@@ -376,22 +376,13 @@ class Nosnik1D:
         def vlak(x1):
             return [(F, x1 + k * a - 0.5 * bw, x1 + k * a + 0.5 * bw) for k in range(9)]
 
+        # vozidlo vjíždí na most a sjíždí z něj (nápravy mimo most se oříznou),
+        # vozidlo je symetrické → stačí jeden směr jízdy
         n_tot = max(1, n * K.n_poli)
-        dx = Lt / n_tot
-        pol = []
-        i = 0
-        while True:
-            x1 = 0.5 * bw + i * dx
-            if x1 + 8 * a + 0.5 * bw >= Lt:
-                pol.append(Lt - 8 * a - 0.5 * bw)
-                break
+        ext = 8 * a + 0.5 * bw + roz
+        pol = self._polohy(vlak, n_tot, roz, -ext, Lt + 0.5 * bw + roz, extra)
+        for x1 in (0.5 * bw, Lt - 8 * a - 0.5 * bw):    # vozidlo celé na mostě u čel
             pol.append(x1)
-            i += 1
-        cile = self._hranice_pasu() if extra else set()
-        hrany = [t for _, s0, e0 in rozsir(vlak(0.0), roz) for t in (s0, e0)]
-        for c in cile:
-            for t in hrany:
-                pol.append(c - t)
         for x1 in pol:
             ax = vlak(x1)
             yield ax, rozsir(ax, roz)

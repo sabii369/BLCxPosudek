@@ -195,10 +195,13 @@ def _extremy(X, Y, rel=0.08, min_abs=1e-9):
 
 
 def _vynes(ax, X, Y, y0, meritko, barva, lw=1.0, alpha=0.35, popis=True, fs=6,
-           tucne=False, zorder=3):
-    """Průběh Y(X) vynesený od osy y0 (kladné hodnoty směrem dolů = −y)."""
+           tucne=False, zorder=3, vypln=0):
+    """Průběh Y(X) vynesený od osy y0 (kladné hodnoty směrem dolů = −y).
+    vypln: 0 = vyplnit celou plochu, +1 = jen kladnou část (obálka max),
+    −1 = jen zápornou část (obálka min) – max a min se pak nepřekrývají."""
     yy = y0 - meritko * Y
-    ax.fill_between(X, y0, yy, color=barva, alpha=alpha, lw=0, zorder=zorder)
+    Yf = Y if vypln == 0 else (np.clip(Y, 0, None) if vypln > 0 else np.clip(Y, None, 0))
+    ax.fill_between(X, y0, y0 - meritko * Yf, color=barva, alpha=alpha, lw=0, zorder=zorder)
     ax.plot(X, yy, color=barva, lw=lw, zorder=zorder + 1)
     ax.plot([X[0], X[-1]], [y0, y0], color="#555", lw=0.6, ls="-.", zorder=zorder + 1)
     if not popis:
@@ -236,12 +239,14 @@ def _pudorys_sil(ax, cr, V, xs, radky, co, nazev, jed, zvyrazni=None, barva=C_ML
     for o in vyb:
         gov = zvyrazni is not None and o == zvyrazni
         (X, Y) = data[o][0]
+        # s obálkou min: max vyplnit jen v kladné části, min jen v záporné
         _vynes(ax, X, Y, V.y[o], mer, barva, lw=1.6 if gov else 0.9,
-               alpha=0.45 if gov else 0.3, tucne=gov, fs=7)
+               alpha=0.45 if gov else 0.3, tucne=gov, fs=7,
+               vypln=1 if radky2 is not None else 0)
         if radky2 is not None:
             (X2, Y2) = data[o][1]
             _vynes(ax, X2, Y2, V.y[o], mer, barva2, lw=1.6 if gov else 0.9,
-                   alpha=0.45 if gov else 0.3, tucne=gov, fs=7)
+                   alpha=0.45 if gov else 0.3, tucne=gov, fs=7, vypln=-1)
         ax.text(ax.get_xlim()[0], V.y[o], f" {V.popisky[o]}", ha="left", va="center",
                 fontsize=7, fontweight="bold" if gov else "normal", color="#333")
     if x_rez is not None and zvyrazni is not None:
