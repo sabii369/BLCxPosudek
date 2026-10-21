@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+
+# Výstupy ukázkového výpočtu (python main.py --demo)
+obalky.png
+vyuziti.png
+pricny_roznos.png
+profily_M.png
+profily_V.png
+obalky_nosniky_MLC_M.png
+obalky_nosniky_MLC_V.png
+zatizeni_M.png
+zatizeni_V.png
+sit_MKP.png
+
+# Excel dočasné soubory
+~$*.xlsx
+
+# OS
+Thumbs.db
+.DS_Store
