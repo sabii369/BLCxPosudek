@@ -2,7 +2,7 @@
 
 Posouzení přechodnosti vojenských vozidel (třídy MLC dle NATO AEP-3.12.1.5) na silničních mostech
 a porovnání s výjimečnou zatížitelností **Ve**. Program počítá spojitý nosník o více polích
-(1D model), příčný rozdělení zatížení deskovým 2D modelem (MKP, prvek MITC4) a výsledky
+(1D model), příčné rozdělení zatížení deskovým 2D modelem (MKP, prvek MITC4) a výsledky
 vyhodnocuje po kontrolních řezech.
 
 Vzniká v rámci diplomové práce na ČVUT v Praze (Kloknerův ústav) – téma hodnocení krizové
@@ -15,7 +15,7 @@ zatížitelnosti silničních mostů.
 - kolmé i **šikmé mosty** (úhel šikmosti 90°–165°, pravá / levá šikmost),
 - třída betonu (E = Ecm dle ČSN EN 1992-1-1), typické prefabrikáty z tabulky `Prefabrikáty.xlsx`,
 - **okrajové podmínky podpor**: kloub tvrdý / měkký, vetknutí, pružné vetknutí,
-- grafické rozhraní (Tkinter) i skriptové použití, obálky M a V, využití MLC/Ve v řezech, příčný rozdělení.
+- grafické rozhraní (Tkinter) i skriptové použití, obálky M a V, využití MLC/Ve v řezech, příčné rozdělení.
 
 Podrobný popis ovládání, metody výpočtu, výstupů a omezení je v
 [`bridge_load_calculator_v9/README.txt`](bridge_load_calculator_v9/README.txt).
@@ -23,7 +23,7 @@ Podrobný popis ovládání, metody výpočtu, výstupů a omezení je v
 ## Rychlý start (Windows)
 
 ```bat
-git clone https://github.com/<uzivatel>/bridge-load-calculator.git
+git clone https://github.com/sabii369/bridge-load-calculator.git
 cd bridge-load-calculator\bridge_load_calculator_v9
 
 setup.bat            :: jednou – nainstaluje numpy, scipy, matplotlib, openpyxl
