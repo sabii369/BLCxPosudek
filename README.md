@@ -5,8 +5,6 @@ a porovnání s výjimečnou zatížitelností **Ve**. Program počítá spojit�
 (1D model), příčné rozdělení zatížení deskovým 2D modelem (MKP, prvek MITC4) a výsledky
 vyhodnocuje po kontrolních řezech.
 
-Vzniká v rámci diplomové práce na ČVUT v Praze (Kloknerův ústav) – téma hodnocení krizové
-zatížitelnosti silničních mostů.
 
 ## Co verze 9 umí
 
@@ -83,7 +81,4 @@ cr = porovnani_zatizeni(
 
 Více v `main.py` (funkce `demo`).
 
-## Verze
 
-Tento repozitář obsahuje aktuální vývojovou verzi **v9**. Starší verze (v1–v8) zde nejsou;
-rozdíly mezi verzemi shrnuje dokument `BLC_v5-v9_shrnuti.docx` (mimo repozitář).
