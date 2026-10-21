@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "blc"
+version = "1.0.0"
+description = "Bridge Load Calculator – přechodnost vozidel MLC vs výjimečná zatížitelnost Ve (1D + 2D MKP)"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Samuel Banas" }]
+dependencies = ["numpy", "scipy", "matplotlib", "openpyxl"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+blc = "blc.__main__:main"
+
+[tool.setuptools]
+packages = ["blc"]
+
+[tool.setuptools.package-data]
+blc = ["data/*.xlsx"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "tests"]

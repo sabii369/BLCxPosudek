@@ -2,7 +2,7 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 echo ============================================================
-echo   Bridge Load Calculator v9 - instalace potrebnych balicku
+echo   Bridge Load Calculator - instalace potrebnych balicku
 echo ============================================================
 echo.
 
@@ -54,6 +54,6 @@ if errorlevel 1 (
     echo tkinter: OK
 )
 echo.
-echo Hotovo. Program spustte souborem spustit_v9.bat.
+echo Hotovo. Program spustte souborem spustit.bat.
 echo.
 pause

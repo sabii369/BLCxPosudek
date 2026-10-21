@@ -1,6 +1,6 @@
 """
-plate_fem.py  (v9)
-==================
+plate_fem.py
+============
 2D model mostovky přes VÍCE POLÍ metodou konečných prvků (MITC4).
 
 Konstrukce se skládá z podélných PRUHŮ; každý pruh je obdélník v lokálních
@@ -12,13 +12,13 @@ posunut o x0 (šikmý most):
     v každém pruhu) nebo tuhé; nosník má kolmé čelo a podporu přes celou
     svou šířku v místě, kde jeho osa protíná šikmou osu podpory (obr. 1);
     podepřeny jsou VŽDY jen nosníky – spára vlastní podporu nemá (kolmý
-    i šikmý most; v9 od 13. 10. 2026, dříve byla u kolmého mostu podepřena),
+    i šikmý most),
   • deska ("deska"): deska šířky b a tloušťky h rozdělená na úzké pruhy
     šířky c ≈ ex s tuhým spojením; každý pruh je podepřen v místě, kde jeho
     osa protíná šikmou osu podpory → liniové uložení podél šikmé osy
     (obr. 2) aproximované schodovitě po pruzích šířky c.
 
-Podpory jsou liniové přes šířku pruhu; okrajové podmínky (v9, K.uloz):
+Podpory jsou liniové přes šířku pruhu; okrajové podmínky (K.uloz):
   tvrdé    w = 0 (pružina k_v), βy = 0 (u pružné podpory βy = ∂w/∂y podél
            linie podpory – bez parazitního smyku),
   měkké    jen w, βx i βy volné,
@@ -55,7 +55,7 @@ from .geometry import Konstrukce, Rez, EPS
 
 # smykový opravný součinitel Mindlinovy desky (obdélníkový průřez): k·G·h, κ = 5/6
 KAPPA = 5.0 / 6.0
-# znaménko momentové reakce (f − K·u na βx) v momentu M(x) levé části (v9)
+# znaménko momentové reakce (f − K·u na βx) v momentu M(x) levé části
 ROT_ZNAM = -1.0
 
 Axle = Tuple[float, float, float]                    # (q [kN/m], s, e)
@@ -63,7 +63,7 @@ Platek = Tuple[float, float, float, float, float]    # (F [kN], x0, x1, y0, y1)
 
 
 # ---------------------------------------------------------------------------
-# Prvek MITC4 (shodný s v5)
+# Prvek MITC4
 # ---------------------------------------------------------------------------
 
 def ke_mitc4(a: float, c: float, D: float, nu: float, kGh: float) -> np.ndarray:
@@ -200,7 +200,7 @@ class DeskaMKP:
         for a, b in zip(hard[:-1], hard[1:]):
             ne = max(nmin, int(round((b - a) / ex)))
             if len(hard) == 2:
-                ne = max(8, ne)                  # shodné s v5 pro jedno kolmé pole
+                ne = max(8, ne)                  # jedno pole: alespoň 8 prvků
             xs.extend(list(a + (b - a) * np.arange(1, ne + 1) / ne))
             i_hard.append(len(xs) - 1)
         self.xs = np.array(xs)
@@ -309,7 +309,7 @@ class DeskaMKP:
         self.R_M = sp.csr_matrix((cM.ravel(), (row_m, col)), shape=shp)
         self.R_Vm = sp.csr_matrix((cVm.ravel(), (row_m, col)), shape=shp)
         self.R_Vp = sp.csr_matrix((cVp.ravel(), (row_p, col)), shape=shp)
-        # v9: M(x⁺) z prvků vpravo od uzlu (potřeba u vetknutí – koncová podpora,
+        # M(x⁺) z prvků vpravo od uzlu (potřeba u vetknutí – koncová podpora,
         # skok M nad vnitřní podporou)
         cMp = Kt[:, 1, :] + Kt[:, 10, :]
         self.R_Mp = sp.csr_matrix((cMp.ravel(), (row_p, col)), shape=shp)
@@ -317,7 +317,7 @@ class DeskaMKP:
 
         # ---- podepření -------------------------------------------------------
         # Podepření (w = 0; βy = 0 = „tvrdé“ kloubové uložení kolem osy y):
-        #  kolmá deska: každá čára pruhu v uzlu podpory pruhu, βy = 0 (jako v7).
+        #  kolmá deska: každá čára pruhu v uzlu podpory pruhu, βy = 0.
         #  šikmý most – deska (obr. 2): každá podélná čára v uzlu, kde ji
         #     protíná šikmá osa podpory (schodovitě po pruzích), βy volné
         #     (βy = 0 by na šikmé linii znamenalo i ∂w/∂x = 0, tj. vetknutí).
@@ -558,7 +558,7 @@ class DeskaMKP:
         """Reakce (vzhůru kladně) v jednotlivých podepřených uzlech
         (u pružného uložení = síla v pružině k·w)."""
         if self.k_uzlu is not None:
-            # pružné uložení: reakce = síla v pružině k·w (v9: u tvrdého uložení
+            # pružné uložení: reakce = síla v pružině k·w (u tvrdého uložení
             # se vazba β_s = ∂w/∂s projeví jen samorovnovážnými silovými dvojicemi
             # podél linie podpory – nejsou to síly do ložisek)
             k_ = self.k_uzlu if u.ndim == 1 else self.k_uzlu[:, None]
@@ -692,7 +692,7 @@ class StavMKP:
 def _reference(model: DeskaMKP, f: np.ndarray, r: np.ndarray, rr=None):
     """Statika celé konstrukce (řez kolmý k ose) z uzlových sil a reakcí
     jednotlivých podepřených uzlů – platí i pro šikmé uložení.
-    rr: momentové reakce vetknutí (na βx podepřených uzlů), v9."""
+    rr: momentové reakce vetknutí (na βx podepřených uzlů)."""
     nx, xs = model.nx, model.xs
     Fk = f[: model._nw].reshape(model._ng, nx).sum(axis=0)
     xr = model.reac_x

@@ -1,6 +1,6 @@
 """
-comparison.py  (v9)
-===================
+comparison.py
+=============
 Porovnání vozidla MLC a výjimečné zatížitelnosti Ve na spojitém nosníku
 po kontrolních řezech.
 
@@ -13,13 +13,13 @@ Postup:
   4. Obálky M_i(x), V_i(x) na každém nosníku z pojezdu po 2D desce
      (pravidelná mřížka poloh, oba směry jízdy).
 
-v8: typ konstrukce "nosniky" (výstupy = nosníky) nebo "deska" (výstupy =
+Typ konstrukce "nosniky" (výstupy = nosníky) nebo "deska" (výstupy =
 pásy šířky 1 m, hodnoty zintegrované na 1 m, jen podélný směr), šikmost
 alfa/prava|leva.  1D analýza probíhá v rámci osy vozidla (podpory v místě,
 kde osa vozidla protíná šikmé osy podpor); do 2D se zatížení posune o
 x0(y_vozidla).
 
-v9: okrajové podmínky podpor (uloz = "tvrde" | "mekke" | "vetknuti", k_rot)
+Okrajové podmínky podpor (uloz = "tvrde" | "mekke" | "vetknuti", k_rot)
 jednou pro celý most – platí v 1D i ve 2D; u vetknutí přibudou řezy M- nad
 krajními podporami.
 """
@@ -216,7 +216,7 @@ def porovnani_zatizeni(
                       od podpory; zatížení smí stát kdekoli (i v pásu d).
         y_center_MLC: příčná poloha středu vozidla MLC [m] (None = střed).
         spoj:         "kloub" | "deska" (propojení pruhů).
-        roznos, t_voz: podélný i příčný roznos plošky (shodně s v5).
+        roznos, t_voz: podélný i příčný roznos plošky.
         ex:           délka prvku MKP podél rozpětí [m].
         obalky:       spočítat obálky na jednotlivých nosnících (2D pojezd).
         n_obalky:     počet poloh na pole pro 2D obálky (None = n).
@@ -226,13 +226,13 @@ def porovnani_zatizeni(
                       N, Iy, spáry se nepoužijí; výsledky na pás 1 m).
         k_pod:        svislá tuhost podpory [kN/m na 1 m délky podpory];
                       None / 0 = tuhá podpora.
-        uloz:         okrajové podmínky podpor (v9): "tvrde" – kloubové tvrdé
+        uloz:         okrajové podmínky podpor: "tvrde" – kloubové tvrdé
                       (β_s = 0; u pružné podpory β_s = ∂w/∂s), "mekke" – kloubové
                       měkké (rotace volné), "vetknuti" – vetknutí (β_n = 0).
         k_rot:        tuhost pružného vetknutí [kNm/rad na 1 m délky podpory];
                       None / 0 = dokonalé vetknutí (jen uloz = "vetknuti").
-        beta_s_pevne: True = β_s = 0 i u pružné podpory (chování v8 / SCIA
-                      s vetknutou rotací podél osy podpory; parazitní smyk).
+        beta_s_pevne: True = β_s = 0 i u pružné podpory (zjednodušená vazba, odpovídá
+                      SCIA s vetknutou rotací podél osy podpory; parazitní smyk).
         alfa, sikmost: úhel šikmosti [°] (90 = kolmý, šikmost roste k 180° – teoretická
                       mez; povoleno 90–165°) a druh "prava" | "leva".
     Podpory jsou liniové; okrajové podmínky viz uloz, k_rot, k_pod.
@@ -334,7 +334,7 @@ def porovnani_zatizeni(
             "nadsazený. Doporučeno modelovat spáru.")
     if K.pruzna and K.tvrde and K.beta_s_pevne:
         varovani.append(
-            "β_s = 0 i u pružné podpory (režim v8): podél podpory vzniká parazitní smyk "
+            "β_s = 0 i u pružné podpory (zjednodušená vazba): podél podpory vzniká parazitní smyk "
             "κGh·∂w/∂s – u šikmých mostů zkresluje V u podpor a reakce (jen pro srovnání).")
     if K.uloz == "mekke":
         varovani.append(
@@ -361,7 +361,7 @@ def porovnani_zatizeni(
 def vypis(cr: ComparisonResult) -> None:
     K = cr.K
     print("=" * 78)
-    print(f"  VÝSLEDKY – DESKOVÝ MODEL, SPOJITÝ NOSNÍK (v9)    {cr.MLC} vs Ve = {cr.Ve} t")
+    print(f"  VÝSLEDKY – DESKOVÝ MODEL, SPOJITÝ NOSNÍK    {cr.MLC} vs Ve = {cr.Ve} t")
     print("=" * 78)
     if K.je_deska:
         print(f"  DESKA {K.popis()},  b = {K.b} m,  h = {K.h} m,  d = {K.d} m,  "

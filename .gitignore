@@ -2,6 +2,8 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+build/
+dist/
 .venv/
 venv/
 .pytest_cache/
@@ -10,17 +12,8 @@ venv/
 .idea/
 .vscode/
 
-# Výstupy ukázkového výpočtu (python main.py --demo)
-obalky.png
-vyuziti.png
-pricny_roznos.png
-profily_M.png
-profily_V.png
-obalky_nosniky_MLC_M.png
-obalky_nosniky_MLC_V.png
-zatizeni_M.png
-zatizeni_V.png
-sit_MKP.png
+# Výstupy výpočtů (python -m blc --demo → vystupy/demo)
+vystupy/
 
 # Excel dočasné soubory
 ~$*.xlsx
@@ -28,3 +21,6 @@ sit_MKP.png
 # OS
 Thumbs.db
 .DS_Store
+
+# Claude Code – osobní nastavení
+.claude/settings.local.json

@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest*)",
+      "Bash(python -m blc --demo*)",
+      "Bash(python -m blc --help*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git fetch*)",
+      "PowerShell(python -m pytest*)",
+      "PowerShell(python -m blc --demo*)",
+      "PowerShell(git status*)",
+      "PowerShell(git diff*)",
+      "PowerShell(git log*)"
+    ],
+    "ask": [
+      "Bash(git push*)",
+      "PowerShell(git push*)",
+      "Bash(python tests/referencni_pripady.py*)",
+      "PowerShell(python tests/referencni_pripady.py*)"
+    ]
+  },
+  "env": {
+    "PYTHONIOENCODING": "utf-8"
+  }
+}

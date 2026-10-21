@@ -1,10 +1,10 @@
 """
-prefabrikaty.py  (v8)
-=====================
+prefabrikaty.py
+===============
 Typické prefabrikované nosníky – předvyplnění vstupů v GUI.
 
-Tabulka se načte ze souboru „Prefabrikáty.xlsx“ (hledá se ve složce programu
-a o úroveň výš, tj. ve složce LOAD), pokud existuje a je k dispozici openpyxl.
+Tabulka se načte ze souboru „data/Prefabrikáty.xlsx“ v balíčku, pokud existuje
+a je k dispozici openpyxl.
 Jinak se použije vestavěná kopie tabulky níže.
 
 Sloupce: Prefabrikát | Rozpětí (typické) | šířka b | Iy | Spára (ANO/NE) |
@@ -82,16 +82,14 @@ def _nacti_xlsx(cesta: str) -> List[Prefabrikat]:
 
 def nacti_prefabrikaty() -> tuple[Dict[str, Prefabrikat], str]:
     """Vrátí (slovník název → Prefabrikat, popis zdroje)."""
-    zde = os.path.dirname(os.path.abspath(__file__))
-    for cesta in (os.path.join(zde, NAZEV_SOUBORU),
-                  os.path.join(os.path.dirname(zde), NAZEV_SOUBORU)):
-        if os.path.isfile(cesta):
-            try:
-                seznam = _nacti_xlsx(cesta)
-                if seznam:
-                    return {p.nazev: p for p in seznam}, cesta
-            except Exception:
-                pass
+    cesta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", NAZEV_SOUBORU)
+    if os.path.isfile(cesta):
+        try:
+            seznam = _nacti_xlsx(cesta)
+            if seznam:
+                return {p.nazev: p for p in seznam}, cesta
+        except Exception:
+            pass
     return {t[0]: Prefabrikat(*t) for t in _VESTAVENE}, "vestavěná tabulka"
 
 

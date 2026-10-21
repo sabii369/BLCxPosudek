@@ -1,14 +1,14 @@
 """
-gui.py  (v9)
-============
-Grafické rozhraní (Tkinter) pro bridge_load_calculator_v9 – deskový model,
+gui.py
+======
+Grafické rozhraní (Tkinter) pro Bridge Load Calculator – deskový model,
 spojitý nosník o více polích.
 
 Vstupy: prefabrikát (předvyplnění), počet polí a rozpětí každého pole, N, b,
         Iy, třída betonu (E = Ecm), ν, podélná spára (b_s, Iy_s), Ve, vzdálenost
         vozidel, počet poloh na pole, d (statická účinná výška), typ a třída
         vozidla, příčná poloha MLC (slider), volby MKP.  Podpory jsou liniové;
-        v9: okrajové podmínky podpor (kloubové tvrdé / kloubové měkké /
+        Okrajové podmínky podpor (kloubové tvrdé / kloubové měkké /
         vetknutí, tuhost pružného vetknutí k_φ) jednou pro celý most.
         V se posuzuje v řezech d od podpor, zatížení smí stát kdekoli.
 Výstupy: tabulka po kontrolních řezech, grafy (1D obálky, obálky na nosnících,
@@ -44,7 +44,7 @@ C_BEAM, C_DECK, C_VEH, C_CENTER = "#2e75b6", "#d5e8f5", "#e74c3c", "#27ae60"
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Bridge Load Calculator v9 – Deskový model, spojitý nosník")
+        self.title("Bridge Load Calculator – Deskový model, spojitý nosník")
         self.resizable(True, True)
         self._cr: ComparisonResult | None = None
         self._vysledek = None
@@ -220,7 +220,7 @@ class App(tk.Tk):
                   foreground="gray").grid(row=r_k, column=2, sticky="w")
         e["k_v"] = kv_var
         self._row += 1
-        # v9: okrajové podmínky podpor (jednou pro celý most)
+        # okrajové podmínky podpor (jednou pro celý most)
         r_u = self._row
         ttk.Label(left, text="Uložení podpor").grid(row=r_u, column=0, sticky="w", **pad)
         uloz_var = tk.StringVar(value="tvrde")
@@ -247,7 +247,7 @@ class App(tk.Tk):
         self._row += 1
         bs_var = tk.BooleanVar(value=False)
         self._chk_bs = ttk.Checkbutton(
-            left, text="β_s = 0 i u pružné podpory (režim v8 / SCIA s vetknutou rotací "
+            left, text="β_s = 0 i u pružné podpory (zjednodušeně, SCIA s vetknutou rotací "
                        "podél podpory – jen pro srovnání)", variable=bs_var)
         self._chk_bs.grid(row=self._row, column=0, columnspan=3, sticky="w", padx=6)
         e["beta_s_pevne"] = bs_var
@@ -683,7 +683,7 @@ class App(tk.Tk):
         stav = lambda ok: "PROJDE ✓" if ok else "NEPROJDE ✗"
         lines = [
             "=" * 70,
-            f"  VÝSLEDKY – DESKOVÝ MODEL, SPOJITÝ NOSNÍK (v9)",
+            f"  VÝSLEDKY – DESKOVÝ MODEL, SPOJITÝ NOSNÍK",
             f"  {cr.MLC} vs Ve = {cr.Ve:g} t",
             (f"  DESKA {K.popis()},  b = {K.b:g} m,  h = {K.h:g} m  (2D hodnoty na pás 1 m)"
              if K.je_deska else

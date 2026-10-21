@@ -1,6 +1,6 @@
 """
-beam_1d.py  (v9)
-================
+beam_1d.py
+==========
 1D analýza spojitého nosníku od pojezdu vozidel MLC a od schématu Ve.
 
 METODA
@@ -15,9 +15,9 @@ síly v uzlu (tj. vlivové čáry reakcí).  Pro libovolné zatížení:
     V(x) = Σ_{x_j < x} R_j          − ∫ q dξ               (V(x⁻))
 
 Statisticky určitá část (integrály zatížení) se počítá přesně, jen reakce
-vycházejí z vlivových čar.  Pro n = 1 to dává totéž co v5.
+vycházejí z vlivových čar.
 
-v9 – okrajové podmínky (K.uloz): u vetknutí („vetknuti“) se zabrání natočení
+Okrajové podmínky (K.uloz): u vetknutí („vetknuti“) se zabrání natočení
 v podporách (dokonale, nebo rotační pružinou k_rot·L_p); momentové reakce C_j
 vstupují do M(x) jako  + Σ_{x_j < x} C_j  a nad podporou se M skokem mění.
 V uzlu podpory se pak bere strana s větší |M| (koncová podpora: M(x⁺)).
@@ -53,7 +53,7 @@ Axle = Tuple[float, float, float]     # (q [kN/m], s [m], e [m])
 
 
 # ---------------------------------------------------------------------------
-# Generování náprav (shodné s v5)
+# Generování náprav
 # ---------------------------------------------------------------------------
 
 def _axles_kolove(v, x1: float, k: int, dist: float) -> List[Axle]:

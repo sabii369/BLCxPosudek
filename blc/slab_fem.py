@@ -1,6 +1,6 @@
 """
-slab_fem.py  (v9)
-=================
+slab_fem.py
+===========
 Deska ("deska") – 2D MKP s KOSOÚHLOU sítí rovnoběžnou se šikmou osou podpor.
 
 Deska šířky b (= B) a tloušťky h přes n polí, liniové kloubové podpory
@@ -10,14 +10,14 @@ přesně podél šikmých os podpor (obr. 2).  Síť: podélné uzlové čáry y
 takže prvky jsou rovnoběžníky a podpory leží přesně v uzlech ξ = x_podpory.
 Prvek: MITC4 (Bathe–Dvorkin) pro obecný čtyřúhelník.
 
-Uložení (v9, K.uloz; s = směr osy podpory, n = normála k ní v půdorysu):
+Uložení (K.uloz; s = směr osy podpory, n = normála k ní v půdorysu):
   tvrdé    w = 0 (pružina k_v) a natočení podél osy podpory β_s = 0; u pružné
-           podpory konzistentně β_s = ∂w/∂s (podpora se natáčí s průhybem –
-           v8 měla β_s = 0 i s pružinami → parazitní smyk κGh·∂w/∂s u tupých rohů),
+           podpory konzistentně β_s = ∂w/∂s (podpora se natáčí s průhybem;
+           β_s = 0 s pružinami by vyvolalo parazitní smyk κGh·∂w/∂s u tupých rohů),
   měkké    jen w; β_s i β_n volné (liniová podpora s volnými rotacemi),
   vetknutí navíc β_n = 0 (natočení kolem osy podpory), s k_rot rotační
            pružina k_rot·ℓ na β_n (ℓ = skutečná délka podpory příslušná uzlu).
-  K.beta_s_pevne = True: β_s = 0 i u pružné podpory (chování v8, pro srovnání).
+  K.beta_s_pevne = True: β_s = 0 i u pružné podpory (zjednodušená vazba, jen pro srovnání se SCIA).
 Vazby se zavádějí transformací stupňů volnosti u = T·u_r.
 
 Vnitřní síly VŽDY ve směru osy prvku (x): m_x = D(κx + ν κy), v_x = kGh γx,
@@ -264,7 +264,7 @@ class DeskaSikmaMKP:
             Mn[g * nx] = 0
             Mn[g * nx + nx - 1] = 0
         self.R_M = Srow @ Mn.tocsr()
-        # v9: m_x v uzlu podpory = lineární extrapolace z vnitřních uzlů pole
+        # m_x v uzlu podpory = lineární extrapolace z vnitřních uzlů pole
         # (zvlášť zleva a zprava).  Uzlová hodnota z rohů prvků jen z jedné strany
         # konverguje pomalu (O(h): při prvku 0,25 m o ~3–4 % menší |M| nad podporou),
         # extrapolace ze dvou sousedních (oboustranně průměrovaných) uzlů ~O(h²).
@@ -299,7 +299,7 @@ class DeskaSikmaMKP:
         self.R_Vm = Srow @ mats[("v", 0)]
         self.R_Vp = Srow @ mats[("v", 1)]
 
-        # ---- podepření a vazby (v9: tvrdé / měkké / vetknutí) -------------------
+        # ---- podepření a vazby (tvrdé / měkké / vetknutí) ------------------------
         lam = self.lam
         sq = math.sqrt(1.0 + lam * lam)            # délka osy podpory na 1 m v y
         fix = []
@@ -463,7 +463,7 @@ class DeskaSikmaMKP:
 
     def reakce_uzlu(self, f: np.ndarray, u: np.ndarray) -> np.ndarray:
         if self.k_uzlu is not None:
-            # pružné uložení: reakce = síla v pružině k·w (v9: u tvrdého uložení
+            # pružné uložení: reakce = síla v pružině k·w (u tvrdého uložení
             # se vazba β_s = ∂w/∂s projeví jen samorovnovážnými silovými dvojicemi
             # podél linie podpory – nejsou to síly do ložisek)
             k_ = self.k_uzlu if u.ndim == 1 else self.k_uzlu[:, None]

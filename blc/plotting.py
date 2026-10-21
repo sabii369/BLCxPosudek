@@ -1,6 +1,6 @@
 """
-plotting.py  (v9)
-=================
+plotting.py
+===========
 Grafy pro spojitý nosník / desku, kolmý i šikmý most.
 
   plot_obalky(cr)                     – 1D obálky M(x), V(x) celého mostu, MLC vs Ve
@@ -430,7 +430,7 @@ def plot_pricny_roznos(cr: ComparisonResult, i: Optional[int] = None, show: bool
 
 
 # ---------------------------------------------------------------------------
-# Průběhy na nosnících / pásech + kontrola Σ vs statika (uspořádání jako ve v5)
+# Průběhy na nosnících / pásech + kontrola Σ vs statika
 # ---------------------------------------------------------------------------
 
 def plot_profily_nosniky(cr: ComparisonResult, i: Optional[int] = None,

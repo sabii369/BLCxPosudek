@@ -1,10 +1,10 @@
 """
-geometry.py  (v9)
-=================
+geometry.py
+===========
 Geometrie konstrukce – spojitý nosník o n polích – a seznam kontrolních řezů.
 
-v8: dva typy konstrukce
-  • "nosniky" – mostovka z N nosníků (případně se spárami), jako ve v7,
+Dva typy konstrukce
+  • "nosniky" – mostovka z N nosníků (případně se spárami),
   • "deska"   – jedna deska šířky b a tloušťky h; posuzují se síly
                 zintegrované na pás šířky 1 m (jen podélný směr),
   a šikmost: úhel alfa [°] mezi osou podpory a osou prvku; 90° = kolmý most,
@@ -23,7 +23,7 @@ Konstrukce
   • d = statická účinná výška průřezu; posouvající síla se posuzuje
     ve vzdálenosti d od podpory, tj. v řezu  x_k ± d,
   • stejný průřez (Iy, E) ve všech polích,
-  • (v8) volitelná podélná spára mezi sousedními nosníky: šířka b_s,
+  • volitelná podélná spára mezi sousedními nosníky: šířka b_s,
     moment setrvačnosti Iy_s, náhradní tloušťka h_s = (12·Iy_s/b_s)^(1/3),
     vlastní beton (E_s = Ecm třídy betonu spáry);
     spára je s nosníky spojena kloubově.  Šířka mostovky
@@ -32,8 +32,8 @@ Konstrukce
     i šikmý most) → délka podpory napříč N·b (deska: B), viz delka_podpory;
     na ni se vztahují k_v a k_rot i v 1D modelu.
 
-Okrajové podmínky podpor (v9) – jednou pro celý most
------------------------------------------------------
+Okrajové podmínky podpor – jednou pro celý most
+------------------------------------------------
   uloz = "tvrde"     kloubové TVRDÉ uložení: w = 0 (nebo pružina k_v), natočení
                      podél osy podpory β_s = 0; u pružné podpory konzistentně
                      β_s = ∂w/∂s (podpora se natáčí s průhybem, bez parazitního smyku)
@@ -43,7 +43,7 @@ Okrajové podmínky podpor (v9) – jednou pro celý most
                      s k_rot pružné vetknutí (rotační pružina)
   k_rot              tuhost pružného vetknutí [kNm/rad na 1 m délky podpory];
                      None = dokonalé vetknutí (jen pro uloz = "vetknuti")
-  beta_s_pevne       True: β_s = 0 i u pružné podpory (chování v8; odpovídá
+  beta_s_pevne       True: β_s = 0 i u pružné podpory (zjednodušená vazba; odpovídá
                      modelu SCIA s pružnou liniovou podporou a vetknutým natočením
                      podél osy podpory) – POZOR: parazitní smyk κGh·∂w/∂s
 
@@ -68,7 +68,7 @@ from typing import List, Optional
 
 EPS = 1e-9
 
-# typy uložení (v9) – klíč → popis
+# typy uložení – klíč → popis
 ULOZENI = {
     "tvrde": "kloubové tvrdé (β_s = 0)",
     "mekke": "kloubové měkké (rotace volné)",
@@ -110,10 +110,10 @@ class Konstrukce:
     sikmost: str = "prava"             # "prava" | "leva"
     k_pod: Optional[float] = None      # svislá tuhost podpory [kN/m na 1 m délky
                                        # podpory]; None / 0 = tuhá podpora
-    uloz: str = "tvrde"                # "tvrde" | "mekke" | "vetknuti" (v9)
+    uloz: str = "tvrde"                # "tvrde" | "mekke" | "vetknuti"
     k_rot: Optional[float] = None      # pružné vetknutí [kNm/rad na 1 m podpory];
                                        # None / 0 = dokonalé vetknutí
-    beta_s_pevne: bool = False         # β_s = 0 i u pružné podpory (kompatibilita v8)
+    beta_s_pevne: bool = False         # β_s = 0 i u pružné podpory (jen pro srovnání se SCIA)
 
     def __post_init__(self):
         self.L = [float(v) for v in self.L]
@@ -215,7 +215,7 @@ class Konstrukce:
         t += (f"; svisle pružné k_v = {self.k_pod / 1000:g} MN/m/m" if self.pruzna
               else "; svisle tuhé")
         if self.pruzna and self.tvrde:
-            t += ("; β_s = 0 (jako v8)" if self.beta_s_pevne else "; β_s = ∂w/∂s")
+            t += ("; β_s = 0 (zjednodušeně)" if self.beta_s_pevne else "; β_s = ∂w/∂s")
         return t
 
     @property
