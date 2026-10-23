@@ -23,9 +23,13 @@ def main(argv=None) -> int:
         return gui_main([a.vstup] if a.vstup else [])
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    model = nacti_model(a.vstup)
-    model.spocitej()
-    out = uloz_protokol(model, a.vystup, embed=not a.bez_vlozenych_obrazku)
+    try:
+        model = nacti_model(a.vstup)
+        model.spocitej()
+        out = uloz_protokol(model, a.vystup, embed=not a.bez_vlozenych_obrazku)
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        print(f"[CHYBA] {a.vstup}: {e}", file=sys.stderr)
+        return 2
     print(f"{'MS':4} {'Posudek':42} {'Fáze':28} {'x [m]':>7} {'η':>7}")
     for v in model.protokol.posudky:
         print(f"{v.mezni_stav:4} {v.nazev[:42]:42} {v.faze[:28]:28} {fmt(v.x, 3) if v.x is not None else '–':>7} "

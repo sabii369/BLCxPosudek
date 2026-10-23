@@ -16,10 +16,13 @@ from .zatizeni import KombinaceVstup, ZatezovaciStav
 
 def nacti_soubor(cesta: str | Path) -> dict:
     cesta = Path(cesta)
+    text = cesta.read_text(encoding="utf-8-sig")  # i soubory s BOM (Poznámkový blok)
     if cesta.suffix.lower() == ".json":
-        return json.loads(cesta.read_text(encoding="utf-8"))
-    with open(cesta, "rb") as f:
-        return tomllib.load(f)
+        return json.loads(text)
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise ValueError(f"Chyba v zápisu souboru {cesta.name}: {e}") from e
 
 
 def _vyber(d: dict, cls) -> dict:
