@@ -1,0 +1,1282 @@
+"""Výpočetní model nosníku z předpjatého betonu a jeho posouzení.
+
+Statické schéma: prostý nosník (volitelně s převislými konci za ložisky).
+Předpětí: dodatečné (soudržné kabely) nebo předem předpjaté (lana).
+Spřažená deska se v této verzi neuvažuje.
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+
+import numpy as np
+
+from . import reologie
+from .kabel import Kabel
+from .materialy import Beton, BetonarskaVyztuz, PredpinaciVyztuz
+from .msu import (VrstvaPredpeti, VrstvaVyztuze, ohybova_unosnost, smykova_unosnost)
+from .protokol import Kapitola, Protokol, VysledekPosudku, fmt
+from .prurez import Prurez
+from .zatizeni import NAZVY_KOMBINACI, Obalka, ZatezovaciStav, kombinace
+from .ztraty import ztrata_dlouhodoba_546, ztrata_pokluzem, ztrata_trenim
+
+
+@dataclass
+class Nastaveni:
+    """Parametry posouzení (výchozí hodnoty podle doporučení ČSN EN 1992-1-1)."""
+
+    # napínání (5.10.2.1, 5.10.3)
+    k1_nap: float = 0.8
+    k2_nap: float = 0.9
+    k7: float = 0.75
+    k8: float = 0.85
+    # napětí v betonu (5.10.2.2, 7.2)
+    k_predpeti: float = 0.6        # tlak při vnesení předpětí · f_ck(t)
+    k1: float = 0.6                # tlak – charakteristická kombinace
+    k2: float = 0.45               # tlak – kvazistálá kombinace
+    k5: float = 0.75               # napětí v předpínací výztuži – charakteristická
+    tah_predpeti: str = "fctm"     # mez tahu při předpětí a výstavbě: fctm | fctk005 | 0
+    tah_provoz: str = "fctm"       # mez tahu – charakteristická kombinace
+    dekomprese: str = "casta"      # casta | kvazistala | zadna
+    dekomprese_rezim: str = "krajni"  # krajni | kabel
+    a_dek: float = 25.0            # mm – hloubka dekomprese kolem kabelu (EN 1992-2 7.3.1(105))
+    r_sup: float | None = None     # 5.10.9 (None = podle typu předpětí)
+    r_inf: float | None = None
+    # MSÚ
+    gamma_P: float = 1.0
+    gamma_G: float = 1.35
+    gamma_G_inf: float = 1.0
+    xi: float = 0.85
+    kombinace_msu: str = "6.10ab"  # 6.10ab | 6.10
+    cot_theta_min: float = 1.0
+    cot_theta_max: float = 2.5
+    kanalky: str = "ocel"          # ocel | plast (6.2.3(6))
+    # použitelnost
+    pruhyb_limit: float = 250.0    # L/...
+    relaxace_t_max_h: float = 500000.0
+    hlavni_napeti: bool = True
+
+
+@dataclass
+class SmykovaVyztuz:
+    Asw: float = 0.0       # mm2 (všechny střižnosti)
+    s: float = 200.0       # mm
+    alpha: float = 90.0    # sklon ve stupních
+    od: float | None = None
+    do: float | None = None
+
+    @property
+    def Asw_s(self) -> float:
+        return self.Asw / self.s if self.s > 0 else 0.0
+
+
+@dataclass
+class Faze:
+    nazev: str
+    t: float
+    provoz: bool
+    stale: list[ZatezovaciStav]
+    sigma: list[np.ndarray] = field(default_factory=list)   # σ_pm,t,i(x)
+    ztraty: dict = field(default_factory=dict)
+
+    @property
+    def nazev_t(self) -> str:
+        return f"{self.nazev} (t = {fmt(self.t, 0)} dní)"
+
+
+class NosnikPB:
+    """Nosník z předpjatého betonu – vstupy, výpočet a posouzení."""
+
+    def __init__(self, *, beton: Beton, predpinaci: PredpinaciVyztuz, betonarska: BetonarskaVyztuz,
+                 prurez: Prurez, L: float, L0: float | None, kabely: list[Kabel],
+                 typ_predpeti: str = "dodatecne", vyztuz: list[VrstvaVyztuze] | None = None,
+                 smykova: list[SmykovaVyztuz] | None = None, RH: float = 70.0, t_s: float = 3.0,
+                 t0: float = 7.0, t_provoz: float = 120.0, t_konec: float = 36500.0,
+                 stale: list[ZatezovaciStav] | None = None,
+                 promenne: list[ZatezovaciStav] | None = None,
+                 nastaveni: Nastaveni | None = None, projekt: dict | None = None,
+                 n_rezu: int = 41, charakteristiky: str = "brutto",
+                 pocet_napinani: int | None = None, relaxace_pred_uvolnenim_h: float | None = None,
+                 predem_eta_p1: float = 3.2, predem_alpha1: float = 1.25,
+                 predem_alpha2: float = 0.19):
+        self.beton = beton
+        self.predp = predpinaci
+        self.betonarska = betonarska
+        self.prurez = prurez
+        self.L = float(L)
+        self.L0 = float(L0) if L0 else float(L)
+        self.kabely = kabely
+        self.typ = typ_predpeti
+        self.vyztuz = vyztuz or []
+        self.smykova = smykova or []
+        self.RH = RH
+        self.t_s = t_s
+        self.t0 = t0
+        self.t_provoz = t_provoz
+        self.t_konec = t_konec
+        self.stale_vstup = stale or []
+        self.promenne = promenne or []
+        self.n = nastaveni or Nastaveni()
+        self.projekt = projekt or {}
+        self.n_rezu = n_rezu
+        self.charakteristiky = charakteristiky
+        self.pocet_napinani = pocet_napinani
+        self.relax_pred_h = relaxace_pred_uvolnenim_h
+        self.eta_p1, self.a1_pt, self.a2_pt = predem_eta_p1, predem_alpha1, predem_alpha2
+        if self.n.r_sup is None:
+            self.n.r_sup = 1.05 if self.predem else 1.10
+        if self.n.r_inf is None:
+            self.n.r_inf = 0.95 if self.predem else 0.90
+        self.protokol = Protokol(self.projekt.get("nazev", "Posudek nosníku z předpjatého betonu"))
+        self.v: dict = {}  # uložené výsledky pro grafy
+
+    # ------------------------------------------------------------------
+    @property
+    def predem(self) -> bool:
+        return self.typ.startswith("predem")
+
+    @property
+    def Ap(self) -> float:
+        return sum(k.Ap for k in self.kabely)
+
+    # ==================================================================
+    def spocitej(self) -> Protokol:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return self._spocitej()
+
+    def _spocitej(self) -> Protokol:
+        self._site()
+        self._vstupy()
+        self._prurezy()
+        self._kabely()
+        self._zatizeni()
+        self._ztraty_okamzite()
+        self._faze_a_dlouhodobe_ztraty()
+        self._vnitrni_sily()
+        self._msp()
+        if self.n.hlavni_napeti:
+            self._hlavni_napeti()
+        self._pruhyb()
+        self._msu_ohyb()
+        self._msu_smyk()
+        self._krehky_lom()
+        return self.protokol
+
+    # ------------------------------------------------------------------
+    def _site(self):
+        self.xa = (self.L - self.L0) / 2
+        self.xb = self.xa + self.L0
+        x = np.linspace(0, self.L, self.n_rezu)
+        x = np.union1d(x, [self.xa, self.xb, self.xa + self.L0 / 2])
+        self.x = x
+        self.ia = int(np.argmin(abs(x - self.xa)))
+        self.ib = int(np.argmin(abs(x - self.xb)))
+        self.im = int(np.argmin(abs(x - (self.xa + self.L0 / 2))))
+        self.v_poli = (x >= self.xa - 1e-9) & (x <= self.xb + 1e-9)
+        body = [0.0, self.xa, self.xa + self.L0 / 4, self.xa + self.L0 / 2,
+                self.xa + 3 * self.L0 / 4, self.xb, self.L]
+        idx = sorted({int(np.argmin(abs(x - b))) for b in body})
+        self.i_tab = idx
+
+    def _x_tab_hlavicka(self) -> list[str]:
+        return [f"x = {fmt(self.x[i], 3)} m" for i in self.i_tab]
+
+    # ------------------------------------------------------------------
+    def _vstupy(self):
+        b, p, s = self.beton, self.predp, self.betonarska
+        K = self.protokol.kapitola("Vstupní údaje")
+        K.text(self.projekt.get("popis", ""))
+        K.text(f"Statické schéma: prostý nosník délky L = {fmt(self.L)} m, rozpětí (vzdálenost "
+               f"ložisek) L0 = {fmt(self.L0)} m. Předpětí: "
+               f"{'předem předpjatá lana' if self.predem else 'dodatečně předpjaté soudržné kabely'}. "
+               "Spřažená deska mostovky se v této verzi neuvažuje.")
+        K2 = self.protokol.kapitola("Materiály", 2)
+        K2.text(f"Beton {b.trida}, cement třídy {b.cement}; charakteristiky podle tab. 3.1 ČSN EN 1992-1-1.")
+        K2.krok("Charakteristická válcová pevnost", "f_{ck}", "", b.fck, "MPa", "tab. 3.1")
+        K2.krok("Průměrná pevnost v tlaku", "f_{cm} = f_{ck} + 8", f"{fmt(b.fck)} + 8", b.fcm, "MPa", "tab. 3.1")
+        K2.krok("Průměrná pevnost v tahu",
+                "f_{ctm} = 0,30·f_{ck}^{2/3}" if b.fck <= 50 else "f_{ctm} = 2,12·ln(1 + f_{cm}/10)",
+                "", b.fctm, "MPa", "tab. 3.1")
+        K2.krok("Charakteristická pevnost v tahu (5% kvantil)", "f_{ctk,0,05} = 0,7·f_{ctm}", "",
+                b.fctk005, "MPa", "tab. 3.1")
+        K2.krok("Sečnový modul pružnosti", "E_{cm} = 22·(f_{cm}/10)^{0,3}" if not b.Ecm_zadany else "E_{cm} (zadáno)",
+                f"22·({fmt(b.fcm)}/10)^{{0,3}}·10^{{3}}" if not b.Ecm_zadany else "", b.Ecm, "MPa", "tab. 3.1")
+        K2.krok("Návrhová pevnost v tlaku", "f_{cd} = α_{cc}·f_{ck}/γ_{c}",
+                f"{fmt(b.alpha_cc)}·{fmt(b.fck)}/{fmt(b.gamma_c)}", b.fcd, "MPa", "3.1.6")
+        K2.krok("Návrhová pevnost v tahu", "f_{ctd} = α_{ct}·f_{ctk,0,05}/γ_{c}",
+                f"{fmt(b.alpha_ct)}·{fmt(b.fctk005)}/{fmt(b.gamma_c)}", b.fctd, "MPa", "3.1.6")
+        K2.krok("Mezní přetvoření (parabola-obdélník)", "ε_{c2}; ε_{cu2}; n",
+                "", f"{fmt(b.eps_c2 * 1e3)} ‰; {fmt(b.eps_cu2 * 1e3)} ‰; {fmt(b.n)}", "", "tab. 3.1")
+        K2.text(f"Předpínací výztuž {p.typ}: A_p,1 = {fmt(p.Ap_lano)} mm², f_pk = {fmt(p.fpk)} MPa, "
+                f"f_p0,1k = {fmt(p.fp01k)} MPa, E_p = {fmt(p.Ep)} MPa, třída relaxace {p.trida_relaxace} "
+                f"(ρ1000 = {fmt(p.rho1000)} %), γ_s = {fmt(p.gamma_s)}.")
+        K2.krok("Návrhová pevnost předpínací výztuže", "f_{pd} = f_{p0,1k}/γ_{s}",
+                f"{fmt(p.fp01k)}/{fmt(p.gamma_s)}", p.fpd, "MPa", "3.3.6")
+        K2.krok("Mezní přetvoření předpínací výztuže", "ε_{ud} = 0,9·ε_{uk}",
+                f"0,9·{fmt(p.eps_uk * 1e3)} ‰", p.eps_ud * 1e3, "‰", "3.3.6(7)")
+        K2.text(f"Betonářská výztuž {s.typ}: f_yk = {fmt(s.fyk)} MPa, f_yd = {fmt(s.fyd)} MPa, "
+                f"E_s = {fmt(s.Es)} MPa, ε_ud = {fmt(s.eps_ud * 1e3)} ‰.")
+        K2.obrazek("diagramy_materialu", "Návrhové pracovní diagramy materiálů pro MSÚ")
+
+    # ------------------------------------------------------------------
+    def _prurezy(self):
+        P = self.prurez
+        K = self.protokol.kapitola("Průřezové charakteristiky", 2)
+        K.text("Průřez je zadán numericky obrysovým polygonem (souřadnice y, z od spodního okraje). "
+               "Charakteristiky jsou spočteny Greenovými vzorci pro polygon.")
+        K.krok("Výška průřezu", "h", "", P.h, "mm")
+        K.krok("Plocha betonu", "A_{c} = ½·Σ(y_{i}·z_{i+1} − y_{i+1}·z_{i})", "", P.A, "mm²")
+        K.krok("Poloha těžiště od spodního okraje", "z_{t} = S_{y}/A_{c}", "", P.zt, "mm")
+        K.krok("Moment setrvačnosti k těžišti", "I_{c} = I_{0} − A_{c}·z_{t}^{2}", "", P.I, "mm⁴")
+        K.krok("Průřezový modul – horní vlákna", "W_{h} = I_{c}/(h − z_{t})",
+               f"{fmt(P.I)}/({fmt(P.h)} − {fmt(P.zt)})", P.W_h, "mm³")
+        K.krok("Průřezový modul – dolní vlákna", "W_{d} = I_{c}/z_{t}", f"{fmt(P.I)}/{fmt(P.zt)}", P.W_d, "mm³")
+        K.krok("Obvod vystavený vysychání", "u", "", P.u, "mm")
+        K.krok("Náhradní rozměr", "h_{0} = 2·A_{c}/u", f"2·{fmt(P.A)}/{fmt(P.u)}", P.h0, "mm", "3.1.4(5)")
+        g0 = P.A * 1e-6 * self.beton.objemova_tiha
+        K.krok("Vlastní tíha nosníku", "g_{0} = A_{c}·γ", f"{fmt(P.A * 1e-6)}·{fmt(self.beton.objemova_tiha)}",
+               g0, "kN/m")
+        K.obrazek("prurez", "Příčný řez nosníku s polohou předpínací a betonářské výztuže")
+        self.g0 = g0
+
+    # ------------------------------------------------------------------
+    def _kabely(self):
+        x = self.x
+        self.zk = [k.geometrie.z_v(x) for k in self.kabely]
+        self.ak = [k.geometrie.alfa_v(x) for k in self.kabely]
+        K = self.protokol.kapitola("Předpínací výztuž a vedení kabelů", 2)
+        rows = []
+        for k in self.kabely:
+            rows.append([k.nazev, k.pocet_lan, fmt(k.Ap), k.popis_geometrie, fmt(k.sigma_max),
+                         fmt(k.P_max), k.napinani if not self.predem else "–",
+                         fmt(k.mu) if not self.predem else "–", fmt(k.k) if not self.predem else "–",
+                         fmt(k.pokluz) if not self.predem else "–", fmt(k.d_kanalku)])
+        K.tabulka(["Kabel", "Počet lan", "A_p [mm²]", "Geometrie", "σ_p,max [MPa]", "P_max [kN]",
+                   "Napínání", "μ", "k [rad/m]", "Pokluz [mm]", "∅ kanálku [mm]"], rows,
+                  "Přehled předpínacích kabelů")
+        rows = []
+        for i in self.i_tab:
+            rows.append([fmt(x[i], 3)] + [fmt(z[i], 1) for z in self.zk] +
+                        [fmt(math.degrees(a[i]), 2) for a in self.ak])
+        K.tabulka(["x [m]"] + [f"z {k.nazev} [mm]" for k in self.kabely] +
+                  [f"α {k.nazev} [°]" for k in self.kabely], rows, "Poloha a sklon kabelů v charakteristických řezech")
+        K.obrazek("kabely", "Vedení kabelů po délce nosníku")
+
+        # průřezové charakteristiky po délce (brutto / ideální)
+        n = len(x)
+        Pz = self.prurez
+        self.secP = np.tile([Pz.A, Pz.zt, Pz.I], (n, 1))
+        self.secL = self.secP.copy()
+        if self.charakteristiky.startswith("ideal"):
+            ap = self.predp.Ep / self.beton.Ecm
+            as_ = self.betonarska.Es / self.beton.Ecm
+            for j in range(n):
+                otvory, plus = [], []
+                for k, z in zip(self.kabely, self.zk):
+                    if not self.predem and k.d_kanalku > 0:
+                        otvory.append((z[j], -math.pi * k.d_kanalku ** 2 / 4))
+                    plus.append((z[j], ((ap - 1) if self.predem else ap) * k.Ap))
+                vyz = [(v.z, (as_ - 1) * v.As) for v in self.vyztuz]
+                if self.predem:
+                    self.secP[j] = Pz.charakteristiky_s_body(plus + vyz)
+                else:
+                    self.secP[j] = Pz.charakteristiky_s_body(otvory + vyz)
+                self.secL[j] = Pz.charakteristiky_s_body(otvory + plus + vyz)
+            j = self.im
+            K.text("Účinky předpětí (a vlastní tíhy při vnesení předpětí) jsou počítány na "
+                   + ("ideálním průřezu (beton + α_p·A_p + α_s·A_s)" if self.predem else
+                      "oslabeném průřezu (beton bez kabelových kanálků + α_s·A_s)")
+                   + ", účinky zatížení po zainjektování na ideálním průřezu.")
+            K.tabulka(["Průřez (střed rozpětí)", "A [mm²]", "z_t [mm]", "I [mm⁴]"],
+                      [["brutto", fmt(Pz.A), fmt(Pz.zt), fmt(Pz.I)],
+                       ["pro předpětí", fmt(self.secP[j, 0]), fmt(self.secP[j, 1]), fmt(self.secP[j, 2])],
+                       ["pro zatížení", fmt(self.secL[j, 0]), fmt(self.secL[j, 1]), fmt(self.secL[j, 2])]])
+        else:
+            K.text("Napětí jsou počítána na plném betonovém (brutto) průřezu – vliv kanálků a výztuže "
+                   "na průřezové charakteristiky se zanedbává.")
+
+    # ------------------------------------------------------------------
+    def _zatizeni(self):
+        x, L = self.x, self.L
+        g0 = ZatezovaciStav("Vlastní tíha nosníku g0", "stale", t=self.t0,
+                            rovnomerne=[(self.g0, 0.0, L)], gamma=self.n.gamma_G,
+                            gamma_inf=self.n.gamma_G_inf)
+        self.zs_g0 = g0
+        for z in [g0] + self.stale_vstup + self.promenne:
+            if z.druh == "stale" and z.t is None:
+                z.t = self.t0
+            z.spocitej(x, L, self.xa, self.xb)
+        K = self.protokol.kapitola("Zatížení a časová osa", 2)
+        rows = [[g0.nazev, "stálé", fmt(g0.t, 0), fmt(self.g0), "–", "–", "–", fmt(g0.gamma)]]
+        for z in self.stale_vstup:
+            rows.append([z.nazev, "stálé", fmt(z.t, 0), self._popis_zs(z), "–", "–", "–", fmt(z.gamma)])
+        for z in self.promenne:
+            rows.append([z.nazev + (f" [{z.skupina}]" if z.skupina else ""), "proměnné", fmt(self.t_provoz, 0),
+                         self._popis_zs(z), fmt(z.psi0), fmt(z.psi1), fmt(z.psi2), fmt(z.gamma)])
+        K.tabulka(["Zatěžovací stav", "Druh", "t [dny]", "Hodnota", "ψ0", "ψ1", "ψ2", "γ"], rows,
+                  "Charakteristické hodnoty zatížení a součinitele kombinací (ČSN EN 1990)")
+        K.text("Proměnná zatížení se stejnou skupinou působí současně (např. LM1 = TS + UDL); "
+               "spojitá proměnná zatížení jsou umístěna do nepříznivých částí příčinkových čar, "
+               "pohyblivé soustavy břemen jsou posouvány po celé délce nosníku.")
+
+    @staticmethod
+    def _popis_zs(z: ZatezovaciStav) -> str:
+        parts = []
+        for q, a, b in z.rovnomerne:
+            parts.append(f"q = {fmt(q)} kN/m ({fmt(a)}–{fmt(b)} m)")
+        for F, p in z.bremena:
+            parts.append(f"F = {fmt(F)} kN v x = {fmt(p)} m")
+        if z.pohyblive:
+            parts.append("pohyblivá břemena " + "+".join(fmt(f) for f in z.pohyblive[0]) + " kN")
+        if z.tabulka:
+            parts.append("vnitřní síly zadané tabulkou")
+        return "; ".join(parts)
+
+    # ------------------------------------------------------------------
+    def _napeti(self, z, NP, MP, Mg0, ML, r=1.0, idx=None):
+        """Napětí v betonu [MPa] ve výšce z (mm) – vektorově po délce nosníku."""
+        sP = self.secP if idx is None else self.secP[idx]
+        sL = self.secL if idx is None else self.secL[idx]
+        AP, ztP, IP = sP[..., 0], sP[..., 1], sP[..., 2]
+        AL, ztL, IL = sL[..., 0], sL[..., 1], sL[..., 2]
+        return (r * (NP * 1e3 / AP + MP * 1e6 * (ztP - z) / IP) + Mg0 * 1e6 * (ztP - z) / IP
+                + ML * 1e6 * (ztL - z) / IL)
+
+    def _sily_predpeti(self, sigma: list[np.ndarray]):
+        """N_P [kN], M_P [kNm], V_P [kN] po délce nosníku od napětí σ_i(x)."""
+        N = np.zeros_like(self.x)
+        M = np.zeros_like(self.x)
+        V = np.zeros_like(self.x)
+        ztP = self.secP[:, 1]
+        for k, s, z, a in zip(self.kabely, sigma, self.zk, self.ak):
+            P = s * k.Ap * 1e-3
+            N -= P * np.cos(a)
+            M += P * np.cos(a) * (z - ztP) * 1e-3
+            V += P * np.sin(a)
+        return N, M, V
+
+    def _faktor_prenosu(self, msu: bool = False) -> np.ndarray:
+        """Náběh předpětí v kotevní oblasti předem předpjatých lan (8.10.2.2)."""
+        if not self.predem:
+            return np.ones_like(self.x)
+        l = self.lpt * (1.2 if msu else 1.0)
+        d = np.minimum(self.x, self.L - self.x) * 1000
+        return np.clip(d / l, 0.0, 1.0)
+
+    # ------------------------------------------------------------------
+    def _ztraty_okamzite(self):
+        x = self.x
+        p = self.predp
+        n = self.n
+        K = self.protokol.kapitola("Ztráty předpětí")
+        K.text("Ztráty předpětí jsou stanoveny podle čl. 5.10.4–5.10.6 ČSN EN 1992-1-1 zvlášť pro "
+               "každý kabel v každém řezu nosníku.")
+        K1 = self.protokol.kapitola("Napětí při napínání", 2)
+        lim_nap = min(n.k1_nap * p.fpk, n.k2_nap * p.fp01k)
+        lim_0 = min(n.k7 * p.fpk, n.k8 * p.fp01k)
+        K1.krok("Maximální napínací napětí", "σ_{p,max} = min(k_{1}·f_{pk}; k_{2}·f_{p0,1k})",
+                f"min({fmt(n.k1_nap)}·{fmt(p.fpk)}; {fmt(n.k2_nap)}·{fmt(p.fp01k)})", lim_nap, "MPa",
+                "5.10.2.1(1)")
+        for k in self.kabely:
+            self.protokol.pridej_posudek(K1, VysledekPosudku(
+                f"Napínací napětí – {k.nazev}", "MSP", k.sigma_max, lim_nap, "MPa",
+                k.sigma_max / lim_nap, faze="napínání", odkaz="5.10.2.1", skupina="Napětí v předpínací výztuži"))
+        self.lim_pm0 = lim_0
+
+        self.sig_tr, self.sig_pokl, self.sig_el = [], [], []
+        self.pokluz_info = []
+        if not self.predem:
+            K2 = self.protokol.kapitola("Ztráta třením", 2)
+            K2.text("Napětí v kabelu po ztrátě třením (5.45):")
+            K2.krok("", "σ_{p}(x) = σ_{p,max}·e^{−μ·(θ + k·x)}", "", None, "", "5.10.5.2")
+            K2.text("θ – součet absolutních úhlových změn kabelu od kotvy, x – délka kabelu od kotvy, "
+                    "μ – součinitel tření, k – neúmyslná úhlová změna.")
+            K3 = self.protokol.kapitola("Ztráta pokluzem v kotvě", 2)
+            K3.text("Dosah pokluzu x_w se určí z podmínky, že plocha mezi průběhy napětí před a po "
+                    "zakotvení je rovna w·E_p (průběh po zakotvení je zrcadlově převrácený vůči úrovni "
+                    "napětí v místě dosahu pokluzu):")
+            K3.krok("", "∫_{0}^{x_{w}} [σ_{p}(x) − σ_{p,po}(x)] dx = w·E_{p},   σ_{p,po}(x) = 2·σ_{p}(x_{w}) − σ_{p}(x)",
+                    "", None, "", "5.10.5.3")
+            for k in self.kabely:
+                g = k.geometrie
+                s_left = ztrata_trenim(k.sigma_max, g.theta, g.s, k.mu, k.k)
+                s_right = ztrata_trenim(k.sigma_max, g.theta[-1] - g.theta, g.s[-1] - g.s, k.mu, k.k)
+                if k.napinani == "levy":
+                    s0 = s_left
+                elif k.napinani == "pravy":
+                    s0 = s_right
+                else:
+                    s0 = np.maximum(s_left, s_right)
+                s1 = s0.copy()
+                info = {}
+                if k.napinani in ("levy", "oba"):
+                    xk = g.x[int(np.argmin(s0))] if k.napinani == "oba" else None
+                    r = ztrata_pokluzem(g.x, s1, k.pokluz, p.Ep, x_konec=xk)
+                    s1 = r.sigma
+                    info["levy"] = r
+                if k.napinani in ("pravy", "oba"):
+                    xk = g.x[int(np.argmin(s0))] if k.napinani == "oba" else None
+                    r = ztrata_pokluzem(g.x[::-1][0] - g.x[::-1], s1[::-1], k.pokluz, p.Ep,
+                                        x_konec=(g.x[-1] - xk) if xk is not None else None)
+                    s1 = r.sigma[::-1]
+                    info["pravy"] = r
+                self.sig_tr.append(np.interp(x, g.x, s0))
+                self.sig_pokl.append(np.interp(x, g.x, s1))
+                self.pokluz_info.append(info)
+                K2.krok(f"Kabel {k.nazev}: celková úhlová změna / délka kabelu", "θ_{celk}; L_{k}", "",
+                        f"{fmt(g.theta[-1], 4)} rad; {fmt(g.s[-1])} m")
+                K2.krok(f"Kabel {k.nazev}: napětí na pasivním konci / v místě minima",
+                        "σ_{p,min} = σ_{p,max}·e^{−μ·(θ + k·x)}", "", float(s0.min()), "MPa")
+                for strana, r in info.items():
+                    K3.krok(f"Kabel {k.nazev} – kotva {strana}: požadovaná plocha napětí", "A_{w} = w·E_{p}",
+                            f"{fmt(k.pokluz)}·10^{{-3}}·{fmt(p.Ep)}", r.plocha, "MPa·m")
+                    K3.krok(f"Kabel {k.nazev} – kotva {strana}: dosah pokluzu", "x_{w}", "iterací", r.x_w, "m")
+                    K3.krok(f"Kabel {k.nazev} – kotva {strana}: ztráta v kotvě", "Δσ_{p,w}(0) = 2·[σ_{p}(0) − σ_{p}(x_{w})]",
+                            "", r.dsigma_kotva, "MPa")
+                    if r.cely_kabel:
+                        K3.text("Pokluz ovlivní celou délku kabelu.")
+            rows = []
+            for i in self.i_tab:
+                rows.append([fmt(x[i], 3)] + [f"{fmt(a[i], 1)} / {fmt(b[i], 1)}"
+                                              for a, b in zip(self.sig_tr, self.sig_pokl)])
+            K3.tabulka(["x [m]"] + [f"{k.nazev}: σ po tření / po pokluzu [MPa]" for k in self.kabely], rows,
+                       "Napětí v kabelech po ztrátě třením a pokluzem")
+        else:
+            K2 = self.protokol.kapitola("Ztráty před uvolněním lan (předem předpjatý prvek)", 2)
+            t_h = self.relax_pred_h if self.relax_pred_h is not None else self.t0 * 24.0
+            self.t_rel_h = t_h
+            for k in self.kabely:
+                d_pr = float(p.relaxace(k.sigma_max, t_h))
+                s = np.full_like(x, k.sigma_max - d_pr)
+                self.sig_tr.append(np.full_like(x, k.sigma_max))
+                self.sig_pokl.append(s)
+                K2.krok(f"{k.nazev}: relaxace do uvolnění lan", f"Δσ_{{pr}} = σ_{{pi}}·{p.popis_relaxace}",
+                        f"t = {fmt(t_h)} h, μ = {fmt(k.sigma_max / p.fpk)}", d_pr, "MPa", "3.3.2(7)")
+            K2.text("Ztráta pokluzem v kotvách napínací dráhy a třením na deviátorech je zahrnuta "
+                    "v zadaném napětí σ_p,max (napětí lan před betonáží).")
+            # délka přenosu
+            b = self.beton
+            fctd_t = b.alpha_ct * 0.7 * b.fctm_t(self.t0) / b.gamma_c
+            fbpt = self.eta_p1 * 1.0 * fctd_t
+            sig_pm0 = max(float(s[self.im]) for s in self.sig_pokl)
+            d_l = p.d_lana or 15.7
+            self.lpt = self.a1_pt * self.a2_pt * d_l * sig_pm0 / fbpt
+            K2.krok("Pevnost v soudržnosti při přenosu", "f_{bpt} = η_{p1}·η_{1}·f_{ctd}(t)",
+                    f"{fmt(self.eta_p1)}·1,0·{fmt(fctd_t)}", fbpt, "MPa", "8.10.2.2(1)")
+            K2.krok("Základní délka přenosu", "l_{pt} = α_{1}·α_{2}·φ·σ_{pm0}/f_{bpt}",
+                    f"{fmt(self.a1_pt)}·{fmt(self.a2_pt)}·{fmt(d_l)}·{fmt(sig_pm0)}/{fmt(fbpt)}",
+                    self.lpt, "mm", "8.10.2.2(2)")
+            K2.text("V oblasti přenosu je předpětí uvažováno s lineárním náběhem; pro MSÚ s délkou "
+                    "l_pt2 = 1,2·l_pt.")
+
+        # --- pružné přetvoření betonu ------------------------------------
+        K4 = self.protokol.kapitola("Ztráta pružným přetvořením betonu", 2)
+        b = self.beton
+        Ec0 = b.Ecm_t(self.t0)
+        nk = self.pocet_napinani or len(self.kabely)
+        j = 1.0 if self.predem else (nk - 1) / (2 * nk)
+        K4.krok("Modul pružnosti betonu při vnesení předpětí", "E_{cm}(t_{0}) = (f_{cm}(t_{0})/f_{cm})^{0,3}·E_{cm}",
+                f"({fmt(b.fcm_t(self.t0))}/{fmt(b.fcm)})^{{0,3}}·{fmt(b.Ecm)}", Ec0, "MPa", "3.1.3(3)")
+        if self.predem:
+            K4.text("U předem předpjatých prvků se při uvolnění lan beton zkrátí současně s lany (j = 1):")
+        else:
+            K4.text(f"Kabely jsou napínány postupně v n = {nk} krocích; ztráta postupným napínáním "
+                    "(5.44) se uvažuje průměrnou hodnotou pro všechny kabely:")
+        K4.krok("", "Δσ_{el} = j·(E_{p}/E_{cm}(t_{0}))·|σ_{c}(z_{p})|", f"j = {fmt(j)}", None, "", "5.10.5.1")
+        Mg0 = self.zs_g0.M_max
+        fr = self._faktor_prenosu()
+        sig = [s * fr for s in self.sig_pokl]
+        for _ in range(4):
+            NP, MP, _ = self._sily_predpeti(sig)
+            new = []
+            for k, s0, z in zip(self.kabely, self.sig_pokl, self.zk):
+                sc = self._napeti(z, NP, MP, Mg0, 0.0)
+                d_el = j * p.Ep / Ec0 * np.maximum(-sc, 0.0)
+                new.append((s0 - d_el) * fr)
+            sig = new
+        self.d_el = [(s0 * fr - s) for s0, s in zip(self.sig_pokl, sig)]
+        self.sig_pm0 = sig
+        im = self.im
+        for k, d in zip(self.kabely, self.d_el):
+            K4.krok(f"Kabel {k.nazev} – ztráta ve středu rozpětí", "Δσ_{el}", "", float(d[im]), "MPa")
+
+        # --- napětí po okamžitých ztrátách ---------------------------------
+        K5 = self.protokol.kapitola("Napětí po okamžitých ztrátách", 2)
+        K5.krok("Mezní napětí po zakotvení", "σ_{pm0,max} = min(k_{7}·f_{pk}; k_{8}·f_{p0,1k})",
+                f"min({fmt(n.k7)}·{fmt(p.fpk)}; {fmt(n.k8)}·{fmt(p.fp01k)})", lim_0, "MPa", "5.10.3(2)")
+        for k, s in zip(self.kabely, self.sig_pm0):
+            i = int(np.argmax(s))
+            self.protokol.pridej_posudek(K5, VysledekPosudku(
+                f"Napětí po zakotvení σ_pm0 – {k.nazev}", "MSP", float(s[i]), lim_0, "MPa",
+                float(s[i]) / lim_0, faze="po vnesení předpětí", x=float(x[i]), odkaz="5.10.3(2)",
+                skupina="Napětí v předpínací výztuži"))
+        NP, MP, VP = self._sily_predpeti(self.sig_pm0)
+        rows = []
+        for i in self.i_tab:
+            rows.append([fmt(x[i], 3)] + [fmt(s[i], 1) for s in self.sig_pm0] + [fmt(-NP[i]), fmt(MP[i])])
+        K5.tabulka(["x [m]"] + [f"σ_pm0 {k.nazev} [MPa]" for k in self.kabely] + ["P_m0 [kN]", "M_P [kNm]"],
+                   rows, "Napětí a síly po okamžitých ztrátách")
+        K5.obrazek("napeti_kabelu", "Průběh napětí v kabelech po délce – okamžité a dlouhodobé ztráty")
+
+    # ------------------------------------------------------------------
+    def _faze_a_dlouhodobe_ztraty(self):
+        x = self.x
+        b, p, P = self.beton, self.predp, self.prurez
+        h0 = P.h0
+        K = self.protokol.kapitola("Časová osa a dlouhodobé ztráty", 2)
+        # fáze
+        faze = [Faze("Vnesení předpětí", self.t0, False, [self.zs_g0])]
+        casy = sorted({z.t for z in self.stale_vstup if z.t > self.t0} | {self.t_provoz, self.t_konec})
+        for t in casy:
+            aktivni = [self.zs_g0] + [z for z in self.stale_vstup if z.t <= t]
+            if t == self.t_konec:
+                nazev = "Konec životnosti"
+            elif t == self.t_provoz:
+                nazev = "Uvedení do provozu"
+            else:
+                nazev = "Vnesení: " + ", ".join(z.nazev for z in self.stale_vstup if z.t == t)
+            faze.append(Faze(nazev, t, t >= self.t_provoz, aktivni))
+        # zatížení v čase t0 pro předpětí mají vliv i stálá zatížení s t <= t0
+        faze[0].stale = [self.zs_g0] + [z for z in self.stale_vstup if z.t <= self.t0]
+        self.faze = faze
+        K.tabulka(["Fáze", "Stáří betonu t [dny]", "Působící stálá zatížení", "Proměnná zatížení"],
+                  [[f.nazev, fmt(f.t, 0), ", ".join(z.nazev for z in f.stale), "ano" if f.provoz else "ne"]
+                   for f in faze], "Časová osa výstavby a provozu")
+
+        # zatěžovací kroky pro dotvarování
+        Mg0 = self.zs_g0.M_max
+        NP0, MP0, _ = self._sily_predpeti(self.sig_pm0)
+        kroky = []  # (t_k, nazev, [σ_c,i(x)] )
+        s0 = [self._napeti(z, NP0, MP0, Mg0, 0.0) for z in self.zk]
+        for zz in self.stale_vstup:
+            if zz.t <= self.t0:
+                s0 = [s + self._napeti(z, 0, 0, 0, zz.M_max) for s, z in zip(s0, self.zk)]
+        kroky.append((self.t0, "předpětí + stálá zatížení při t0", s0))
+        for zz in self.stale_vstup:
+            if zz.t > self.t0:
+                kroky.append((zz.t, zz.nazev, [self._napeti(z, 0, 0, 0, zz.M_max) for z in self.zk]))
+        Mqp = sum((z.psi2 * z.M_max for z in self.promenne), np.zeros_like(x))
+        if np.any(Mqp != 0):
+            kroky.append((self.t_provoz, "kvazistálá část proměnných zatížení",
+                          [self._napeti(z, 0, 0, 0, Mqp) for z in self.zk]))
+        self.kroky_dotv = kroky
+
+        # nelineární dotvarování od předpětí
+        fck0 = b.fck_t(self.t0)
+        smin = min(float(self._napeti(z, NP0, MP0, Mg0, 0.0).min()) for z in (0.0, P.h))
+        _, k_sig = reologie.nelinearni_dotvarovani(1.0, smin, fck0)
+        self.k_sigma0 = k_sig
+
+        # --- smršťování ---------------------------------------------------
+        Ks = self.protokol.kapitola("Smršťování betonu", 2)
+        sh = reologie.smrstovani(b, self.RH, h0, self.t_konec, self.t_s)
+        sh0 = reologie.smrstovani(b, self.RH, h0, self.t0, self.t_s)
+        Ks.text(f"Relativní vlhkost RH = {fmt(self.RH)} %, konec ošetřování t_s = {fmt(self.t_s)} dne, "
+                f"h0 = {fmt(h0)} mm, cement třídy {b.cement}. Hodnoty pro konec životnosti t = {fmt(self.t_konec, 0)} dní:")
+        Ks.krok("Součinitel vlhkosti", "β_{RH} = 1,55·[1 − (RH/RH_{0})^{3}]", f"1,55·[1 − ({fmt(self.RH)}/100)^{{3}}]",
+                sh["beta_RH"], "", "(B.12)")
+        Ks.krok("Základní smršťování vysycháním",
+                "ε_{cd,0} = 0,85·[(220 + 110·α_{ds1})·exp(−α_{ds2}·f_{cm}/f_{cm0})]·10^{−6}·β_{RH}",
+                f"0,85·[(220 + 110·{fmt(sh['alpha_ds1'])})·exp(−{fmt(sh['alpha_ds2'])}·{fmt(b.fcm)}/10)]·10^{{−6}}·{fmt(sh['beta_RH'])}",
+                sh["eps_cd0"], "", "(B.11)")
+        Ks.krok("Součinitel náhradního rozměru", "k_{h}", f"h0 = {fmt(h0)} mm", sh["k_h"], "", "tab. 3.3")
+        Ks.krok("Časový průběh vysychání", "β_{ds}(t,t_{s}) = (t − t_{s})/[(t − t_{s}) + 0,04·√(h_{0}^{3})]",
+                f"({fmt(self.t_konec, 0)} − {fmt(self.t_s)})/[({fmt(self.t_konec, 0)} − {fmt(self.t_s)}) + 0,04·√({fmt(h0)}^{{3}})]",
+                sh["beta_ds"], "", "(3.10)")
+        Ks.krok("Smršťování vysycháním", "ε_{cd}(t) = β_{ds}(t,t_{s})·k_{h}·ε_{cd,0}",
+                f"{fmt(sh['beta_ds'])}·{fmt(sh['k_h'])}·{fmt(sh['eps_cd0'])}", sh["eps_cd"], "", "(3.9)")
+        Ks.krok("Autogenní smršťování (konečné)", "ε_{ca}(∞) = 2,5·(f_{ck} − 10)·10^{−6}",
+                f"2,5·({fmt(b.fck)} − 10)·10^{{−6}}", sh["eps_ca_inf"], "", "(3.12)")
+        Ks.krok("Autogenní smršťování", "ε_{ca}(t) = [1 − exp(−0,2·t^{0,5})]·ε_{ca}(∞)",
+                f"{fmt(sh['beta_as'])}·{fmt(sh['eps_ca_inf'])}", sh["eps_ca"], "", "(3.11), (3.13)")
+        Ks.krok("Celkové smršťování", "ε_{cs}(t) = ε_{cd}(t) + ε_{ca}(t)", "", sh["eps_cs"], "", "(3.8)")
+        Ks.krok("Smršťování do vnesení předpětí", "ε_{cs}(t_{0})", f"t0 = {fmt(self.t0)} dní", sh0["eps_cs"], "")
+        Ks.text("Ztrátu předpětí způsobuje jen smršťování po vnesení předpětí: ε_cs(t) − ε_cs(t0).")
+
+        # --- dotvarování ---------------------------------------------------
+        Kd = self.protokol.kapitola("Dotvarování betonu", 2)
+        cr = reologie.dotvarovani(b, self.RH, h0, self.t_konec, self.t0)
+        Kd.text(f"Součinitel dotvarování podle přílohy B.1 pro zatížení v čase t0 = {fmt(self.t0)} dní "
+                f"a konec životnosti t = {fmt(self.t_konec, 0)} dní:")
+        Kd.krok("Součinitele vlivu pevnosti", "α_{1} = (35/f_{cm})^{0,7}; α_{2} = (35/f_{cm})^{0,2}; α_{3} = (35/f_{cm})^{0,5}",
+                "", f"{fmt(cr['alpha1'])}; {fmt(cr['alpha2'])}; {fmt(cr['alpha3'])}", "", "(B.8c)")
+        Kd.krok("Vliv vlhkosti", "φ_{RH} = [1 + (1 − RH/100)/(0,1·h_{0}^{1/3})·α_{1}]·α_{2}" if b.fcm > 35 else
+                "φ_{RH} = 1 + (1 − RH/100)/(0,1·h_{0}^{1/3})", "", cr["phi_RH"], "", "(B.3)")
+        Kd.krok("Vliv pevnosti betonu", "β(f_{cm}) = 16,8/√f_{cm}", f"16,8/√{fmt(b.fcm)}", cr["beta_fcm"], "", "(B.4)")
+        Kd.krok("Upravené stáří při zatížení (druh cementu)", "t_{0} = t_{0,T}·[9/(2 + t_{0,T}^{1,2}) + 1]^{α} ≥ 0,5",
+                "", cr["t0_upr"], "dní", "(B.9)")
+        Kd.krok("Vliv stáří při zatížení", "β(t_{0}) = 1/(0,1 + t_{0}^{0,20})", "", cr["beta_t0"], "", "(B.5)")
+        Kd.krok("Základní součinitel dotvarování", "φ_{0} = φ_{RH}·β(f_{cm})·β(t_{0})",
+                f"{fmt(cr['phi_RH'])}·{fmt(cr['beta_fcm'])}·{fmt(cr['beta_t0'])}", cr["phi0"], "", "(B.2)")
+        Kd.krok("Součinitel β_H", "β_{H} = 1,5·[1 + (0,012·RH)^{18}]·h_{0} + 250·α_{3} ≤ 1500·α_{3}", "",
+                cr["beta_H"], "", "(B.8)")
+        Kd.krok("Časový průběh dotvarování", "β_{c}(t,t_{0}) = [(t − t_{0})/(β_{H} + t − t_{0})]^{0,3}", "",
+                cr["beta_c"], "", "(B.7)")
+        Kd.krok("Součinitel dotvarování", "φ(t,t_{0}) = φ_{0}·β_{c}(t,t_{0})",
+                f"{fmt(cr['phi0'])}·{fmt(cr['beta_c'])}", cr["phi"], "", "(B.1)")
+        Kd.krok("Poměr napětí při vnesení předpětí", "k_{σ} = |σ_{c}|/f_{ck}(t_{0})",
+                f"{fmt(abs(smin))}/{fmt(fck0)}", k_sig, "", "3.1.4(4)")
+        if k_sig > 0.45:
+            Kd.text(f"k_σ > 0,45 → uvažuje se nelineární dotvarování od předpětí: φ_nl = φ·exp[1,5·(k_σ − 0,45)] "
+                    f"= φ·{fmt(math.exp(1.5 * (k_sig - 0.45)))}.")
+        rows = []
+        for t_k, naz, _ in kroky:
+            rows.append([naz, fmt(t_k, 0)] + [fmt(self._phi(f.t, t_k, first=(t_k == self.t0)))
+                                               for f in faze])
+        Kd.tabulka(["Zatěžovací krok", "t_k [dny]"] + [f"φ({fmt(f.t, 0)}, t_k)" for f in faze], rows,
+                   "Součinitele dotvarování pro jednotlivé zatěžovací kroky (superpozice)")
+
+        # --- relaxace a výsledná ztráta (5.46) ----------------------------
+        Kr = self.protokol.kapitola("Relaxace a celkové dlouhodobé ztráty (5.46)", 2)
+        Kr.text("Ztráta relaxací podle 3.3.2(7): Δσ_pr = σ_pi·" + p.popis_relaxace +
+                f", čas od napnutí v hodinách (nejvýše {fmt(self.n.relaxace_t_max_h, 0)} h podle 3.3.2(8)), "
+                "σ_pi je napětí po okamžitých ztrátách.")
+        Kr.text("Dlouhodobé ztráty od smršťování, dotvarování a relaxace podle (5.46); pro zatížení vnášená "
+                "postupně se dotvarovací člen počítá superpozicí Σ φ(t,t_k)·Δσ_c,k:")
+        Kr.krok("", "Δσ_{p,c+s+r} = [ε_{cs}·E_{p} + 0,8·Δσ_{pr} + (E_{p}/E_{cm})·Σφ(t,t_{k})·σ_{c,k}] / "
+                "[1 + (E_{p}/E_{cm})·(A_{p}/A_{c})·(1 + A_{c}·z_{cp}^{2}/I_{c})·(1 + 0,8·φ(t,t_{0}))]",
+                "", None, "", "5.10.6(2)")
+        Ac, Ic = P.A, P.I
+        Ap_tot = self.Ap
+        faze[0].sigma = [s.copy() for s in self.sig_pm0]
+        faze[0].ztraty = {"eps_cs": 0.0}
+        im = self.im
+        for f in faze[1:]:
+            sigs, det, eps, phi0, zcp, zres = self._dlouhodobe(f.t)
+            f.sigma = sigs
+            f.ztraty = {"eps_cs": eps, "phi0": phi0, "kabely": det}
+            # podrobný postup ve středu rozpětí
+            if f.t == self.t_konec or f.provoz:
+                Kr.text(f"<b>{f.nazev_t}</b> – střed rozpětí:")
+                Kr.krok("Smršťování po vnesení předpětí", "ε_{cs}(t) − ε_{cs}(t_{0})", "", eps, "")
+                Kr.krok("Součinitel dotvarování", "φ(t,t_{0})", "", phi0, "")
+                Kr.krok("Excentricita výslednice předpětí", "z_{cp} = z_{t} − z_{p}", f"{fmt(P.zt)} − {fmt(zres[im])}",
+                        float(zcp[im]), "mm")
+                for k, d in zip(self.kabely, det):
+                    m = d["mezi"]
+                    Kr.krok(f"{k.nazev}: relaxace", "Δσ_{pr}", "", float(np.atleast_1d(d["d_pr"])[im]
+                                                                          if np.ndim(d["d_pr"]) else d["d_pr"]), "MPa")
+                    Kr.krok(f"{k.nazev}: dotvarovací člen", "Σφ(t,t_{k})·σ_{c,k}(z_{p})", "", float(d["creep"][im]), "MPa")
+                    Kr.krok(f"{k.nazev}: ztráta Δσ_p,c+s+r", "[ε_{cs}E_{p} + 0,8Δσ_{pr} − α_{p}Σφσ_{c}]/jmenovatel",
+                            f"[{fmt(m['clen_smrst'])} + {fmt(float(np.atleast_1d(m['clen_relax'])[im] if np.ndim(m['clen_relax']) else m['clen_relax']))} + "
+                            f"{fmt(float(m['clen_dotv'][im]))}] / {fmt(float(m['jmenovatel'][im]) if np.ndim(m['jmenovatel']) else m['jmenovatel'])}",
+                            float(d["loss"][im]), "MPa")
+        # tabulka sil v čase
+        rows = []
+        for f in faze:
+            NP, MP, _ = self._sily_predpeti(f.sigma)
+            rows.append([f.nazev, fmt(f.t, 0)] + [fmt(-NP[i]) for i in self.i_tab])
+        Kr.tabulka(["Fáze", "t [dny]"] + [f"P [kN] {h}" for h in self._x_tab_hlavicka()], rows,
+                   "Předpínací síla P_m,t v čase (střední hodnota)")
+        P0 = sum(k.P_max for k in self.kabely)
+        Pk = -self._sily_predpeti(faze[-1].sigma)[0][im]
+        Kr.krok("Celková ztráta ve středu rozpětí na konci životnosti", "(P_{max} − P_{m,∞})/P_{max}",
+                f"({fmt(P0)} − {fmt(Pk)})/{fmt(P0)}", 100 * (P0 - Pk) / P0, "%")
+        Kr.obrazek("ztraty_rozklad", "Rozklad ztrát předpětí ve středu rozpětí")
+        Kr.obrazek("sila_v_case", "Předpínací síla ve středu rozpětí v čase")
+
+    def _dlouhodobe(self, t: float):
+        """Napětí v kabelech po dlouhodobých ztrátách v čase t (5.46 se superpozicí dotvarování)."""
+        b, p, P = self.beton, self.predp, self.prurez
+        h0 = P.h0
+        x = self.x
+        eps = reologie.eps_cs(b, self.RH, h0, t, self.t_s) - reologie.eps_cs(b, self.RH, h0, self.t0, self.t_s)
+        phi0 = self._phi(t, self.t0, first=True)
+        Psum = sum(s * k.Ap for s, k in zip(self.sig_pm0, self.kabely))
+        zres = sum(s * k.Ap * z for s, k, z in zip(self.sig_pm0, self.kabely, self.zk)) / np.where(Psum > 0, Psum, 1)
+        zcp = P.zt - zres
+        sigs, det = [], []
+        for ik, (k, s_pm0) in enumerate(zip(self.kabely, self.sig_pm0)):
+            if self.predem:
+                t_h_tot = min(self.t_rel_h + (t - self.t0) * 24.0, self.n.relaxace_t_max_h)
+                d_pr = p.relaxace(k.sigma_max, t_h_tot) - p.relaxace(k.sigma_max, self.t_rel_h)
+            else:
+                t_h = min((t - self.t0) * 24.0, self.n.relaxace_t_max_h)
+                d_pr = p.relaxace(s_pm0, t_h)
+            d_pr = np.maximum(d_pr, 0.0) * np.ones_like(x)
+            creep = np.zeros_like(x)
+            for t_k, _, sk in self.kroky_dotv:
+                if t_k <= t:
+                    creep += self._phi(t, t_k, first=(t_k == self.t0)) * sk[ik]
+            loss, mezi = ztrata_dlouhodoba_546(eps, p.Ep, d_pr, b.Ecm, phi0, 0.0, self.Ap, P.A, P.I,
+                                               zcp, creep_term=creep)
+            if self.predem:
+                loss = loss * self._faktor_prenosu()
+            sigs.append(s_pm0 - loss)
+            det.append(dict(d_pr=d_pr, creep=creep, loss=loss, mezi=mezi, zcp=zcp))
+        return sigs, det, eps, phi0, zcp, zres
+
+    def _phi(self, t: float, tk: float, first: bool = False) -> float:
+        if t <= tk:
+            return 0.0
+        ph = reologie.phi(self.beton, self.RH, self.prurez.h0, t, tk)
+        if first and self.k_sigma0 > 0.45:
+            ph *= math.exp(1.5 * (self.k_sigma0 - 0.45))
+        return ph
+
+    # ------------------------------------------------------------------
+    def _vnitrni_sily(self):
+        n = len(self.x)
+        nn = self.n
+        K = self.protokol.kapitola("Vnitřní síly")
+        K.text("Vnitřní síly od zatížení jsou spočteny na prostém nosníku pomocí příčinkových čar. Kombinace "
+               "podle ČSN EN 1990 (6.14b) charakteristická, (6.15b) častá, (6.16b) kvazistálá a pro MSÚ "
+               + ("(6.10a) a (6.10b)" if nn.kombinace_msu == "6.10ab" else "(6.10)") + ".")
+        K.text("Vnitřní síly od předpětí (staticky určitá konstrukce – pouze primární účinky): "
+               "N_P = −ΣP_i·cos α_i, M_P = ΣP_i·cos α_i·(z_i − z_t), V_P = ΣP_i·sin α_i.")
+        self.komb = {}
+        for f in self.faze:
+            prom = self.promenne if f.provoz else []
+            stale_po = [z for z in f.stale if z is not self.zs_g0]
+            d = {}
+            for druh in ("char", "casta", "kvazistala"):
+                d[druh] = kombinace(stale_po, prom, druh, n)
+            d["msu"] = kombinace(f.stale, prom, "msu", n, nn.gamma_G, nn.gamma_G_inf, nn.xi, nn.kombinace_msu)
+            d["vse_char"] = kombinace(f.stale, prom, "char", n)
+            self.komb[f.nazev] = d
+        fz = self.faze[-1]
+        d = self.komb[fz.nazev]
+        NP, MP, VP = self._sily_predpeti(fz.sigma)
+        rows = []
+        for i in self.i_tab:
+            rows.append([fmt(self.x[i], 3), fmt(self.zs_g0.M_max[i]),
+                         fmt(d["vse_char"].M_max[i]), fmt(d["casta"].M_max[i] + self.zs_g0.M_max[i]),
+                         fmt(d["kvazistala"].M_max[i] + self.zs_g0.M_max[i]), fmt(d["msu"].M_max[i]),
+                         fmt(d["msu"].V_max[i]), fmt(d["msu"].V_min[i]), fmt(MP[i]), fmt(VP[i])])
+        K.tabulka(["x [m]", "M_g0", "M_char", "M_častá", "M_kvazist.", "M_Ed", "V_Ed,max", "V_Ed,min",
+                   "M_P,∞", "V_P,∞"], rows,
+                  f"Vnitřní síly [kNm, kN] – fáze {fz.nazev} (kombinace bez předpětí; M_P,∞ a V_P,∞ od předpětí)")
+        K.obrazek("vnitrni_sily", "Průběhy ohybových momentů a posouvajících sil")
+
+    # ------------------------------------------------------------------
+    def _mez_tahu(self, druh: str, t: float) -> float:
+        b = self.beton
+        if druh == "fctm":
+            return b.fctm_t(t)
+        if druh == "fctk005":
+            return b.fctk005_t(t)
+        return 0.0
+
+    def _msp(self):
+        x, b, nn, p = self.x, self.beton, self.n, self.predp
+        K = self.protokol.kapitola("Mezní stavy použitelnosti")
+        K.text("Normálová napětí jsou počítána pružně na neporušeném průřezu (tah +, tlak −). Předpětí "
+               f"se uvažuje charakteristickými hodnotami P_k,sup = r_sup·P_m,t a P_k,inf = r_inf·P_m,t "
+               f"(r_sup = {fmt(nn.r_sup)}, r_inf = {fmt(nn.r_inf)}, čl. 5.10.9); rozhodující hodnota "
+               "je použita pro každé kritérium.")
+        Mg0 = self.zs_g0.M_max
+        h = self.prurez.h
+        self.msp_napeti = {}
+        for f in self.faze:
+            Kf = self.protokol.kapitola(f"Napětí v betonu – {f.nazev_t}", 2)
+            NP, MP, _ = self._sily_predpeti(f.sigma)
+            d = self.komb[f.nazev]
+            fck_t = b.fck_t(f.t)
+            if not f.provoz:
+                kombinace_list = [("stala", d["char"])]
+                lim_t = self._mez_tahu(nn.tah_predpeti, f.t)
+                k_tl = nn.k_predpeti if f is self.faze[0] else nn.k1
+            else:
+                kombinace_list = [("char", d["char"]), ("casta", d["casta"]), ("kvazistala", d["kvazistala"])]
+                lim_t = self._mez_tahu(nn.tah_provoz, f.t)
+                k_tl = nn.k1
+            lim_c = k_tl * fck_t
+            lim_qp = nn.k2 * fck_t
+            Kf.krok("Mez tlakového napětí", f"{fmt(k_tl)}·f_{{ck}}(t)", f"{fmt(k_tl)}·{fmt(fck_t)}", lim_c, "MPa",
+                    "5.10.2.2(5)" if f is self.faze[0] else "7.2(2)")
+            Kf.krok("Mez tahového napětí", "f_{ctm}(t)" if (nn.tah_provoz if f.provoz else nn.tah_predpeti) == "fctm"
+                    else "f_{ctk,0,05}(t)", "", lim_t, "MPa")
+            res = {}
+            for druh, ob in kombinace_list:
+                out = {}
+                for r_naz, r in (("sup", nn.r_sup), ("inf", nn.r_inf)):
+                    for mm, Mx in (("max", ob.M_max), ("min", ob.M_min)):
+                        sh = self._napeti(h, NP, MP, Mg0, Mx, r)
+                        sd = self._napeti(0.0, NP, MP, Mg0, Mx, r)
+                        out[(r_naz, mm)] = (sh, sd)
+                res[druh] = out
+            self.msp_napeti[f.nazev] = res
+            # tabulka – charakteristická / stálá, obálka
+            hlavni = "stala" if not f.provoz else "char"
+            env_h_min = np.min([v[0] for v in res[hlavni].values()], 0)
+            env_h_max = np.max([v[0] for v in res[hlavni].values()], 0)
+            env_d_min = np.min([v[1] for v in res[hlavni].values()], 0)
+            env_d_max = np.max([v[1] for v in res[hlavni].values()], 0)
+            rows = []
+            for i in self.i_tab:
+                rows.append([fmt(x[i], 3), fmt(-NP[i]), fmt(MP[i]), fmt(env_h_min[i], 2), fmt(env_h_max[i], 2),
+                             fmt(env_d_min[i], 2), fmt(env_d_max[i], 2)])
+            Kf.tabulka(["x [m]", "P_m,t [kN]", "M_P [kNm]", "σ_h,min", "σ_h,max", "σ_d,min", "σ_d,max"], rows,
+                       f"Napětí v krajních vláknech [MPa] – kombinace {NAZVY_KOMBINACI[hlavni]} (obálka P_sup/P_inf)")
+            # podrobný výpočet ve středu rozpětí
+            i = self.im
+            sP = self.secP[i]
+            sL = self.secL[i]
+            Mx = d["char"].M_max[i]
+            Kf.text(f"Podrobně – střed rozpětí x = {fmt(x[i], 3)} m, předpětí P_m,t = {fmt(-NP[i])} kN, "
+                    f"M_P = {fmt(MP[i])} kNm, M_g0 = {fmt(Mg0[i])} kNm, M_ostatní = {fmt(Mx)} kNm:")
+            for r_naz, r in (("sup", nn.r_sup), ("inf", nn.r_inf)):
+                for zz, naz in ((h, "horní"), (0.0, "dolní")):
+                    val = float(self._napeti(zz, NP[i], MP[i], Mg0[i], Mx, r, idx=i))
+                    Kf.krok(f"σ – {naz} vlákna, P_{r_naz}",
+                            "σ = r·(N_{P}/A + M_{P}·(z_{t} − z)/I) + (M_{g0} + M_{ost})·(z_{t} − z)/I",
+                            f"{fmt(r)}·({fmt(NP[i])}·10^{{3}}/{fmt(sP[0])} + {fmt(MP[i])}·10^{{6}}·({fmt(sP[1])} − {fmt(zz)})/{fmt(sP[2])})"
+                            f" + ({fmt(Mg0[i])} + {fmt(Mx)})·10^{{6}}·({fmt(sL[1])} − {fmt(zz)})/{fmt(sL[2])}",
+                            val, "MPa")
+            # posudky
+            fz = f.nazev
+            for druh, out in res.items():
+                nazk = NAZVY_KOMBINACI[druh]
+                vals_min = np.min([np.minimum(a, c) for a, c in out.values()], 0)
+                vals_max = np.max([np.maximum(a, c) for a, c in out.values()], 0)
+                if druh in ("stala", "char"):
+                    i = int(np.argmin(vals_min))
+                    self.protokol.pridej_posudek(Kf, VysledekPosudku(
+                        "Tlakové napětí v betonu", "MSP", -float(vals_min[i]), lim_c, "MPa",
+                        max(-float(vals_min[i]), 0) / lim_c, fz, nazk, float(x[i]),
+                        odkaz="5.10.2.2(5)" if f is self.faze[0] else "7.2(2)", skupina="Napětí v betonu"))
+                    i = int(np.argmax(vals_max))
+                    self.protokol.pridej_posudek(Kf, VysledekPosudku(
+                        "Tahové napětí v betonu", "MSP", float(vals_max[i]), lim_t, "MPa",
+                        max(float(vals_max[i]), 0) / lim_t if lim_t > 0 else (0 if vals_max[i] <= 0 else math.inf),
+                        fz, nazk, float(x[i]), poznamka="předpoklad neporušeného průřezu",
+                        skupina="Napětí v betonu"))
+                if druh == "kvazistala" or (druh == "stala" and f is not self.faze[0]):
+                    i = int(np.argmin(vals_min))
+                    self.protokol.pridej_posudek(Kf, VysledekPosudku(
+                        "Tlakové napětí – lineární dotvarování", "MSP", -float(vals_min[i]), lim_qp, "MPa",
+                        max(-float(vals_min[i]), 0) / lim_qp, fz, nazk, float(x[i]), odkaz="7.2(3)",
+                        skupina="Napětí v betonu"))
+            # dekomprese
+            if f.provoz and nn.dekomprese != "zadna":
+                druh = "casta" if nn.dekomprese == "casta" else "kvazistala"
+                ob = d[druh]
+                eta, info = self._dekomprese(NP, MP, Mg0, ob)
+                i = int(np.argmax(eta))
+                self.protokol.pridej_posudek(Kf, VysledekPosudku(
+                    "Dekomprese", "MSP", float(info["sE"][i]), float(info["sP"][i]), "MPa", float(eta[i]), fz,
+                    NAZVY_KOMBINACI[druh], float(x[i]),
+                    poznamka=f"vlákno z = {fmt(info['z'][i])} mm; E_d = napětí od zatížení, R_d = |tlak od P_inf|",
+                    odkaz="7.3.1, tab. 7.1N", skupina="Dekomprese"))
+            # napětí v předpínací výztuži v provozu
+            if f.provoz:
+                ob = d["char"]
+                lim = nn.k5 * p.fpk
+                worst = (0.0, 0, "")
+                for k, s, z in zip(self.kabely, f.sigma, self.zk):
+                    ztL, IL = self.secL[:, 1], self.secL[:, 2]
+                    ds = p.Ep / b.Ecm * ob.M_max * 1e6 * (ztL - z) / IL
+                    sp = s + np.maximum(ds, 0)
+                    i = int(np.argmax(sp))
+                    if sp[i] > worst[0]:
+                        worst = (float(sp[i]), i, k.nazev)
+                self.protokol.pridej_posudek(Kf, VysledekPosudku(
+                    "Napětí v předpínací výztuži", "MSP", worst[0], lim, "MPa", worst[0] / lim, fz,
+                    "charakteristická", float(x[worst[1]]), poznamka=f"kabel {worst[2]}", odkaz="7.2(5)",
+                    skupina="Napětí v předpínací výztuži"))
+            Kf.obrazek(f"napeti_{self.faze.index(f)}", f"Napětí v krajních vláknech po délce – {f.nazev}")
+        K2 = self.protokol.kapitola("Rozdělení napětí po výšce průřezu", 2)
+        K2.obrazek("napeti_profil", "Rozdělení normálových napětí ve středu rozpětí v jednotlivých fázích")
+
+    def _dekomprese(self, NP, MP, Mg0, ob: Obalka):
+        """Využití z hlediska dekomprese: η = σ_od zatížení / |σ_od předpětí| v rozhodujícím vláknu."""
+        nn = self.n
+        h = self.prurez.h
+        if nn.dekomprese_rezim == "kabel":
+            zmin = np.min(self.zk, 0) - nn.a_dek
+            zmax = np.max(self.zk, 0) + nn.a_dek
+            zd = np.clip(zmin, 0, h)
+            zh = np.clip(zmax, 0, h)
+        else:
+            zd = np.zeros_like(self.x)
+            zh = np.full_like(self.x, h)
+        best = np.zeros_like(self.x)
+        sE_b = np.zeros_like(self.x)
+        sP_b = np.zeros_like(self.x)
+        z_b = np.zeros_like(self.x)
+        for z, Mx in ((zd, ob.M_max), (zh, ob.M_min)):
+            sP = self._napeti(z, NP, MP, 0.0, 0.0, nn.r_inf)
+            sE = self._napeti(z, 0.0, 0.0, Mg0, Mx)
+            # vlákno tlačené předpětím: η = σ_E/|σ_P|; jinak η = 1 + σ/f_ctm (> 1, pokud je vlákno v tahu)
+            eta = np.where(sP < 0, np.maximum(sE, 0) / np.where(sP < 0, -sP, 1),
+                           np.where(sP + sE > 0, 1.0 + (sP + sE) / self.beton.fctm, 0.0))
+            m = eta > best
+            best = np.where(m, eta, best)
+            sE_b = np.where(m, sE, sE_b)
+            sP_b = np.where(m, -sP, sP_b)
+            z_b = np.where(m, z, z_b)
+        return best, dict(sE=sE_b, sP=sP_b, z=z_b)
+
+    # ------------------------------------------------------------------
+    def _hlavni_napeti(self):
+        b, nn = self.beton, self.n
+        P = self.prurez
+        K = self.protokol.kapitola("Hlavní napětí v betonu", 2)
+        K.text("Hlavní tahová napětí se ověřují v neporušených oblastech podle ČSN EN 1992-2 (příloha QQ, 12.6.3): "
+               "σ_1 ≤ f_ctb = (1 − 0,8·σ_3/f_ck)·f_ctk,0,05. Smyková napětí τ = V·S(z)/(I·b(z)), V zahrnuje "
+               "posouvající sílu od předpětí. Kombinace charakteristická; vyhodnocení ve stojině průřezu.")
+        zz = np.linspace(0.02 * P.h, 0.98 * P.h, 49)
+        bz = P.sirka(zz)
+        zz, bz = zz[bz > 1.0], bz[bz > 1.0]
+        # vyhodnocení ve stojině (šířka ≤ 1,2·b_min); u plných průřezů v rozsahu 0,1h–0,9h
+        stojina = bz <= 1.2 * bz.min()
+        if stojina.mean() > 0.9:
+            stojina = (zz >= 0.1 * P.h) & (zz <= 0.9 * P.h)
+        zz, bz = zz[stojina], bz[stojina]
+        Sz = P.staticky_moment(zz)
+        Mg0 = self.zs_g0.M_max
+        self.hlavni = {}
+        for f in self.faze:
+            if not f.provoz:
+                continue
+            NP, MP, VP = self._sily_predpeti(f.sigma)
+            ob = self.komb[f.nazev]["char"]
+            g0V = self.zs_g0.V_max
+            best = (0.0, 0, 0, 0.0, 0.0, 0.0)
+            prof = None
+            eta_x = np.zeros_like(self.x)
+            for i in np.nonzero(self.v_poli)[0]:
+                IL = self.secL[i, 2]
+                for r in (nn.r_sup, nn.r_inf):
+                    for Mx, Vx in ((ob.M_max[i], ob.V_max[i]), (ob.M_max[i], ob.V_min[i])):
+                        V = Vx + g0V[i] + r * VP[i]
+                        tau = V * 1e3 * Sz / (IL * bz)
+                        sx = self._napeti(zz, NP[i], MP[i], Mg0[i], Mx, r, idx=i)
+                        s1 = sx / 2 + np.sqrt((sx / 2) ** 2 + tau ** 2)
+                        s3 = sx / 2 - np.sqrt((sx / 2) ** 2 + tau ** 2)
+                        fctb = np.where(s3 < 0, (1 - 0.8 * np.abs(s3) / b.fck) * b.fctk005, b.fctk005)
+                        eta = np.where(s1 > 0, s1 / fctb, 0)
+                        j = int(np.argmax(eta))
+                        eta_x[i] = max(eta_x[i], eta[j])
+                        if eta[j] > best[0]:
+                            best = (float(eta[j]), i, j, float(s1[j]), float(s3[j]), float(fctb[j]))
+                            prof = (sx.copy(), tau.copy(), s1.copy(), s3.copy(), fctb.copy())
+            eta, i, j, s1, s3, fctb = best
+            self.hlavni[f.nazev] = dict(z=zz, x=self.x, eta_x=eta_x, i=i, prof=prof)
+            K.krok(f"{f.nazev}: rozhodující místo", "x; z", "", f"{fmt(self.x[i], 3)} m; {fmt(zz[j])} mm")
+            K.krok("Hlavní napětí", "σ_{1,3} = σ_{x}/2 ± √((σ_{x}/2)^{2} + τ^{2})", "", f"{fmt(s1)}; {fmt(s3)}", "MPa")
+            K.krok("Směrově závislá pevnost v tahu", "f_{ctb} = (1 − 0,8·|σ_{3}|/f_{ck})·f_{ctk,0,05}",
+                   f"(1 − 0,8·{fmt(abs(min(s3, 0)))}/{fmt(b.fck)})·{fmt(b.fctk005)}", fctb, "MPa", "QQ.101")
+            self.protokol.pridej_posudek(K, VysledekPosudku(
+                "Hlavní tahové napětí", "MSP", s1, fctb, "MPa", eta, f.nazev, "charakteristická", float(self.x[i]),
+                poznamka=f"z = {fmt(zz[j])} mm", odkaz="EN 1992-2 QQ", skupina="Hlavní napětí"))
+        K.obrazek("hlavni_napeti", "Průběh hlavních napětí po výšce průřezu v rozhodujícím řezu")
+
+    # ------------------------------------------------------------------
+    def _pruhyb(self):
+        """Průhyb – pružný výpočet s účinným modulem pro dotvarování (dvojitá integrace křivosti)."""
+        b, x = self.beton, self.x
+        K = self.protokol.kapitola("Průhyb", 2)
+        K.text("Průhyb je počítán dvojitou integrací křivosti κ = M/(E·I) mezi ložisky (neporušený průřez). "
+               "Vliv dotvarování se zahrnuje součinitelem (1 + φ(t,t_k)) pro každý zatěžovací krok, změna "
+               "předpětí od dlouhodobých ztrát s (1 + 0,8·φ). Průhyb dolů je kladný.")
+        ia, ib = self.ia, self.ib
+        xs = x[ia:ib + 1]
+        IL = self.secL[ia:ib + 1, 2]
+
+        def w_of(M, E):
+            k = M[ia:ib + 1] * 1e6 / (E * IL)  # 1/mm
+            xm = xs * 1000
+            th = np.concatenate([[0], np.cumsum(0.5 * (k[1:] + k[:-1]) * np.diff(xm))])
+            y = np.concatenate([[0], np.cumsum(0.5 * (th[1:] + th[:-1]) * np.diff(xm))])
+            y = y - y[-1] * (xm - xm[0]) / (xm[-1] - xm[0])
+            return -y  # dolů kladně
+
+        _, MP0, _ = self._sily_predpeti(self.sig_pm0)
+        Mg0 = self.zs_g0.M_max
+        Ec0 = b.Ecm_t(self.t0)
+        w0 = w_of(MP0 + Mg0, Ec0)
+        self.w = {"Vnesení předpětí": w0}
+        lim = self.L0 * 1000 / self.n.pruhyb_limit
+        imid = self.im - ia
+        K.krok("Průhyb při vnesení předpětí (krátkodobý)", "w_{0}", f"E_cm(t0) = {fmt(Ec0)} MPa", float(w0[imid]), "mm")
+        for f in self.faze[1:]:
+            w = np.zeros_like(xs)
+            for t_k, naz, _ in self.kroky_dotv:
+                if t_k > f.t:
+                    continue
+                if t_k == self.t0:
+                    M = MP0 + Mg0 + sum((z.M_max for z in self.stale_vstup if z.t <= self.t0), np.zeros_like(x))
+                elif naz == "kvazistálá část proměnných zatížení":
+                    M = sum((z.psi2 * z.M_max for z in self.promenne), np.zeros_like(x))
+                else:
+                    M = sum((z.M_max for z in self.stale_vstup if z.nazev == naz), np.zeros_like(x))
+                w += w_of(M, b.Ecm) * (1 + self._phi(f.t, t_k, first=(t_k == self.t0)))
+            _, MPt, _ = self._sily_predpeti(f.sigma)
+            w += w_of(MPt - MP0, b.Ecm) * (1 + 0.8 * self._phi(f.t, self.t0))
+            self.w[f.nazev] = w
+            K.krok(f"Průhyb – kvazistálá kombinace, {f.nazev_t}", "w_{qp}(t)", "", float(w[imid]), "mm")
+            if f.provoz:
+                wq = w_of(self.komb[f.nazev]["casta"].M_max -
+                          sum((z.M_max for z in f.stale if z is not self.zs_g0), np.zeros_like(x)), b.Ecm)
+                self.w[f.nazev + " – častá (krátkodobě od Q)"] = w + wq
+                K.krok(f"Přírůstek od proměnného zatížení (častá kombinace), {f.nazev}", "w_{Q,fr}", "",
+                       float(wq[imid]), "mm")
+        wk = self.w[self.faze[-1].nazev]
+        i = int(np.argmax(np.abs(wk)))
+        K.krok("Mezní průhyb", f"w_{{lim}} = L_{{0}}/{fmt(self.n.pruhyb_limit, 0)}",
+               f"{fmt(self.L0 * 1000)}/{fmt(self.n.pruhyb_limit, 0)}", lim, "mm", "7.4.1(4)")
+        self.protokol.pridej_posudek(K, VysledekPosudku(
+            "Průhyb (kvazistálá kombinace)", "MSP", float(abs(wk[i])), lim, "mm", float(abs(wk[i])) / lim,
+            self.faze[-1].nazev, "kvazistálá", float(xs[i]),
+            poznamka="nadvýšení (záporný průhyb) i průhyb", odkaz="7.4.1(4)", skupina="Průhyb"))
+        self.w_x = xs
+        K.obrazek("pruhyb", "Průhyb nosníku v jednotlivých fázích")
+
+    # ------------------------------------------------------------------
+    def _vrstvy_msu(self, f: Faze, i: int, eps0_navic: bool = True, redukce: float = 1.0):
+        b, p = self.beton, self.predp
+        fr = self._faktor_prenosu(msu=True)[i] if self.predem else 1.0
+        NP, MP, _ = self._sily_predpeti(f.sigma)
+        Mperm = sum((z.M_max[i] for z in f.stale if z is not self.zs_g0), 0.0)
+        vrstvy = []
+        for k, s, z in zip(self.kabely, f.sigma, self.zk):
+            sc = float(self._napeti(z[i], NP[i] * redukce, MP[i] * redukce, self.zs_g0.M_max[i], Mperm, idx=i))
+            e0 = s[i] / p.Ep - (sc / b.Ecm if eps0_navic else 0.0)
+            vrstvy.append(VrstvaPredpeti(float(z[i]), k.Ap * fr * redukce, float(e0), k.nazev))
+        return vrstvy
+
+    def _msu_ohyb(self):
+        b, p, s = self.beton, self.predp, self.betonarska
+        K = self.protokol.kapitola("Mezní stav únosnosti")
+        K1 = self.protokol.kapitola("Ohybová únosnost", 2)
+        K1.text("Moment únosnosti je stanoven metodou mezních přetvoření: rovinnost průřezu, beton v tahu "
+                "nepůsobí, beton v tlaku parabola-obdélník (3.17), předpínací výztuž bilineární diagram se "
+                "stoupající větví (obr. 3.10), betonářská výztuž obdobně. Předpínací výztuž má počáteční "
+                "přetvoření ε_p0 = σ_pm,t/E_p − σ_c,perm(z_p)/E_cm (předpětí + dekomprese betonu od stálých "
+                "účinků). Poloha neutrálné osy je určena iteračně z podmínky ΣN = 0, porušení nastane "
+                f"dosažením ε_cu2 = {fmt(b.eps_cu2 * 1e3)} ‰ v betonu nebo ε_ud v oceli.")
+        self.msu_M = {}
+        vyz = [VrstvaVyztuze(v.z, v.As, v.nazev) for v in self.vyztuz]
+        for f in self.faze:
+            if not f.provoz:
+                continue
+            MEd = self.komb[f.nazev]["msu"].M_max
+            MRd = np.full_like(self.x, np.nan)
+            vys = {}
+            for i in np.nonzero(self.v_poli)[0]:
+                r = ohybova_unosnost(self.prurez, b, p, s, self._vrstvy_msu(f, i), vyz)
+                MRd[i] = r.MRd
+                vys[i] = r
+            eta = np.where(self.v_poli, np.maximum(MEd, 0) / MRd, 0)
+            i = int(np.nanargmax(eta))
+            r = vys[i]
+            self.msu_M[f.nazev] = dict(MEd=MEd, MRd=MRd, eta=eta, vys=vys, i=i)
+            K1.text(f"<b>{f.nazev_t}</b> – rozhodující řez x = {fmt(self.x[i], 3)} m:")
+            K1.krok("Návrhový moment", "M_{Ed}", "", float(MEd[i]), "kNm")
+            K1.krok("Výška tlačené oblasti", "x", "iterace ΣN = 0", r.x, "mm")
+            K1.krok("Přetvoření horních / dolních vláken", "ε_{c,h}; ε_{c,d}", "",
+                    f"{fmt(r.eps_horni * 1e3)} ‰; {fmt(r.eps_dolni * 1e3)} ‰")
+            K1.krok("Rozhoduje", "", "", r.rozhoduje)
+            rows = [[v["nazev"], fmt(v["z"]), fmt(v["Ap"]), fmt(v["eps0"] * 1e3), fmt(v["eps"] * 1e3),
+                     fmt(v["sigma"]), fmt(v["F"])] for v in r.vrstvy_p]
+            rows += [[v["nazev"] or "výztuž", fmt(v["z"]), fmt(v["As"]), "0", fmt(v["eps"] * 1e3),
+                      fmt(v["sigma"]), fmt(v["F"])] for v in r.vrstvy_s]
+            rows.append(["beton (tlak)", fmt(r.z_Fc), "–", "–", "–", "–", fmt(r.Fc)])
+            K1.tabulka(["Vrstva", "z [mm]", "A [mm²]", "ε0 [‰]", "ε [‰]", "σ [MPa]", "F [kN]"], rows,
+                       "Síly v průřezu na mezi únosnosti")
+            K1.krok("Rameno vnitřních sil", "z", "", r.rameno, "mm")
+            K1.krok("Moment únosnosti", "M_{Rd} = ΣF_{i}·(z_{t} − z_{i})", "", r.MRd, "kNm")
+            self.protokol.pridej_posudek(K1, VysledekPosudku(
+                "Ohybová únosnost", "MSÚ", float(MEd[i]), float(r.MRd), "kNm", float(eta[i]), f.nazev,
+                "MSÚ – základní", float(self.x[i]), odkaz="6.1", skupina="Ohyb"))
+            if not r.konvergence:
+                K1.text("Upozornění: iterace polohy neutrálné osy nekonvergovala – zkontrolujte vstupy.")
+        K1.obrazek("msu_ohyb", "Návrhové momenty a momenty únosnosti po délce nosníku")
+        K1.obrazek("msu_pretvoreni", "Přetvoření a napětí v rozhodujícím průřezu na mezi únosnosti")
+
+    # ------------------------------------------------------------------
+    def _smykova_vyztuz_v(self, xx: float) -> SmykovaVyztuz:
+        for sv in self.smykova:
+            od = sv.od if sv.od is not None else -1e9
+            do = sv.do if sv.do is not None else 1e9
+            if od - 1e-9 <= xx <= do + 1e-9:
+                return sv
+        return SmykovaVyztuz(0.0, 1.0)
+
+    def _msu_smyk(self):
+        b, nn = self.beton, self.n
+        P = self.prurez
+        K = self.protokol.kapitola("Smyková únosnost", 2)
+        K.text("Smyk podle 6.2: v oblastech bez ohybových trhlin (σ_d ≤ f_ctk,0,05/γ_c v MSÚ) únosnost (6.4), "
+               "jinak (6.2a,b). Je-li V_Ed > V_Rd,c, je únosnost dána smykovou výztuží (6.8/6.13) a tlakovou "
+               "diagonálou (6.9/6.14); cot θ je volen v mezích "
+               f"{fmt(nn.cot_theta_min)}–{fmt(nn.cot_theta_max)} pro maximální únosnost. V_Ed zahrnuje "
+               "příznivý účinek sklonu kabelů V_P (γ_P = 1,0).")
+        k_d = 0.5 if nn.kanalky == "ocel" else 1.2
+        zt = P.zt
+        S_t = float(P.staticky_moment(zt)[0])
+        self.msu_V = {}
+        for f in self.faze:
+            if not f.provoz:
+                continue
+            ob = self.komb[f.nazev]["msu"]
+            NP, MP, VP = self._sily_predpeti(f.sigma)
+            NP, VP = nn.gamma_P * NP, nn.gamma_P * VP
+            MP = nn.gamma_P * MP
+            Mg0 = self.zs_g0.M_max
+            res = {}
+            arr = {k: np.full_like(self.x, np.nan) for k in
+                   ("VEd", "VRd", "VRdc", "VRds", "VRdmax", "eta", "eta_max", "dF_eta", "cot")}
+            for i in np.nonzero(self.v_poli)[0]:
+                cand = [ob.V_max[i] + VP[i], ob.V_min[i] + VP[i]]
+                VEd = max(cand, key=abs)
+                # tažená výztuž
+                zs_list = [(z[i], k.Ap) for z, k in zip(self.zk, self.kabely) if z[i] < zt]
+                zs_list += [(v.z, v.As) for v in self.vyztuz if v.z < zt]
+                if not zs_list:
+                    zl = min(z[i] for z in self.zk)
+                    zs_list = [(zl, 0.0)]
+                A_sl = sum(a for _, a in zs_list)
+                z_s = sum(z * a for z, a in zs_list) / A_sl if A_sl > 0 else zs_list[0][0]
+                d = P.h - z_s
+                zr = np.linspace(z_s, min(z_s + 0.9 * d, P.h), 40)
+                bw = float(P.sirka(zr).min())
+                # oslabení kanálky
+                sum_phi = 0.0
+                b_t_red = 0.0
+                if not self.predem:
+                    for k, z in zip(self.kabely, self.zk):
+                        if k.d_kanalku > bw / 8:
+                            lvl = sum(kk.d_kanalku for kk, zz in zip(self.kabely, self.zk)
+                                      if abs(zz[i] - z[i]) < 0.5 * (kk.d_kanalku + k.d_kanalku))
+                            sum_phi = max(sum_phi, lvl)
+                            if abs(z[i] - zt) < k.d_kanalku / 2:
+                                b_t_red = max(b_t_red, lvl)
+                bw_nom = bw - k_d * sum_phi
+                b_t = float(P.sirka(zt)[0]) - k_d * b_t_red
+                # trhliny od ohybu v MSÚ
+                sd = float(self._napeti(0.0, NP[i], MP[i], 0.0, ob.M_max[i], idx=i))
+                sh = float(self._napeti(P.h, NP[i], MP[i], 0.0, ob.M_min[i], idx=i))
+                trhliny = max(sd, sh) > b.fctk005 / b.gamma_c
+                al = 1.0
+                if self.predem:
+                    lx = min(self.x[i], self.L - self.x[i]) * 1000
+                    al = min(lx / (1.2 * self.lpt), 1.0)
+                sv = self._smykova_vyztuz_v(self.x[i])
+                r = smykova_unosnost(b, self.betonarska, abs(VEd), NP[i], self.secL[i, 0], self.secL[i, 2],
+                                     S_t, b_t, bw, bw_nom, d, A_sl, sv.Asw_s, sv.alpha, trhliny,
+                                     nn.cot_theta_min, nn.cot_theta_max, al)
+                res[i] = (r, VEd, sv)
+                arr["VEd"][i] = abs(VEd)
+                arr["VRd"][i] = r.V_Rd
+                arr["VRdc"][i] = r.V_Rd_c
+                arr["VRds"][i] = r.V_Rd_s
+                arr["VRdmax"][i] = r.V_Rd_max
+                arr["cot"][i] = r.cot_theta
+                arr["eta"][i] = abs(VEd) / r.V_Rd if r.V_Rd > 0 else math.inf
+                if abs(VEd) > r.V_Rd_c:
+                    arr["eta_max"][i] = abs(VEd) / r.V_Rd_max
+                else:
+                    lim = 0.5 * bw * d * r.nu1 * b.fcd * 1e-3
+                    arr["eta_max"][i] = abs(VEd) / lim
+                Md = self.msu_M.get(f.nazev)
+                if Md is not None and trhliny and abs(VEd) > r.V_Rd_c:
+                    zlev = 0.9 * d
+                    arr["dF_eta"][i] = (max(ob.M_max[i], 0) * 1e6 / zlev + r.dF_td * 1e3) / (Md["MRd"][i] * 1e6 / zlev)
+            self.msu_V[f.nazev] = dict(arr=arr, res=res)
+            i = int(np.nanargmax(arr["eta"]))
+            r, VEd, sv = res[i]
+            K.text(f"<b>{f.nazev_t}</b> – rozhodující řez x = {fmt(self.x[i], 3)} m:")
+            K.krok("Návrhová posouvající síla (vč. V_P)", "V_{Ed} = V_{Ed,ext} + V_{P}", "", abs(VEd), "kN")
+            K.krok("Napětí od předpětí v těžišti", "σ_{cp} = N_{Ed}/A_{c}", "", r.sigma_cp, "MPa")
+            K.krok("Účinná výška; šířka stojiny; nominální šířka", "d; b_{w}; b_{w,nom}", "",
+                   f"{fmt(r.d)} mm; {fmt(r.bw)} mm; {fmt(r.bw_nom)} mm")
+            if not r.trhliny:
+                K.krok("Oblast bez ohybových trhlin – únosnost betonu",
+                       "V_{Rd,c} = I·b/S·√(f_{ctd}^{2} + α_{l}·σ_{cp}·f_{ctd})",
+                       f"{fmt(r.mezi['I_c'])}·{fmt(r.mezi['b_t'])}/{fmt(r.mezi['S_t'])}·√({fmt(b.fctd)}^{{2}} + "
+                       f"{fmt(r.mezi['alpha_l'])}·{fmt(r.sigma_cp)}·{fmt(b.fctd)})·10^{{−3}}", r.V_Rd_c, "kN", "(6.4)")
+            else:
+                K.krok("Oblast s ohybovými trhlinami – únosnost betonu",
+                       "V_{Rd,c} = [C_{Rd,c}·k·(100·ρ_{l}·f_{ck})^{1/3} + k_{1}·σ_{cp}]·b_{w}·d",
+                       f"[{fmt(0.18 / b.gamma_c)}·{fmt(r.k)}·(100·{fmt(r.rho_l)}·{fmt(b.fck)})^{{1/3}} + 0,15·"
+                       f"{fmt(min(r.sigma_cp, 0.2 * b.fcd))}]·{fmt(r.bw)}·{fmt(r.d)}·10^{{−3}}", r.V_Rd_c, "kN", "(6.2)")
+            K.krok("Smyková výztuž", "A_{sw}/s", f"{fmt(sv.Asw)}/{fmt(sv.s)}", sv.Asw_s, "mm²/mm")
+            K.krok("Součinitel α_cw; redukce ν1; cot θ", "α_{cw}; ν_{1} = 0,6·(1 − f_{ck}/250); cot θ", "",
+                   f"{fmt(r.alpha_cw)}; {fmt(r.nu1)}; {fmt(r.cot_theta)}", "", "(6.6N), (6.11N)")
+            K.krok("Únosnost smykové výztuže", "V_{Rd,s} = (A_{sw}/s)·z·f_{ywd}·(cot θ + cot α)·sin α",
+                   f"{fmt(sv.Asw_s)}·{fmt(r.z)}·{fmt(r.mezi['fywd'])}·{fmt(r.cot_theta)}·10^{{−3}}", r.V_Rd_s, "kN", "(6.8), (6.13)")
+            K.krok("Únosnost tlakové diagonály",
+                   "V_{Rd,max} = α_{cw}·b_{w,nom}·z·ν_{1}·f_{cd}·(cot θ + cot α)/(1 + cot^{2}θ)",
+                   f"{fmt(r.alpha_cw)}·{fmt(r.bw_nom)}·{fmt(r.z)}·{fmt(r.nu1)}·{fmt(b.fcd)}·{fmt(r.cot_theta)}/(1 + {fmt(r.cot_theta)}^{{2}})·10^{{−3}}",
+                   r.V_Rd_max, "kN", "(6.9), (6.14)")
+            K.krok("Smyková únosnost", "V_{Rd} = V_{Rd,c} (V_{Ed} ≤ V_{Rd,c}), jinak min(V_{Rd,s}; V_{Rd,max})",
+                   "", r.V_Rd, "kN")
+            self.protokol.pridej_posudek(K, VysledekPosudku(
+                "Smyková únosnost", "MSÚ", abs(VEd), r.V_Rd, "kN", float(arr["eta"][i]), f.nazev,
+                "MSÚ – základní", float(self.x[i]), poznamka="bez trhlin" if not r.trhliny else "s trhlinami",
+                odkaz="6.2", skupina="Smyk"))
+            j = int(np.nanargmax(arr["eta_max"]))
+            rj = res[j][0]
+            self.protokol.pridej_posudek(K, VysledekPosudku(
+                "Únosnost tlakové diagonály", "MSÚ", float(arr["VEd"][j]),
+                float(arr["VEd"][j] / arr["eta_max"][j]) if arr["eta_max"][j] > 0 else rj.V_Rd_max, "kN",
+                float(arr["eta_max"][j]), f.nazev, "MSÚ – základní", float(self.x[j]), odkaz="6.2.2(6), 6.2.3(3)",
+                skupina="Smyk"))
+            # minimální smyková výztuž
+            sv_min = min((self._smykova_vyztuz_v(self.x[i]) for i in np.nonzero(self.v_poli)[0]),
+                         key=lambda q: q.Asw_s)
+            rho_w = sv_min.Asw_s / (r.bw * math.sin(math.radians(sv_min.alpha))) if r.bw > 0 else 0
+            self.protokol.pridej_posudek(K, VysledekPosudku(
+                "Minimální smyková výztuž", "MSÚ", rho_w * 100, r.rho_w_min * 100, "%",
+                r.rho_w_min / rho_w if rho_w > 0 else math.inf, f.nazev, "", None,
+                poznamka="ρ_w ≥ ρ_w,min = 0,08·√f_ck/f_yk", odkaz="9.2.2(5)", skupina="Smyk"))
+            if np.any(np.isfinite(arr["dF_eta"])):
+                j = int(np.nanargmax(arr["dF_eta"]))
+                self.protokol.pridej_posudek(K, VysledekPosudku(
+                    "Ohyb + přídavná tahová síla ΔF_td", "MSÚ", float(arr["dF_eta"][j]), 1.0, "–",
+                    float(arr["dF_eta"][j]), f.nazev, "MSÚ – základní", float(self.x[j]),
+                    poznamka="(M_Ed/z + ΔF_td)/(M_Rd/z), ΔF_td = 0,5·V_Ed·(cot θ − cot α)", odkaz="6.2.3(7)",
+                    skupina="Ohyb"))
+        K.obrazek("msu_smyk", "Posouvající síly a smykové únosnosti po délce nosníku")
+
+    # ------------------------------------------------------------------
+    def _krehky_lom(self):
+        b, s = self.beton, self.betonarska
+        P = self.prurez
+        K = self.protokol.kapitola("Výztuž pro vyloučení křehkého lomu", 2)
+        K.text("Ověření podle ČSN EN 1992-2, 6.1(109): (a) minimální betonářská výztuž A_s,min = M_rep/(z_s·f_yk), "
+               "kde M_rep je moment na mezi vzniku trhlin s f_ctm bez účinku předpětí; nebo (b) ověření, že při "
+               "redukované ploše předpínací výztuže (tah f_ctm v dolních vláknech při časté kombinaci) je "
+               "únosnost vyšší než účinek časté kombinace. Posudek vyhoví, je-li splněna alespoň jedna podmínka.")
+        f = next(ff for ff in self.faze if ff.provoz)
+        i = self.im
+        Mrep = b.fctm * P.W_d * 1e-6
+        zs_v = [v for v in self.vyztuz if v.z < P.zt]
+        As_prov = sum(v.As for v in zs_v)
+        d_s = P.h - (sum(v.z * v.As for v in zs_v) / As_prov if As_prov > 0 else 0.1 * P.h)
+        z_s = 0.9 * d_s
+        As_min = Mrep * 1e6 / (z_s * s.fyk)
+        K.krok("Moment na mezi vzniku trhlin", "M_{rep} = f_{ctm}·W_{d}", f"{fmt(b.fctm)}·{fmt(P.W_d)}·10^{{−6}}",
+               Mrep, "kNm")
+        K.krok("Minimální plocha výztuže", "A_{s,min} = M_{rep}/(z_{s}·f_{yk})",
+               f"{fmt(Mrep)}·10^{{6}}/({fmt(z_s)}·{fmt(s.fyk)})", As_min, "mm²", "(6.101a)")
+        K.krok("Navržená výztuž v tažené oblasti", "A_{s,prov}", "", As_prov, "mm²")
+        eta_a = As_min / As_prov if As_prov > 0 else math.inf
+        # (b) redukovaná plocha předpětí
+        NP, MP, _ = self._sily_predpeti(f.sigma)
+        Mfr = self.komb[f.nazev]["casta"].M_max[i]
+        Mg0 = self.zs_g0.M_max[i]
+        sP = float(self._napeti(0.0, NP[i], MP[i], 0.0, 0.0, idx=i))
+        sE = float(self._napeti(0.0, 0.0, 0.0, Mg0, Mfr, idx=i))
+        rho = (b.fctm - sE) / sP if sP < 0 else 1.0
+        rho = min(max(rho, 0.0), 1.0)
+        K.krok("Redukce předpětí pro dosažení f_ctm (častá kombinace)", "ρ_{red} = (f_{ctm} − σ_{E})/σ_{P}",
+               f"({fmt(b.fctm)} − {fmt(sE)})/{fmt(sP)}", rho, "")
+        vyz = [VrstvaVyztuze(v.z, v.As, v.nazev) for v in self.vyztuz]
+        vr = self._vrstvy_msu(f, i, redukce=rho)
+        r = ohybova_unosnost(P, b, self.predp, s, vr, vyz)
+        M_ed_fr = Mfr + Mg0
+        K.krok("Únosnost s redukovanou plochou předpětí", "M_{Rd,red}", "", r.MRd, "kNm")
+        K.krok("Moment od časté kombinace", "M_{fr}", "", M_ed_fr, "kNm")
+        eta_b = M_ed_fr / r.MRd if r.MRd > 0 else math.inf
+        if eta_a <= eta_b:
+            v = VysledekPosudku("Křehký lom – min. výztuž", "MSÚ", As_min, As_prov, "mm²", eta_a, f.nazev, "", float(self.x[i]),
+                                poznamka=f"varianta (a); varianta (b): η = {fmt(eta_b)}", odkaz="EN 1992-2 6.1(109)",
+                                skupina="Křehký lom")
+        else:
+            v = VysledekPosudku("Křehký lom – redukované předpětí", "MSÚ", M_ed_fr, r.MRd, "kNm", eta_b, f.nazev,
+                                "častá", float(self.x[i]), poznamka=f"varianta (b); varianta (a): η = {fmt(eta_a)}",
+                                odkaz="EN 1992-2 6.1(109)", skupina="Křehký lom")
+        self.protokol.pridej_posudek(K, v)
