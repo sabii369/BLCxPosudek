@@ -1,6 +1,8 @@
 """Grafické výstupy posudku (matplotlib → PNG)."""
 from __future__ import annotations
 
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 import matplotlib
@@ -30,9 +32,24 @@ plt.rcParams.update({
 })
 
 
-def _uloz(fig, adr: Path, nazev: str) -> str:
-    p = adr / f"{nazev}.png"
+_stav = threading.local()
+
+
+@contextmanager
+def vracet_obrazky():
+    """V tomto kontextu funkce grafů nevykreslují do souboru, ale vrací objekt Figure (pro GUI)."""
+    _stav.vracet = True
+    try:
+        yield
+    finally:
+        _stav.vracet = False
+
+
+def _uloz(fig, adr: Path, nazev: str):
     fig.tight_layout()
+    if getattr(_stav, "vracet", False):
+        return fig
+    p = adr / f"{nazev}.png"
     fig.savefig(p, dpi=130)
     plt.close(fig)
     return p.name

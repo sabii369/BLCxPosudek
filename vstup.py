@@ -38,8 +38,14 @@ def _prurez(d: dict) -> Prurez:
     raise ValueError("Průřez: zadejte 'vrstvy', 'obrys' nebo 'b' a 'h'.")
 
 
+_POVINNE_KABEL = {"parabola": ("z_L", "z_S"), "polygon": ("body",), "primka": ("z_L",)}
+
+
 def _kabel(d: dict, L: float, vyztuz: PredpinaciVyztuz, i: int) -> Kabel:
     typ = d.get("geometrie", "parabola")
+    chybi = [k for k in _POVINNE_KABEL.get(typ, ()) + ("pocet_lan", "sigma_max") if d.get(k) in (None, "", [])]
+    if chybi:
+        raise ValueError(f"Kabel {d.get('nazev', i + 1)} (geometrie {typ}): chybí {', '.join(chybi)}")
     if typ == "parabola":
         g = geometrie_parabola(L, d["z_L"], d["z_S"], d.get("z_P", d["z_L"]), d.get("x_S"))
         popis = f"parabola z = {d['z_L']} / {d['z_S']} / {d.get('z_P', d['z_L'])} mm"

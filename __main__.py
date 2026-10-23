@@ -12,11 +12,15 @@ from .vstup import nacti_model
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pb_posudek",
                                  description="Posudek nosníku z předpjatého betonu (ČSN EN 1992-1-1)")
-    ap.add_argument("vstup", help="vstupní soubor .toml nebo .json")
+    ap.add_argument("vstup", nargs="?", help="vstupní soubor .toml nebo .json (bez argumentu se otevře GUI)")
+    ap.add_argument("--gui", action="store_true", help="otevřít grafické rozhraní")
     ap.add_argument("-o", "--vystup", default="vystup", help="výstupní adresář (výchozí: vystup)")
     ap.add_argument("--bez-vlozenych-obrazku", action="store_true",
                     help="obrázky v HTML odkazovat do složky místo vložení")
     a = ap.parse_args(argv)
+    if a.gui or a.vstup is None:
+        from .gui import main as gui_main
+        return gui_main([a.vstup] if a.vstup else [])
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
     model = nacti_model(a.vstup)
