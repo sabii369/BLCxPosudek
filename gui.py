@@ -29,11 +29,12 @@ from .model import Nastaveni
 from .protokol import fmt
 from .toml_zapis import dumps as toml_dumps
 from .vstup import model_ze_slovniku, nacti_soubor
+from .zatizeni import DRUHY_KOMBINACI
 
 TRIDY_BETONU = ["C20/25", "C25/30", "C30/37", "C35/45", "C40/50", "C45/55", "C50/60", "C55/67",
                 "C60/75", "C70/85", "C80/95", "C90/105"]
 
-PRIKLAD = Path(__file__).resolve().parents[1] / "examples" / "nosnik_I_20m_dodatecne.toml"
+PRIKLAD = Path(__file__).resolve().parents[1] / "examples" / "nosnik_I_20m_kombinace.toml"
 
 VYCHOZI = {
     "projekt": {"nazev": "Nový nosník", "popis": "", "autor": ""},
@@ -48,7 +49,11 @@ VYCHOZI = {
     "smykova_vyztuz": [{"Asw": 157, "s": 150, "alpha": 90}],
     "prostredi": {"RH": 70, "t_s": 1},
     "casova_osa": {"t0": 7, "t_provoz": 120, "t_konec": 36500},
-    "zatizeni": {"stale": [{"nazev": "Ostatní stálé", "q": 10.0, "t": 60}],
+    "zatizeni": {"zpusob": "kombinace", "obsahuje_vlastni_tihu": False, "t_vneseni": 60,
+                 "kombinace": [{"druh": "6.10a", "q": 21.9}, {"druh": "6.10b", "q": 23.5},
+                               {"druh": "char", "q": 16.0}, {"druh": "casta", "q": 14.0},
+                               {"druh": "kvazistala", "q": 12.4}],
+                 "stale": [{"nazev": "Ostatní stálé", "q": 10.0, "t": 60}],
                  "promenne": [{"nazev": "Užitné", "q": 8.0, "psi0": 0.7, "psi1": 0.5, "psi2": 0.3, "gamma": 1.5}]},
     "posouzeni": {},
 }
@@ -416,6 +421,181 @@ class Graf(ttk.Frame):
         del old
 
 
+KOMB_ZALOZKY = [("6.10a", "MSÚ 6.10a"), ("6.10b", "MSÚ 6.10b"), ("char", "Charakteristická"),
+                ("casta", "Častá"), ("kvazistala", "Kvazistálá"), ("6.10", "MSÚ 6.10 (místo 6.10a/b)")]
+SLOUPCE_KOMB = ["x", "M_max", "M_min", "V_max", "V_min"]
+
+
+def _parsuj_schranku(text: str) -> list[list[float]]:
+    """Řádky čísel ze schránky (Excel, SCIA – tabulátor, středník nebo mezery; desetinná čárka i tečka)."""
+    radky = []
+    for ln in text.splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        if "\t" in ln:
+            casti = ln.split("\t")
+        elif ";" in ln:
+            casti = ln.split(";")
+        else:
+            casti = ln.split()
+        try:
+            radky.append([float(c.strip().replace("\u202f", "").replace(" ", "").replace(",", "."))
+                          for c in casti if c.strip()])
+        except ValueError:
+            continue  # záhlaví nebo text
+    return radky
+
+
+class KombinacePanel(ttk.Frame):
+    """Přímé zadání kombinací: pro každou kombinaci spojité zatížení q nebo tabulka vnitřních sil."""
+
+    def __init__(self, master, pri_zmene=None, **kw):
+        super().__init__(master, **kw)
+        self.pri_zmene = pri_zmene or (lambda: None)
+        hl = ttk.Frame(self)
+        hl.pack(fill="x", pady=(0, 4))
+        self.var_g0 = tk.BooleanVar(value=False)
+        ttk.Checkbutton(hl, text="Kombinace obsahují vlastní tíhu nosníku g0 (program ji odečte)",
+                        variable=self.var_g0, command=self.pri_zmene).pack(side="left")
+        ttk.Label(hl, text="   Kvazistálá kombinace působí od stáří t [dny]:").pack(side="left")
+        self.var_tv = tk.StringVar()
+        ttk.Entry(hl, textvariable=self.var_tv, width=8).pack(side="left", padx=4)
+        ttk.Label(hl, text="(prázdné = uvedení do provozu)", foreground="#52514e").pack(side="left")
+        self.var_tv.trace_add("write", lambda *_: self.pri_zmene())
+        self.nb = ttk.Notebook(self)
+        self.nb.pack(fill="both", expand=True)
+        self.karty: dict[str, dict] = {}
+        for druh, nazev in KOMB_ZALOZKY:
+            fr = ttk.Frame(self.nb, padding=6)
+            self.nb.add(fr, text=nazev)
+            rez = tk.StringVar(value="q")
+            r = ttk.Frame(fr)
+            r.pack(fill="x")
+            ttk.Label(r, text="Zadání:").pack(side="left")
+            ram_q = ttk.Frame(fr)
+            ram_t = ttk.Frame(fr)
+            k = dict(rezim=rez, ram_q=ram_q, ram_t=ram_t)
+            for val, txt in (("q", "náhradní spojité zatížení q"), ("tabulka", "tabulka vnitřních sil M, V")):
+                ttk.Radiobutton(r, text=txt, value=val, variable=rez,
+                                command=lambda d=druh: self._prepni(d)).pack(side="left", padx=4)
+            k["fq"] = Formular(ram_q, [("q", "q [kN/m]", "optfloat", None), ("od", "od x [m]", "optfloat", None),
+                                       ("do", "do x [m]", "optfloat", None)], sloupcu=3, pri_zmene=self.pri_zmene)
+            k["fq"].pack(fill="x", pady=4)
+            br = ttk.Frame(ram_q)
+            br.pack(fill="x")
+            ttk.Label(br, text="Osamělá břemena F:x; … [kN:m]").pack(side="left")
+            k["bremena"] = tk.StringVar()
+            ttk.Entry(br, textvariable=k["bremena"], width=50).pack(side="left", padx=4)
+            k["bremena"].trace_add("write", lambda *_: self.pri_zmene())
+            ttk.Label(ram_q, foreground="#52514e", text=(
+                "q působí na celé délce nosníku (není-li zadáno od–do); vnitřní síly se spočtou na prostém nosníku "
+                "s převislými konci.")).pack(anchor="w", pady=4)
+            k["tab"] = Tabulka(ram_t, [
+                ("x", "x [m]", 70, "float", None), ("M_max", "M_max [kNm]", 95, "float", None),
+                ("M_min", "M_min [kNm]", 95, "optfloat", None), ("V_max", "V_max [kN]", 95, "optfloat", None),
+                ("V_min", "V_min [kN]", 95, "optfloat", None)], pri_zmene=self.pri_zmene, vyska=8)
+            k["tab"].pack(fill="both", expand=True)
+            bt = ttk.Frame(ram_t)
+            bt.pack(fill="x", pady=(4, 0))
+            ttk.Button(bt, text="Vložit ze schránky (Excel / SCIA)",
+                       command=lambda d=druh: self._vloz_schranku(d)).pack(side="left")
+            ttk.Button(bt, text="Vymazat tabulku", command=lambda d=druh: self._vymaz(d)).pack(side="left", padx=4)
+            ttk.Label(bt, foreground="#52514e", text=(
+                "sloupce: x, M  |  x, M, V  |  x, M_max, M_min, V_max  |  x, M_max, M_min, V_max, V_min")
+                      ).pack(side="left", padx=6)
+            self.karty[druh] = k
+            self._prepni(druh)
+
+    def _prepni(self, druh: str):
+        k = self.karty[druh]
+        k["ram_q"].pack_forget()
+        k["ram_t"].pack_forget()
+        (k["ram_q"] if k["rezim"].get() == "q" else k["ram_t"]).pack(fill="both", expand=True)
+        self.pri_zmene()
+
+    def _vymaz(self, druh: str):
+        self.karty[druh]["tab"].nastav([])
+        self.pri_zmene()
+
+    def _vloz_schranku(self, druh: str):
+        try:
+            text = self.clipboard_get()
+        except tk.TclError:
+            messagebox.showwarning("Schránka", "Schránka neobsahuje text.")
+            return
+        radky = _parsuj_schranku(text)
+        if not radky:
+            messagebox.showwarning("Schránka", "Ve schránce nejsou číselné řádky.")
+            return
+        n = max(len(r) for r in radky)
+        mapa = {2: ["x", "M_max"], 3: ["x", "M_max", "V_max"], 4: ["x", "M_max", "M_min", "V_max"]}.get(
+            n, SLOUPCE_KOMB)
+        data = [{c: v for c, v in zip(mapa, r)} for r in radky if len(r) >= 2]
+        self.karty[druh]["tab"].nastav(data)
+        self.karty[druh]["rezim"].set("tabulka")
+        self._prepni(druh)
+        messagebox.showinfo("Schránka", f"Vloženo {len(data)} řádků, sloupce: {', '.join(mapa[:n])}.")
+
+    def nastav(self, zat: dict):
+        self.var_g0.set(bool(zat.get("obsahuje_vlastni_tihu", False)))
+        self.var_tv.set(_na_text(zat.get("t_vneseni")))
+        kv = {k.get("druh"): k for k in zat.get("kombinace", [])}
+        for druh, k in self.karty.items():
+            d = kv.get(druh, {})
+            if d.get("x") is not None:
+                k["rezim"].set("tabulka")
+                n = len(d["x"])
+                k["tab"].nastav([{c: d[c][i] for c in SLOUPCE_KOMB if d.get(c) is not None} for i in range(n)])
+                k["fq"].nastav({})
+                k["bremena"].set("")
+            else:
+                k["rezim"].set("q")
+                k["fq"].nastav(d)
+                k["bremena"].set(_pary_na_text(d.get("bremena")))
+                k["tab"].nastav([])
+            self._prepni(druh)
+
+    def ziskej(self) -> dict:
+        out = {"obsahuje_vlastni_tihu": self.var_g0.get()}
+        if self.var_tv.get().strip():
+            try:
+                out["t_vneseni"] = float(_cislo(self.var_tv.get()))
+            except ValueError:
+                raise ValueError(f"Čas působení kvazistálé kombinace: neplatné číslo „{self.var_tv.get()}“")
+        komb = []
+        for druh, nazev in KOMB_ZALOZKY:
+            k = self.karty[druh]
+            if k["rezim"].get() == "tabulka":
+                try:
+                    radky = k["tab"].ziskej()
+                except ValueError as e:
+                    raise ValueError(f"Kombinace {nazev}: {e}")
+                if not radky:
+                    continue
+                d = {"druh": druh}
+                for c in SLOUPCE_KOMB:
+                    vals = [r.get(c) for r in radky]
+                    if all(v is None for v in vals):
+                        continue
+                    if any(v is None for v in vals):
+                        raise ValueError(f"Kombinace {nazev}: sloupec {c} je vyplněn jen částečně.")
+                    d[c] = vals
+                komb.append(d)
+            else:
+                d = {"druh": druh, **k["fq"].ziskej()}
+                try:
+                    br = _text_na_pary(k["bremena"].get())
+                except ValueError:
+                    raise ValueError(f"Kombinace {nazev}: neplatná břemena „{k['bremena'].get()}“ (zápis F:x; F:x)")
+                if br:
+                    d["bremena"] = br
+                if "q" in d or br:
+                    komb.append(d)
+        out["kombinace"] = komb
+        return out
+
+
 # ---------------------------------------------------------------------------
 # hlavní okno
 # ---------------------------------------------------------------------------
@@ -729,6 +909,21 @@ class Aplikace(tk.Tk):
                                    ("t_provoz", "Uvedení do provozu [dny]", "float", None),
                                    ("t_konec", "Konec životnosti [dny]", "float", None)])
         self.f_cas.pack(fill="x")
+        rf = ttk.Frame(z)
+        rf.pack(fill="x", pady=(8, 2))
+        ttk.Label(rf, text="Vnější zatížení:", style="Nadpis.TLabel").pack(side="left")
+        self.zpusob_zat = tk.StringVar(value="kombinace")
+        for val, txt in (("kombinace", "přímo kombinacemi (6.10a, 6.10b, charakteristická, častá, kvazistálá)"),
+                         ("zatezovaci_stavy", "zatěžovacími stavy s automatickými kombinacemi")):
+            ttk.Radiobutton(rf, text=txt, value=val, variable=self.zpusob_zat,
+                            command=self._prepni_zatizeni).pack(side="left", padx=6)
+        self.ram_zat = ttk.Frame(z)
+        self.ram_zat.pack(fill="both", expand=True)
+        self.p_komb = KombinacePanel(self.ram_zat, pri_zmene=self._naplanuj_nahled)
+        self.g_komb = Graf(self.p_komb, figsize=(9, 2.6))
+        self.g_komb.pack(fill="both", expand=True, pady=(6, 0))
+        self.ram_zs = ttk.Frame(self.ram_zat)
+        z = self.ram_zs
         lf = ttk.LabelFrame(z, text="Stálá zatížení (vlastní tíha nosníku se počítá automaticky)", padding=6)
         lf.pack(fill="both", expand=True, pady=6)
         self.t_stale = Tabulka(lf, [
@@ -750,6 +945,15 @@ class Aplikace(tk.Tk):
             ("psi2", "ψ2", 45, "optfloat", None), ("gamma", "γ_Q", 50, "optfloat", None),
             ("skupina", "Skupina", 80, "str", None)], vyska=5)
         self.t_prom.pack(fill="both", expand=True)
+
+    def _prepni_zatizeni(self):
+        self.p_komb.pack_forget()
+        self.ram_zs.pack_forget()
+        if self.zpusob_zat.get() == "kombinace":
+            self.p_komb.pack(fill="both", expand=True)
+        else:
+            self.ram_zs.pack(fill="both", expand=True)
+        self._naplanuj_nahled()
 
     def _zalozka_nastaveni(self):
         f = self._skrol("6  Nastavení posouzení")
@@ -858,6 +1062,9 @@ class Aplikace(tk.Tk):
                 r.pop("pohyblive")
             prom.append(r)
         self.t_prom.nastav(prom)
+        self.p_komb.nastav(zat)
+        self.zpusob_zat.set(zat.get("zpusob", "kombinace" if zat.get("kombinace") else "zatezovaci_stavy"))
+        self._prepni_zatizeni()
         self.f_nastaveni.nastav(d.get("posouzeni", {}))
         self._prepni_prurez()
         self._info_materialy()
@@ -883,7 +1090,11 @@ class Aplikace(tk.Tk):
             if sily:
                 r["pohyblive"] = {"sily": sily, "rozestupy": roz or []}
             prom.append(r)
-        d["zatizeni"] = {**d.get("zatizeni", {}), "stale": self.t_stale.ziskej(), "promenne": prom}
+        zat = {k: v for k, v in d.get("zatizeni", {}).items()
+               if k not in ("obsahuje_vlastni_tihu", "t_vneseni", "kombinace")}
+        zat.update({"zpusob": self.zpusob_zat.get(), **self.p_komb.ziskej(),
+                    "stale": self.t_stale.ziskej(), "promenne": prom})
+        d["zatizeni"] = zat
         d["posouzeni"] = self.f_nastaveni.ziskej()
         if not d["kabel"]:
             raise ValueError("Zadejte alespoň jeden kabel.")
@@ -977,6 +1188,35 @@ class Aplikace(tk.Tk):
         ax.legend(ncol=max(len(m.kabely), 1), fontsize=8, loc="upper center")
         fig.tight_layout()
         self.g_kabely.canvas.draw_idle()
+        self._nahled_kombinaci(m)
+
+    def _nahled_kombinaci(self, m):
+        fig = self.g_komb.fig
+        fig.clear()
+        if not m.kombinace_vstup:
+            self.g_komb.canvas.draw_idle()
+            return
+        axm, axv = fig.add_subplot(121), fig.add_subplot(122)
+        xa = (m.L - m.L0) / 2
+        x = np.union1d(np.linspace(0, m.L, 201), [xa, xa + m.L0])
+        for j, k in enumerate(m.kombinace_vstup):
+            try:
+                o = k.obalka(x, m.L, xa, xa + m.L0)
+            except Exception:  # noqa: BLE001
+                continue
+            c = grafy.C[j % 8]
+            axm.plot(x, o.M_max, color=c, lw=1.6, label=DRUHY_KOMBINACI.get(k.druh, k.druh))
+            if not np.allclose(o.M_min, o.M_max):
+                axm.plot(x, o.M_min, color=c, lw=1.0, ls="--")
+            axv.plot(x, o.V_max, color=c, lw=1.6)
+            if not np.allclose(o.V_min, o.V_max):
+                axv.plot(x, o.V_min, color=c, lw=1.0, ls="--")
+        axm.invert_yaxis()
+        axm.set(title="M ze zadaných kombinací [kNm]", xlabel="x [m]")
+        axv.set(title="V ze zadaných kombinací [kN]", xlabel="x [m]")
+        axm.legend(fontsize=7, ncol=2)
+        fig.tight_layout()
+        self.g_komb.canvas.draw_idle()
 
     # --- soubory ----------------------------------------------------------
     def novy(self):

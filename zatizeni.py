@@ -238,6 +238,78 @@ def kombinace(stale: list[ZatezovaciStav], promenne: list[ZatezovaciStav], druh:
     raise ValueError(druh)
 
 
+#: druhy přímo zadávaných kombinací
+DRUHY_KOMBINACI = {
+    "6.10a": "MSÚ (6.10a)",
+    "6.10b": "MSÚ (6.10b)",
+    "6.10": "MSÚ (6.10)",
+    "char": "charakteristická",
+    "casta": "častá",
+    "kvazistala": "kvazistálá",
+}
+
+
+@dataclass
+class KombinaceVstup:
+    """Kombinace vnějšího zatížení zadaná přímo (návrhové / provozní hodnoty).
+
+    Zadání buď náhradním spojitým zatížením q [kN/m] (+ osamělá břemena [(F, x)]),
+    nebo tabulkou vnitřních sil x [m], M_max/M_min [kNm], V_max/V_min [kN]
+    (chybí-li M_min / V_min, berou se rovny M_max / V_max). Kladný moment táhne dolní vlákna,
+    V = dM/dx (kladná v levé části prostého nosníku).
+    """
+
+    druh: str
+    q: float | None = None
+    od: float | None = None
+    do: float | None = None
+    bremena: list[tuple[float, float]] = field(default_factory=list)
+    x: list[float] | None = None
+    M_max: list[float] | None = None
+    M_min: list[float] | None = None
+    V_max: list[float] | None = None
+    V_min: list[float] | None = None
+    nazev: str = ""
+    otoceno_V: bool = False
+
+    @property
+    def popis(self) -> str:
+        if self.x is not None:
+            return f"tabulka vnitřních sil ({len(self.x)} bodů)"
+        parts = []
+        if self.q is not None:
+            parts.append(f"q = {self.q:g} kN/m")
+        for F, p in self.bremena:
+            parts.append(f"F = {F:g} kN v x = {p:g} m")
+        return "; ".join(parts).replace(".", ",")
+
+    def obalka(self, x: np.ndarray, L: float, xa: float, xb: float) -> "Obalka":
+        if self.x is not None:
+            tx = np.asarray(self.x, float)
+            if self.M_max is None:
+                raise ValueError(f"Kombinace {self.druh}: chybí M_max.")
+            o = np.argsort(tx)
+            tx = tx[o]
+            Mx = np.asarray(self.M_max, float)[o]
+            Mn = np.asarray(self.M_min, float)[o] if self.M_min is not None else Mx
+            Vx = np.asarray(self.V_max, float)[o] if self.V_max is not None else np.zeros_like(tx)
+            Vn = np.asarray(self.V_min, float)[o] if self.V_min is not None else Vx
+            # kontrola znaménkové konvence V = dM/dx (např. výstup ze SCIA má opačné znaménko)
+            if len(tx) >= 3 and np.ptp(Vx) > 0:
+                dM = np.gradient(Mx, tx)
+                if float(np.dot(dM, Vx)) < 0:
+                    Vx, Vn = -Vn, -Vx
+                    self.otoceno_V = True
+            return Obalka(np.interp(x, tx, Mx), np.interp(x, tx, Mn), np.interp(x, tx, Vx),
+                          np.interp(x, tx, Vn))
+        zs = ZatezovaciStav(self.druh, "stale",
+                            rovnomerne=[(self.q, self.od if self.od is not None else 0.0,
+                                         self.do if self.do is not None else L)] if self.q else [],
+                            bremena=list(self.bremena))
+        zs.spocitej(x, L, xa, xb)
+        return Obalka(zs.M_max, zs.M_min, zs.V_max, zs.V_min)
+
+
 NAZVY_KOMBINACI = {
     "char": "charakteristická",
     "casta": "častá",

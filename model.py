@@ -17,7 +17,8 @@ from .materialy import Beton, BetonarskaVyztuz, PredpinaciVyztuz
 from .msu import (VrstvaPredpeti, VrstvaVyztuze, ohybova_unosnost, smykova_unosnost)
 from .protokol import Kapitola, Protokol, VysledekPosudku, fmt
 from .prurez import Prurez
-from .zatizeni import NAZVY_KOMBINACI, Obalka, ZatezovaciStav, kombinace
+from .zatizeni import (DRUHY_KOMBINACI, NAZVY_KOMBINACI, KombinaceVstup, Obalka, ZatezovaciStav,
+                       kombinace)
 from .ztraty import ztrata_dlouhodoba_546, ztrata_pokluzem, ztrata_trenim
 
 
@@ -77,6 +78,7 @@ class Faze:
     provoz: bool
     stale: list[ZatezovaciStav]
     sigma: list[np.ndarray] = field(default_factory=list)   # σ_pm,t,i(x)
+    popis: str = ""
     ztraty: dict = field(default_factory=dict)
 
     @property
@@ -98,7 +100,8 @@ class NosnikPB:
                  n_rezu: int = 41, charakteristiky: str = "brutto",
                  pocet_napinani: int | None = None, relaxace_pred_uvolnenim_h: float | None = None,
                  predem_eta_p1: float = 3.2, predem_alpha1: float = 1.25,
-                 predem_alpha2: float = 0.19):
+                 predem_alpha2: float = 0.19, kombinace_vstup: list[KombinaceVstup] | None = None,
+                 kombinace_vcetne_g0: bool = False, t_vneseni: float | None = None):
         self.beton = beton
         self.predp = predpinaci
         self.betonarska = betonarska
@@ -116,6 +119,10 @@ class NosnikPB:
         self.t_konec = t_konec
         self.stale_vstup = stale or []
         self.promenne = promenne or []
+        self.kombinace_vstup = kombinace_vstup or []
+        self.rezim_kombinace = bool(self.kombinace_vstup)
+        self.kombinace_vcetne_g0 = kombinace_vcetne_g0
+        self.t_vneseni = t_vneseni if t_vneseni is not None else t_provoz
         self.n = nastaveni or Nastaveni()
         self.projekt = projekt or {}
         self.n_rezu = n_rezu
@@ -302,6 +309,10 @@ class NosnikPB:
                             rovnomerne=[(self.g0, 0.0, L)], gamma=self.n.gamma_G,
                             gamma_inf=self.n.gamma_G_inf)
         self.zs_g0 = g0
+        if self.rezim_kombinace:
+            g0.spocitej(x, L, self.xa, self.xb)
+            self._zatizeni_kombinace()
+            return
         for z in [g0] + self.stale_vstup + self.promenne:
             if z.druh == "stale" and z.t is None:
                 z.t = self.t0
@@ -318,6 +329,58 @@ class NosnikPB:
         K.text("Proměnná zatížení se stejnou skupinou působí současně (např. LM1 = TS + UDL); "
                "spojitá proměnná zatížení jsou umístěna do nepříznivých částí příčinkových čar, "
                "pohyblivé soustavy břemen jsou posouvány po celé délce nosníku.")
+
+    def _zatizeni_kombinace(self):
+        """Vnější zatížení zadané přímo kombinacemi (bez vlastní tíhy nosníku g0)."""
+        nn = self.n
+        kv = {k.druh: k for k in self.kombinace_vstup}
+        nezname = [d for d in kv if d not in DRUHY_KOMBINACI]
+        if nezname:
+            raise ValueError(f"Neznámý druh kombinace: {', '.join(nezname)} "
+                             f"(povolené: {', '.join(DRUHY_KOMBINACI)})")
+        chybi = [DRUHY_KOMBINACI[d] for d in ("char", "casta", "kvazistala") if d not in kv]
+        if not any(d in kv for d in ("6.10a", "6.10b", "6.10")):
+            chybi.append("MSÚ (6.10a / 6.10b nebo 6.10)")
+        if chybi:
+            raise ValueError("Chybí kombinace: " + ", ".join(chybi))
+        if self.t_vneseni < self.t0:
+            raise ValueError("Čas vnesení stálých zatížení nesmí být menší než t0.")
+        fak_g0 = {"char": 1.0, "casta": 1.0, "kvazistala": 1.0, "6.10a": nn.gamma_G,
+                  "6.10": nn.gamma_G, "6.10b": nn.xi * nn.gamma_G}
+        g = self.zs_g0
+        self.kv: dict[str, Obalka] = {}
+        for druh, k in kv.items():
+            o = k.obalka(self.x, self.L, self.xa, self.xb)
+            if self.kombinace_vcetne_g0:
+                f = fak_g0[druh]
+                o = Obalka(o.M_max - f * g.M_max, o.M_min - f * g.M_max, o.V_max - f * g.V_max,
+                           o.V_min - f * g.V_max)
+            self.kv[druh] = o
+        K = self.protokol.kapitola("Zatížení a časová osa", 2)
+        K.text("Vnější zatížení je zadáno přímo kombinacemi podle ČSN EN 1990 (vnitřní síly prostého nosníku). "
+               "Vlastní tíhu nosníku g0 = " + fmt(self.g0) + " kN/m počítá program samostatně, protože působí "
+               "již při vnesení předpětí; v MSÚ se přičítá s γ_G = " + fmt(nn.gamma_G) + " (6.10a, 6.10) a "
+               "ξ·γ_G = " + fmt(nn.xi * nn.gamma_G) + " (6.10b). "
+               + ("Zadané kombinace vlastní tíhu nosníku obsahují – její podíl se od nich odečítá."
+                  if self.kombinace_vcetne_g0 else "Zadané kombinace vlastní tíhu nosníku neobsahují."))
+        K.text(f"Kvazistálá kombinace (bez g0) je uvažována jako dlouhodobě působící od stáří betonu "
+               f"t = {fmt(self.t_vneseni, 0)} dní (dotvarování, ztráty předpětí, průhyb). Charakteristická, častá "
+               "a MSÚ kombinace se posuzují od uvedení do provozu.")
+        im = self.im
+        rows = []
+        for druh in DRUHY_KOMBINACI:
+            if druh not in kv:
+                continue
+            o = self.kv[druh]
+            rows.append([DRUHY_KOMBINACI[druh],
+                         kv[druh].popis + (" – znaménko V otočeno" if kv[druh].otoceno_V else ""),
+                         fmt(o.M_max[im]), fmt(float(o.M_max.max())), fmt(float(o.M_min.min())),
+                         fmt(float(o.V_max.max())), fmt(float(o.V_min.min()))])
+        K.tabulka(["Kombinace", "Zadání", "M uprostřed", "M_max", "M_min", "V_max", "V_min"], rows,
+                  "Vnitřní síly od zadaných kombinací bez vlastní tíhy nosníku [kNm, kN]")
+        if any(k.otoceno_V for k in kv.values()):
+            K.text("U kombinací označených „znaménko V otočeno“ neodpovídalo znaménko posouvající síly konvenci "
+                   "V = dM/dx (např. výstup ze SCIA) – posouvající síly byly převráceny.")
 
     @staticmethod
     def _popis_zs(z: ZatezovaciStav) -> str:
@@ -527,38 +590,55 @@ class NosnikPB:
         # fáze
         faze = [Faze("Vnesení předpětí", self.t0, False, [self.zs_g0])]
         casy = sorted({z.t for z in self.stale_vstup if z.t > self.t0} | {self.t_provoz, self.t_konec})
+        if self.rezim_kombinace:
+            casy = sorted({self.t_provoz, self.t_konec} | ({self.t_vneseni} if self.t_vneseni > self.t0 else set()))
         for t in casy:
             aktivni = [self.zs_g0] + [z for z in self.stale_vstup if z.t <= t]
             if t == self.t_konec:
                 nazev = "Konec životnosti"
             elif t == self.t_provoz:
                 nazev = "Uvedení do provozu"
+            elif self.rezim_kombinace:
+                nazev = "Vnesení ostatních stálých zatížení"
             else:
                 nazev = "Vnesení: " + ", ".join(z.nazev for z in self.stale_vstup if z.t == t)
             faze.append(Faze(nazev, t, t >= self.t_provoz, aktivni))
+            if self.rezim_kombinace:
+                faze[-1].popis = "g0" + (" + kvazistálá kombinace" if t >= self.t_vneseni else "")
         # zatížení v čase t0 pro předpětí mají vliv i stálá zatížení s t <= t0
         faze[0].stale = [self.zs_g0] + [z for z in self.stale_vstup if z.t <= self.t0]
+        if self.rezim_kombinace:
+            faze[0].popis = "g0" + (" + kvazistálá kombinace" if self.t_vneseni <= self.t0 else "")
         self.faze = faze
         K.tabulka(["Fáze", "Stáří betonu t [dny]", "Působící stálá zatížení", "Proměnná zatížení"],
-                  [[f.nazev, fmt(f.t, 0), ", ".join(z.nazev for z in f.stale), "ano" if f.provoz else "ne"]
-                   for f in faze], "Časová osa výstavby a provozu")
+                  [[f.nazev, fmt(f.t, 0), f.popis or ", ".join(z.nazev for z in f.stale),
+                    "ano" if f.provoz else "ne"] for f in faze], "Časová osa výstavby a provozu")
 
         # zatěžovací kroky pro dotvarování
         Mg0 = self.zs_g0.M_max
         NP0, MP0, _ = self._sily_predpeti(self.sig_pm0)
-        kroky = []  # (t_k, nazev, [σ_c,i(x)] )
-        s0 = [self._napeti(z, NP0, MP0, Mg0, 0.0) for z in self.zk]
-        for zz in self.stale_vstup:
-            if zz.t <= self.t0:
-                s0 = [s + self._napeti(z, 0, 0, 0, zz.M_max) for s, z in zip(s0, self.zk)]
-        kroky.append((self.t0, "předpětí + stálá zatížení při t0", s0))
-        for zz in self.stale_vstup:
-            if zz.t > self.t0:
-                kroky.append((zz.t, zz.nazev, [self._napeti(z, 0, 0, 0, zz.M_max) for z in self.zk]))
-        Mqp = sum((z.psi2 * z.M_max for z in self.promenne), np.zeros_like(x))
-        if np.any(Mqp != 0):
-            kroky.append((self.t_provoz, "kvazistálá část proměnných zatížení",
-                          [self._napeti(z, 0, 0, 0, Mqp) for z in self.zk]))
+        # zatěžovací kroky: (t_k, název, [σ_c,i(x)] v úrovni kabelů, vnější moment M_k(x) mimo g0)
+        kroky = []
+        if self.rezim_kombinace:
+            M0 = self.kv["kvazistala"].M_max if self.t_vneseni <= self.t0 else np.zeros_like(x)
+            kroky.append((self.t0, "předpětí + vlastní tíha nosníku",
+                          [self._napeti(z, NP0, MP0, Mg0, M0) for z in self.zk], M0))
+            if self.t_vneseni > self.t0:
+                Mq = self.kv["kvazistala"].M_max
+                kroky.append((self.t_vneseni, "kvazistálá kombinace",
+                              [self._napeti(z, 0, 0, 0, Mq) for z in self.zk], Mq))
+        else:
+            M0 = sum((zz.M_max for zz in self.stale_vstup if zz.t <= self.t0), np.zeros_like(x))
+            kroky.append((self.t0, "předpětí + stálá zatížení při t0",
+                          [self._napeti(z, NP0, MP0, Mg0, M0) for z in self.zk], M0))
+            for zz in self.stale_vstup:
+                if zz.t > self.t0:
+                    kroky.append((zz.t, zz.nazev, [self._napeti(z, 0, 0, 0, zz.M_max) for z in self.zk],
+                                  zz.M_max))
+            Mqp = sum((z.psi2 * z.M_max for z in self.promenne), np.zeros_like(x))
+            if np.any(Mqp != 0):
+                kroky.append((self.t_provoz, "kvazistálá část proměnných zatížení",
+                              [self._napeti(z, 0, 0, 0, Mqp) for z in self.zk], Mqp))
         self.kroky_dotv = kroky
 
         # nelineární dotvarování od předpětí
@@ -620,7 +700,7 @@ class NosnikPB:
             Kd.text(f"k_σ > 0,45 → uvažuje se nelineární dotvarování od předpětí: φ_nl = φ·exp[1,5·(k_σ − 0,45)] "
                     f"= φ·{fmt(math.exp(1.5 * (k_sig - 0.45)))}.")
         rows = []
-        for t_k, naz, _ in kroky:
+        for t_k, naz, _, _ in kroky:
             rows.append([naz, fmt(t_k, 0)] + [fmt(self._phi(f.t, t_k, first=(t_k == self.t0)))
                                                for f in faze])
         Kd.tabulka(["Zatěžovací krok", "t_k [dny]"] + [f"φ({fmt(f.t, 0)}, t_k)" for f in faze], rows,
@@ -695,7 +775,7 @@ class NosnikPB:
                 d_pr = p.relaxace(s_pm0, t_h)
             d_pr = np.maximum(d_pr, 0.0) * np.ones_like(x)
             creep = np.zeros_like(x)
-            for t_k, _, sk in self.kroky_dotv:
+            for t_k, _, sk, _ in self.kroky_dotv:
                 if t_k <= t:
                     creep += self._phi(t, t_k, first=(t_k == self.t0)) * sk[ik]
             loss, mezi = ztrata_dlouhodoba_546(eps, p.Ep, d_pr, b.Ecm, phi0, 0.0, self.Ap, P.A, P.I,
@@ -719,13 +799,22 @@ class NosnikPB:
         n = len(self.x)
         nn = self.n
         K = self.protokol.kapitola("Vnitřní síly")
-        K.text("Vnitřní síly od zatížení jsou spočteny na prostém nosníku pomocí příčinkových čar. Kombinace "
-               "podle ČSN EN 1990 (6.14b) charakteristická, (6.15b) častá, (6.16b) kvazistálá a pro MSÚ "
-               + ("(6.10a) a (6.10b)" if nn.kombinace_msu == "6.10ab" else "(6.10)") + ".")
+        if self.rezim_kombinace:
+            K.text("Vnitřní síly od vnějšího zatížení jsou převzaty ze zadaných kombinací; vlastní tíha nosníku "
+                   "g0 je přičtena programem. Před uvedením do provozu působí (od času vnesení) kvazistálá "
+                   "kombinace jako stálé zatížení.")
+        else:
+            K.text("Vnitřní síly od zatížení jsou spočteny na prostém nosníku pomocí příčinkových čar. Kombinace "
+                   "podle ČSN EN 1990 (6.14b) charakteristická, (6.15b) častá, (6.16b) kvazistálá a pro MSÚ "
+                   + ("(6.10a) a (6.10b)" if nn.kombinace_msu == "6.10ab" else "(6.10)") + ".")
         K.text("Vnitřní síly od předpětí (staticky určitá konstrukce – pouze primární účinky): "
                "N_P = −ΣP_i·cos α_i, M_P = ΣP_i·cos α_i·(z_i − z_t), V_P = ΣP_i·sin α_i.")
         self.komb = {}
+        if self.rezim_kombinace:
+            self._komb_ze_vstupu()
         for f in self.faze:
+            if self.rezim_kombinace:
+                break
             prom = self.promenne if f.provoz else []
             stale_po = [z for z in f.stale if z is not self.zs_g0]
             d = {}
@@ -747,6 +836,41 @@ class NosnikPB:
                    "M_P,∞", "V_P,∞"], rows,
                   f"Vnitřní síly [kNm, kN] – fáze {fz.nazev} (kombinace bez předpětí; M_P,∞ a V_P,∞ od předpětí)")
         K.obrazek("vnitrni_sily", "Průběhy ohybových momentů a posouvajících sil")
+
+    def _komb_ze_vstupu(self):
+        """Obálky kombinací pro jednotlivé fáze z přímo zadaných kombinací."""
+        nn = self.n
+        g = self.zs_g0
+        G = Obalka(g.M_max, g.M_max, g.V_max, g.V_max)
+        nula = Obalka.nula(len(self.x))
+
+        def s_g0(o: Obalka, f_sup: float) -> Obalka:
+            a = np.stack([f_sup * G.M_max, nn.gamma_G_inf * G.M_max])
+            v = np.stack([f_sup * G.V_max, nn.gamma_G_inf * G.V_max])
+            return Obalka(o.M_max + a.max(0), o.M_min + a.min(0), o.V_max + v.max(0), o.V_min + v.min(0))
+
+        for f in self.faze:
+            d = {}
+            if f.provoz:
+                for druh in ("char", "casta", "kvazistala"):
+                    d[druh] = self.kv[druh]
+                msu = []
+                for druh, fac in (("6.10a", nn.gamma_G), ("6.10", nn.gamma_G), ("6.10b", nn.xi * nn.gamma_G)):
+                    if druh in self.kv:
+                        msu.append(s_g0(self.kv[druh], fac))
+                d["msu"] = Obalka.max_z(msu)
+            else:
+                ext = self.kv["kvazistala"] if f.t >= self.t_vneseni else nula
+                for druh in ("char", "casta", "kvazistala"):
+                    d[druh] = ext
+                d["msu"] = s_g0(Obalka(nn.gamma_G * ext.M_max, nn.gamma_G * ext.M_min, nn.gamma_G * ext.V_max,
+                                       nn.gamma_G * ext.V_min), nn.gamma_G)
+            d["vse_char"] = d["char"] + G
+            self.komb[f.nazev] = d
+
+    def _M_trvale(self, t: float) -> np.ndarray:
+        """Dlouhodobě působící vnější moment (bez g0) v čase t – součet zatěžovacích kroků."""
+        return sum((M for t_k, _, _, M in self.kroky_dotv if t_k <= t), np.zeros_like(self.x))
 
     # ------------------------------------------------------------------
     def _mez_tahu(self, druh: str, t: float) -> float:
@@ -992,23 +1116,17 @@ class NosnikPB:
         K.krok("Průhyb při vnesení předpětí (krátkodobý)", "w_{0}", f"E_cm(t0) = {fmt(Ec0)} MPa", float(w0[imid]), "mm")
         for f in self.faze[1:]:
             w = np.zeros_like(xs)
-            for t_k, naz, _ in self.kroky_dotv:
+            for t_k, naz, _, Mk in self.kroky_dotv:
                 if t_k > f.t:
                     continue
-                if t_k == self.t0:
-                    M = MP0 + Mg0 + sum((z.M_max for z in self.stale_vstup if z.t <= self.t0), np.zeros_like(x))
-                elif naz == "kvazistálá část proměnných zatížení":
-                    M = sum((z.psi2 * z.M_max for z in self.promenne), np.zeros_like(x))
-                else:
-                    M = sum((z.M_max for z in self.stale_vstup if z.nazev == naz), np.zeros_like(x))
+                M = MP0 + Mg0 + Mk if t_k == self.t0 else Mk
                 w += w_of(M, b.Ecm) * (1 + self._phi(f.t, t_k, first=(t_k == self.t0)))
             _, MPt, _ = self._sily_predpeti(f.sigma)
             w += w_of(MPt - MP0, b.Ecm) * (1 + 0.8 * self._phi(f.t, self.t0))
             self.w[f.nazev] = w
             K.krok(f"Průhyb – kvazistálá kombinace, {f.nazev_t}", "w_{qp}(t)", "", float(w[imid]), "mm")
             if f.provoz:
-                wq = w_of(self.komb[f.nazev]["casta"].M_max -
-                          sum((z.M_max for z in f.stale if z is not self.zs_g0), np.zeros_like(x)), b.Ecm)
+                wq = w_of(self.komb[f.nazev]["casta"].M_max - self._M_trvale(f.t), b.Ecm)
                 self.w[f.nazev + " – častá (krátkodobě od Q)"] = w + wq
                 K.krok(f"Přírůstek od proměnného zatížení (častá kombinace), {f.nazev}", "w_{Q,fr}", "",
                        float(wq[imid]), "mm")
@@ -1028,7 +1146,7 @@ class NosnikPB:
         b, p = self.beton, self.predp
         fr = self._faktor_prenosu(msu=True)[i] if self.predem else 1.0
         NP, MP, _ = self._sily_predpeti(f.sigma)
-        Mperm = sum((z.M_max[i] for z in f.stale if z is not self.zs_g0), 0.0)
+        Mperm = float(self._M_trvale(f.t)[i])
         vrstvy = []
         for k, s, z in zip(self.kabely, f.sigma, self.zk):
             sc = float(self._napeti(z[i], NP[i] * redukce, MP[i] * redukce, self.zs_g0.M_max[i], Mperm, idx=i))

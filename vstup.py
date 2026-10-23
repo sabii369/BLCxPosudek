@@ -11,7 +11,7 @@ from .materialy import Beton, BetonarskaVyztuz, PredpinaciVyztuz
 from .model import Nastaveni, NosnikPB, SmykovaVyztuz
 from .msu import VrstvaVyztuze
 from .prurez import Prurez
-from .zatizeni import ZatezovaciStav
+from .zatizeni import KombinaceVstup, ZatezovaciStav
 
 
 def nacti_soubor(cesta: str | Path) -> dict:
@@ -87,6 +87,23 @@ def _zs(d: dict, druh: str, L: float) -> ZatezovaciStav:
     )
 
 
+def _kombinace(d: dict) -> KombinaceVstup:
+    if "druh" not in d:
+        raise ValueError("Kombinace: chybí 'druh' (6.10a, 6.10b, 6.10, char, casta, kvazistala).")
+    tab = {k: d.get(k) for k in ("x", "M_max", "M_min", "V_max", "V_min")}
+    if tab["x"] is not None:
+        n = len(tab["x"])
+        for k, v in tab.items():
+            if v is not None and len(v) != n:
+                raise ValueError(f"Kombinace {d['druh']}: sloupec {k} má {len(v)} hodnot, x má {n}.")
+        if tab["M_max"] is None:
+            raise ValueError(f"Kombinace {d['druh']}: tabulka musí obsahovat M_max.")
+    elif d.get("q") is None and not d.get("bremena"):
+        raise ValueError(f"Kombinace {d['druh']}: zadejte q, břemena nebo tabulku x / M_max / V_max.")
+    return KombinaceVstup(druh=str(d["druh"]), q=d.get("q"), od=d.get("od"), do=d.get("do"),
+                          bremena=[tuple(b) for b in d.get("bremena", [])], nazev=d.get("nazev", ""), **tab)
+
+
 def model_ze_slovniku(d: dict) -> NosnikPB:
     beton = Beton(**{**_vyber(d.get("beton", {}), Beton),
                      **({"Ecm_zadany": d["beton"]["Ecm"]} if "Ecm" in d.get("beton", {}) else {})})
@@ -101,8 +118,16 @@ def model_ze_slovniku(d: dict) -> NosnikPB:
     pr = d.get("prostredi", {})
     co = d.get("casova_osa", {})
     zat = d.get("zatizeni", {})
-    stale = [_zs(z, "stale", L) for z in zat.get("stale", [])]
-    prom = [_zs(z, "promenne", L) for z in zat.get("promenne", [])]
+    zpusob = zat.get("zpusob", "kombinace" if zat.get("kombinace") else "zatezovaci_stavy")
+    if zpusob == "kombinace":
+        stale, prom = [], []
+        komb = [_kombinace(k) for k in zat.get("kombinace", [])]
+        if not komb:
+            raise ValueError("Zatížení: způsob 'kombinace', ale nejsou zadány žádné kombinace.")
+    else:
+        stale = [_zs(z, "stale", L) for z in zat.get("stale", [])]
+        prom = [_zs(z, "promenne", L) for z in zat.get("promenne", [])]
+        komb = []
     nast = Nastaveni(**_vyber(d.get("posouzeni", {}), Nastaveni))
     pd = d.get("predem", {})
     return NosnikPB(
@@ -114,7 +139,8 @@ def model_ze_slovniku(d: dict) -> NosnikPB:
         charakteristiky=n.get("charakteristiky", "brutto"), pocet_napinani=n.get("pocet_napinani"),
         relaxace_pred_uvolnenim_h=pd.get("relaxace_pred_uvolnenim_h"),
         predem_eta_p1=pd.get("eta_p1", 3.2), predem_alpha1=pd.get("alpha1", 1.25),
-        predem_alpha2=pd.get("alpha2", 0.19),
+        predem_alpha2=pd.get("alpha2", 0.19), kombinace_vstup=komb,
+        kombinace_vcetne_g0=bool(zat.get("obsahuje_vlastni_tihu", False)), t_vneseni=zat.get("t_vneseni"),
     )
 
 
