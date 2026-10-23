@@ -24,7 +24,8 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Circle, Polygon
 
 from . import __version__, grafy
-from .materialy import BETONARSKA_VYZTUZ, PREDPINACI_VYZTUZ, Beton, PredpinaciVyztuz
+from .materialy import (BETONARSKA_VYZTUZ, PREDPINACI_VYZTUZ, RELAXACE_RHO1000, Beton, BetonarskaVyztuz,
+                        PredpinaciVyztuz)
 from .model import Nastaveni
 from .protokol import fmt
 from .toml_zapis import dumps as toml_dumps
@@ -173,6 +174,17 @@ class Formular(ttk.Frame):
             else:
                 self.prom[k].set(_na_text(v))
 
+    def doplnit(self, d: dict, prepsat: bool = False):
+        """Vyplní pole hodnotami z d – prázdná pole vždy, ostatní jen při prepsat=True."""
+        for k, v in d.items():
+            if k not in self.prom or v is None:
+                continue
+            var = self.prom[k]
+            if isinstance(var, tk.BooleanVar):
+                continue
+            if prepsat or not str(var.get()).strip():
+                var.set(_na_text(v))
+
     def ziskej(self) -> dict:
         out = {}
         for k, popis, typ, volby in self.pole:
@@ -203,9 +215,10 @@ class Tabulka(ttk.Frame):
     se zachovají.
     """
 
-    def __init__(self, master, sloupce, pri_zmene=None, vyska: int = 6, **kw):
+    def __init__(self, master, sloupce, pri_zmene=None, vyska: int = 6, vychozi: dict | None = None, **kw):
         super().__init__(master, **kw)
         self.sloupce = sloupce
+        self.vychozi = vychozi or {}
         self.pri_zmene = pri_zmene
         self._navic: dict[str, dict] = {}
         klice = [s[0] for s in sloupce]
@@ -243,6 +256,8 @@ class Tabulka(ttk.Frame):
             self._vloz(r)
 
     def _vloz(self, r: dict, index="end"):
+        r = {**{k: v for k, v in self.vychozi.items() if r.get(k) in (None, "")}, **{k: v for k, v in r.items()
+                                                                                  if v not in (None, "")}}
         hodnoty = []
         for k, popis, sirka, typ, volby in self.sloupce:
             v = r.get(k)
@@ -255,6 +270,20 @@ class Tabulka(ttk.Frame):
         iid = self.tree.insert("", index, values=hodnoty)
         self._navic[iid] = {k: v for k, v in r.items() if k not in {s[0] for s in self.sloupce}}
         return iid
+
+    def ziskej_surove(self) -> list[dict]:
+        """Řádky jako slovníky textů (prázdné buňky vynechány) včetně skrytých klíčů."""
+        out = []
+        for iid in self.tree.get_children():
+            vals = self.tree.item(iid, "values")
+            r = dict(self._navic.get(iid, {}))
+            for (k, popis, sirka, typ, volby), v in zip(self.sloupce, vals):
+                if str(v).strip():
+                    r[k] = _text_na_pary(str(v)) if typ == "pary" else (
+                        _text_na_seznam(str(v)) if typ == "seznam" else
+                        (_cislo(v) if typ in ("float", "optfloat", "int") else str(v)))
+            out.append(r)
+        return out
 
     def ziskej(self) -> list[dict]:
         out = []
@@ -722,12 +751,12 @@ class Aplikace(tk.Tk):
         lf.pack(fill="x", pady=4)
         self.f_beton = Formular(lf, [
             ("trida", "Třída betonu", "choice", TRIDY_BETONU), ("cement", "Cement (S/N/R)", "choice", ["S", "N", "R"]),
-            ("Ecm", "E_cm [MPa] (prázdné = tab. 3.1)", "optfloat", None),
+            ("Ecm", "E_cm [MPa] (tab. 3.1)", "optfloat", None),
             ("objemova_tiha", "Objemová tíha [kN/m³]", "optfloat", None),
             ("gamma_c", "γ_c", "optfloat", None), ("alpha_cc", "α_cc", "optfloat", None)],
             sloupcu=2, pri_zmene=self._info_materialy)
         self.f_beton.pack(fill="x")
-        lf = ttk.LabelFrame(f, text="Předpínací výztuž (prázdné hodnoty = předvolba typu)", padding=6)
+        lf = ttk.LabelFrame(f, text="Předpínací výztuž (hodnoty se doplní podle typu, lze je přepsat)", padding=6)
         lf.pack(fill="x", pady=4)
         self.f_predp = Formular(lf, [
             ("typ", "Typ", "choice", list(PREDPINACI_VYZTUZ)), ("fpk", "f_pk [MPa]", "optfloat", None),
@@ -747,6 +776,126 @@ class Aplikace(tk.Tk):
         lf.pack(fill="x", pady=4)
         self.lbl_mat = ttk.Label(lf, text="", justify="left", font=("Consolas", 9))
         self.lbl_mat.pack(anchor="w")
+        ttk.Label(f, foreground="#52514e", text=(
+            "Po změně třídy betonu nebo typu výztuže se závislé hodnoty (E_cm; f_pk, f_p0,1k, E_p, A_p, třída relaxace, "
+            "ρ1000; f_yk, E_s) automaticky přepíší hodnotami podle ČSN EN 1992-1-1 / předvolby; lze je ručně upravit."
+        )).pack(anchor="w", pady=4)
+        self.f_beton.prom["trida"].trace_add("write", lambda *_: self._zmena_typu("beton"))
+        self.f_predp.prom["typ"].trace_add("write", lambda *_: self._zmena_typu("predp"))
+        self.f_predp.prom["trida_relaxace"].trace_add("write", lambda *_: self._zmena_typu("relaxace"))
+        self.f_bet.prom["typ"].trace_add("write", lambda *_: self._zmena_typu("bet"))
+
+    # --- výchozí hodnoty --------------------------------------------------
+    @staticmethod
+    def _vych_beton(trida: str) -> dict | None:
+        try:
+            b = Beton(trida=trida)
+        except ValueError:
+            return None
+        return {"Ecm": float(round(b.Ecm)), "objemova_tiha": 25.0, "gamma_c": 1.5, "alpha_cc": 1.0, "cement": "N"}
+
+    @staticmethod
+    def _vych_predp(typ: str) -> dict | None:
+        if typ not in PREDPINACI_VYZTUZ:
+            return None
+        p = PredpinaciVyztuz(typ)
+        return {"fpk": p.fpk, "fp01k": p.fp01k, "Ep": p.Ep, "Ap_lano": p.Ap_lano, "d_lana": p.d_lana,
+                "trida_relaxace": p.trida_relaxace, "rho1000": p.rho1000, "gamma_s": p.gamma_s}
+
+    @staticmethod
+    def _vych_bet(typ: str) -> dict | None:
+        if typ not in BETONARSKA_VYZTUZ:
+            return None
+        s = BetonarskaVyztuz(typ)
+        return {"fyk": s.fyk, "Es": s.Es, "gamma_s": s.gamma_s}
+
+    def _vych_nastaveni(self) -> dict:
+        out = {}
+        for fl in fields(Nastaveni):
+            if fl.default is not MISSING and fl.default is not None and not isinstance(fl.default, bool):
+                out[fl.name] = fl.default
+        predem = self.f_nosnik.prom["predpeti"].get().startswith("predem")
+        out["r_sup"], out["r_inf"] = (1.05, 0.95) if predem else (1.10, 0.90)
+        return out
+
+    VYCH_NOSNIK = {"predpeti": "dodatecne", "charakteristiky": "brutto", "pocet_rezu": 41}
+    VYCH_PREDEM = {"eta_p1": 3.2, "alpha1": 1.25, "alpha2": 0.19}
+    VYCH_PROSTREDI = {"RH": 70.0, "t_s": 3.0}
+    VYCH_CAS = {"t0": 7.0, "t_provoz": 120.0, "t_konec": 36500.0}
+
+    def _zmena_typu(self, co: str):
+        """Po změně třídy / typu přepíše závislé hodnoty (při načítání souboru jen doplní prázdná pole)."""
+        if getattr(self, "_nacitani", False):
+            return
+        if co == "beton":
+            v = self._vych_beton(self.f_beton.prom["trida"].get())
+            if v:
+                self.f_beton.doplnit({"Ecm": v["Ecm"]}, prepsat=True)
+        elif co == "predp":
+            v = self._vych_predp(self.f_predp.prom["typ"].get())
+            if v:
+                v.pop("gamma_s")
+                self.f_predp.doplnit(v, prepsat=True)
+        elif co == "relaxace":
+            try:
+                t = int(_cislo(self.f_predp.prom["trida_relaxace"].get()))
+            except (TypeError, ValueError):
+                return
+            if t in RELAXACE_RHO1000:
+                self.f_predp.doplnit({"rho1000": RELAXACE_RHO1000[t]}, prepsat=True)
+        elif co == "bet":
+            v = self._vych_bet(self.f_bet.prom["typ"].get())
+            if v:
+                v.pop("gamma_s")
+                self.f_bet.doplnit(v, prepsat=True)
+        elif co == "predpeti":
+            stare = {"r_sup": (1.05, 1.10), "r_inf": (0.95, 0.90)}
+            nove = self._vych_nastaveni()
+            for k, moznosti in stare.items():
+                try:
+                    akt = _cislo(self.f_nastaveni.prom[k].get())
+                except ValueError:
+                    continue
+                if akt is None or any(abs(akt - m) < 1e-9 for m in moznosti):
+                    self.f_nastaveni.doplnit({k: nove[k]}, prepsat=True)
+
+    def _doplnit_vychozi(self):
+        """Doplní do prázdných polí výchozí hodnoty (po načtení souboru)."""
+        vb = self._vych_beton(self.f_beton.prom["trida"].get())
+        if vb:
+            self.f_beton.doplnit(vb)
+        vp = self._vych_predp(self.f_predp.prom["typ"].get())
+        if vp:
+            self.f_predp.doplnit(vp)
+        else:
+            self.f_predp.doplnit({"gamma_s": 1.15})
+        vs = self._vych_bet(self.f_bet.prom["typ"].get())
+        if vs:
+            self.f_bet.doplnit(vs)
+        self.f_nosnik.doplnit(self.VYCH_NOSNIK)
+        self.f_predem.doplnit(self.VYCH_PREDEM)
+        self.f_prostredi.doplnit(self.VYCH_PROSTREDI)
+        self.f_cas.doplnit(self.VYCH_CAS)
+        self.f_nastaveni.doplnit(self._vych_nastaveni())
+        for t in (self.t_kabely, self.t_smyk, self.t_stale, self.t_prom):
+            t.nastav(t.ziskej_surove())
+
+    @staticmethod
+    def _bez_vychozich(d: dict, vych: dict | None) -> dict:
+        """Vynechá hodnoty shodné s výchozími (soubor zůstane přehledný, E_cm se nebere jako zadaný)."""
+        if not vych:
+            return d
+        out = {}
+        for k, v in d.items():
+            w = vych.get(k)
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and isinstance(w, (int, float)):
+                tol = 0.5 if k == "Ecm" else 1e-9 * max(1.0, abs(w))
+                if abs(v - w) <= tol:
+                    continue
+            elif w is not None and v == w and k not in ("typ", "trida"):
+                continue
+            out[k] = v
+        return out
 
     def _info_materialy(self):
         try:
@@ -832,6 +981,7 @@ class Aplikace(tk.Tk):
             ("pocet_rezu", "Počet řezů", "optint", None),
             ("pocet_napinani", "Počet kroků napínání", "optint", None)], sloupcu=3, pri_zmene=self._naplanuj_nahled)
         self.f_nosnik.pack(fill="x")
+        self.f_nosnik.prom["predpeti"].trace_add("write", lambda *_: self._zmena_typu("predpeti"))
         lf = ttk.LabelFrame(horni, text="Předem předpjaté prvky", padding=6)
         lf.pack(side="left", fill="x", padx=(8, 0))
         self.f_predem = Formular(lf, [("relaxace_pred_uvolnenim_h", "Čas do uvolnění [h]", "optfloat", None),
@@ -849,7 +999,9 @@ class Aplikace(tk.Tk):
             ("sigma_max", "σ_p,max", 65, "float", None),
             ("napinani", "Napínání", 70, "choice", ["levy", "pravy", "oba"]), ("mu", "μ", 50, "optfloat", None),
             ("k", "k [rad/m]", 65, "optfloat", None), ("pokluz", "Pokluz [mm]", 70, "optfloat", None),
-            ("d_kanalku", "∅ kanálku", 70, "optfloat", None)], pri_zmene=self._naplanuj_nahled, vyska=5)
+            ("d_kanalku", "∅ kanálku", 70, "optfloat", None)], pri_zmene=self._naplanuj_nahled, vyska=5,
+            vychozi={"geometrie": "parabola", "napinani": "levy", "mu": 0.19, "k": 0.005, "pokluz": 6.0,
+                     "d_kanalku": 0.0})
         self.t_kabely.pack(fill="both", expand=True)
         ttk.Label(lf, foreground="#52514e", text=(
             "parabola: z vlevo / z vrchol / z vpravo (+ x vrcholu, výchozí L/2); primka: z vlevo (+ z vpravo); "
@@ -890,7 +1042,8 @@ class Aplikace(tk.Tk):
         lf.pack(fill="both", expand=True, pady=6)
         self.t_smyk = Tabulka(lf, [("Asw", "A_sw [mm²] (všechny střižnosti)", 190, "float", None),
                                    ("s", "s [mm]", 80, "float", None), ("alpha", "α [°]", 70, "optfloat", None),
-                                   ("od", "od [m]", 70, "optfloat", None), ("do", "do [m]", 70, "optfloat", None)])
+                                   ("od", "od [m]", 70, "optfloat", None), ("do", "do [m]", 70, "optfloat", None)],
+                              vychozi={"alpha": 90.0})
         self.t_smyk.pack(fill="both", expand=True)
 
     def _zalozka_zatizeni(self):
@@ -930,7 +1083,8 @@ class Aplikace(tk.Tk):
             ("nazev", "Název", 200, "str", None), ("q", "q [kN/m]", 70, "optfloat", None),
             ("od", "od [m]", 60, "optfloat", None), ("do", "do [m]", 60, "optfloat", None),
             ("bremena", "Břemena F:x; … [kN:m]", 170, "pary", None), ("t", "t vnesení [dny]", 90, "optfloat", None),
-            ("gamma", "γ_G,sup", 60, "optfloat", None), ("gamma_inf", "γ_G,inf", 60, "optfloat", None)], vyska=5)
+            ("gamma", "γ_G,sup", 60, "optfloat", None), ("gamma_inf", "γ_G,inf", 60, "optfloat", None)], vyska=5,
+            vychozi={"gamma": 1.35, "gamma_inf": 1.0})
         self.t_stale.pack(fill="both", expand=True)
         lf = ttk.LabelFrame(z, text="Proměnná zatížení (stejná „skupina“ = působí současně, např. LM1 = TS + UDL)",
                             padding=6)
@@ -943,7 +1097,8 @@ class Aplikace(tk.Tk):
             ("rozestupy", "Rozestupy [m]; …", 110, "seznam", None),
             ("psi0", "ψ0", 45, "optfloat", None), ("psi1", "ψ1", 45, "optfloat", None),
             ("psi2", "ψ2", 45, "optfloat", None), ("gamma", "γ_Q", 50, "optfloat", None),
-            ("skupina", "Skupina", 80, "str", None)], vyska=5)
+            ("skupina", "Skupina", 80, "str", None)], vyska=5,
+            vychozi={"psi0": 0.0, "psi1": 0.0, "psi2": 0.0, "gamma": 1.5})
         self.t_prom.pack(fill="both", expand=True)
 
     def _prepni_zatizeni(self):
@@ -970,7 +1125,8 @@ class Aplikace(tk.Tk):
             if vych is not None and typ != "bool":
                 popis += f"   (výchozí {vych})"
             pole.append((fl.name, popis, typ, vych if typ == "bool" else VOLBY_NASTAVENI.get(fl.name)))
-        ttk.Label(f, text="Prázdné pole = výchozí hodnota podle doporučení ČSN EN 1992-1-1.",
+        ttk.Label(f, text=("Hodnoty jsou předvyplněny podle doporučení ČSN EN 1992-1-1; r_sup a r_inf se mění podle "
+                           "typu předpětí (5.10.9). Hodnoty shodné s výchozími se do souboru nezapisují."),
                   foreground="#52514e").pack(anchor="w", pady=(0, 6))
         self.f_nastaveni = Formular(f, pole, sloupcu=2)
         self.f_nastaveni.pack(fill="x")
@@ -1027,6 +1183,16 @@ class Aplikace(tk.Tk):
 
     # --- data <-> formuláře --------------------------------------------
     def nastav_data(self, d: dict):
+        self._nacitani = True
+        try:
+            self._nastav_data(d)
+            self._doplnit_vychozi()
+        finally:
+            self._nacitani = False
+        self._info_materialy()
+        self._naplanuj_nahled()
+
+    def _nastav_data(self, d: dict):
         self.data = copy.deepcopy(d)
         self.f_projekt.nastav(d.get("projekt", {}))
         self.f_beton.nastav(d.get("beton", {}))
@@ -1067,15 +1233,17 @@ class Aplikace(tk.Tk):
         self._prepni_zatizeni()
         self.f_nastaveni.nastav(d.get("posouzeni", {}))
         self._prepni_prurez()
-        self._info_materialy()
-        self._naplanuj_nahled()
 
     def ziskej_data(self) -> dict:
         d = copy.deepcopy(self.data)
         d["projekt"] = {**d.get("projekt", {}), **self.f_projekt.ziskej()}
-        d["beton"] = self.f_beton.ziskej()
-        d["predpinaci_vyztuz"] = self.f_predp.ziskej()
-        d["betonarska_vyztuz"] = self.f_bet.ziskej()
+        beton = self.f_beton.ziskej()
+        vb = self._vych_beton(beton.get("trida", ""))
+        d["beton"] = self._bez_vychozich(beton, {k: v for k, v in (vb or {}).items() if k != "cement"})
+        predp = self.f_predp.ziskej()
+        d["predpinaci_vyztuz"] = self._bez_vychozich(predp, self._vych_predp(predp.get("typ", "")))
+        bet = self.f_bet.ziskej()
+        d["betonarska_vyztuz"] = self._bez_vychozich(bet, self._vych_bet(bet.get("typ", "")))
         d["prurez"] = self._prurez_data()
         d["nosnik"] = self.f_nosnik.ziskej()
         d["predem"] = self.f_predem.ziskej()
@@ -1095,7 +1263,9 @@ class Aplikace(tk.Tk):
         zat.update({"zpusob": self.zpusob_zat.get(), **self.p_komb.ziskej(),
                     "stale": self.t_stale.ziskej(), "promenne": prom})
         d["zatizeni"] = zat
-        d["posouzeni"] = self.f_nastaveni.ziskej()
+        d["posouzeni"] = self._bez_vychozich(self.f_nastaveni.ziskej(), self._vych_nastaveni())
+        d["posouzeni"] = {k: v for k, v in d["posouzeni"].items()
+                          if not (k == "hlavni_napeti" and v is True)}
         if not d["kabel"]:
             raise ValueError("Zadejte alespoň jeden kabel.")
         return d
