@@ -361,14 +361,20 @@ def msu_smyk(m, adr):
         return None
     f, d = list(m.msu_V.items())[-1]
     a = d["arr"]
-    fig, ax = plt.subplots(figsize=(10, 3.8))
+    fig, ax = plt.subplots(figsize=(10, 4.4))
+    tr = np.nan_to_num(a["trhliny"]) > 0.5
+    if tr.any():
+        ax.fill_between(m.x, 0, 1, where=tr, transform=ax.get_xaxis_transform(), color=C[3], alpha=0.12, lw=0,
+                        label="oblast s ohybovými trhlinami (6.2a)")
     ax.plot(m.x, a["VEd"], color=C[1], label="|V_Ed| (vč. V_P)")
     ax.plot(m.x, a["VRdc"], color=C[0], lw=1.4, label="V_Rd,c")
-    ax.plot(m.x, a["VRds"], color=C[2], lw=1.4, label="V_Rd,s")
-    ax.plot(m.x, a["VRdmax"], color=C[6], lw=1.4, label="V_Rd,max")
-    ax.plot(m.x, a["VRd"], color=INK, lw=1.0, ls="--", label="V_Rd")
-    ax.set(xlabel="x [m]", ylabel="V [kN]", title=f"Smyková únosnost – {f}")
-    ax.legend(fontsize=8, ncol=5)
+    ax.plot(m.x, a["VRds"], color=C[2], lw=1.6, ls=(0, (5, 3)), label="V_Rd,s")
+    ax.plot(m.x, a["VRdmax"], color=C[6], lw=1.2, label="V_Rd,max")
+    ax.plot(m.x, a["VRd"], color=INK, lw=2.2, alpha=0.35, label="V_Rd = max(V_Rd,c; min(V_Rd,s; V_Rd,max))")
+    ax.set_ylim(bottom=0)
+    ax.set(xlabel="x [m]", ylabel="V [kN]")
+    ax.legend(fontsize=7, ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.18))
+    ax.set_title(f"Smyková únosnost – {f} (V_Rd,s = V_Rd,max při optimálním cot θ)")
     return _uloz(fig, adr, "msu_smyk")
 
 

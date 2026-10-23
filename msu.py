@@ -165,18 +165,24 @@ def smykova_unosnost(beton: Beton, betonarska: BetonarskaVyztuz, V_Ed: float, N_
                      A_c: float, I_c: float, S_t: float, b_t: float, bw: float, bw_nom: float,
                      d: float, A_sl: float, Asw_s: float, alpha_deg: float,
                      trhliny: bool, cot_min: float = 1.0, cot_max: float = 2.5,
-                     alpha_l: float = 1.0, z_ohyb: float | None = None) -> VysledekSmyku:
+                     alpha_l: float = 1.0, z_ohyb: float | None = None,
+                     vrdc_uroven: dict | None = None) -> VysledekSmyku:
     """Smyková únosnost podle 6.2.2 a 6.2.3.
 
     V_Ed [kN] (absolutní), N_Ed [kN] (tlak záporný), A_c [mm2], I_c [mm4], S_t [mm3]
     statický moment k těžišti, b_t šířka v těžišti, bw, bw_nom [mm], d [mm],
     A_sl [mm2] podélná tahová výztuž (vč. soudržné předpínací), Asw_s [mm2/mm].
+    vrdc_uroven – V_Rd,c podle (6.4) stanovené jako minimum přes úrovně průřezu
+    (6.2.2(2) pozn.): dict(V, I, b, S, z, sigma_cp); jinak se (6.4) počítá v těžišti.
+    Únosnost: V_Rd = max(V_Rd,c; min(V_Rd,s; V_Rd,max)).
     """
     fck, fcd, fctd = beton.fck, beton.fcd, beton.fctd
     sigma_cp = max(-N_Ed * 1e3 / A_c, 0.0)  # tlak kladně
     k = min(1.0 + math.sqrt(200.0 / d), 2.0)
     rho_l = min(A_sl / (bw * d), 0.02)
-    if not trhliny:
+    if not trhliny and vrdc_uroven is not None:
+        V_Rd_c = vrdc_uroven["V"]
+    elif not trhliny:
         V_Rd_c = I_c * b_t / S_t * math.sqrt(fctd ** 2 + alpha_l * sigma_cp * fctd) * 1e-3
     else:
         CRdc = 0.18 / beton.gamma_c
@@ -203,10 +209,8 @@ def smykova_unosnost(beton: Beton, betonarska: BetonarskaVyztuz, V_Ed: float, N_
     i = int(np.argmax(vals))
     cot_t = float(cs[i])
     V_Rd_s, V_Rd_max = vrds(cot_t), vrdmax(cot_t)
-    if V_Ed <= V_Rd_c:
-        V_Rd = V_Rd_c
-    else:
-        V_Rd = min(V_Rd_s, V_Rd_max)
+    # bez výpočtové smykové výztuže únosnost V_Rd,c; se smykovou výztuží min(V_Rd,s; V_Rd,max)
+    V_Rd = max(V_Rd_c, min(V_Rd_s, V_Rd_max)) if Asw_s > 0 else V_Rd_c
     rho_w = Asw_s / (bw * math.sin(a)) if bw > 0 else 0.0
     rho_w_min = 0.08 * math.sqrt(fck) / betonarska.fyk
     dF = 0.5 * V_Ed * (cot_t - cot_a)
@@ -214,5 +218,6 @@ def smykova_unosnost(beton: Beton, betonarska: BetonarskaVyztuz, V_Ed: float, N_
         V_Ed=V_Ed, V_Rd=V_Rd, V_Rd_c=V_Rd_c, V_Rd_s=V_Rd_s, V_Rd_max=V_Rd_max,
         cot_theta=cot_t, trhliny=trhliny, sigma_cp=sigma_cp, d=d, z=z, bw=bw, bw_nom=bw_nom,
         alpha_cw=acw, nu1=nu1, rho_l=rho_l, k=k, rho_w=rho_w, rho_w_min=rho_w_min, dF_td=dF,
-        mezi=dict(fywd=fywd, cot_alpha=cot_a, alpha_l=alpha_l, I_c=I_c, S_t=S_t, b_t=b_t),
+        mezi=dict(fywd=fywd, cot_alpha=cot_a, alpha_l=alpha_l, I_c=I_c, S_t=S_t, b_t=b_t,
+                  uroven=vrdc_uroven),
     )

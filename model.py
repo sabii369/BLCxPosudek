@@ -268,6 +268,19 @@ class NosnikPB:
         K.tabulka(["x [m]"] + [f"z {k.nazev} [mm]" for k in self.kabely] +
                   [f"α {k.nazev} [°]" for k in self.kabely], rows, "Poloha a sklon kabelů v charakteristických řezech")
         K.obrazek("kabely", "Vedení kabelů po délce nosníku")
+        # kontrola výškového překrytí kanálků (kabely jsou zadány v jedné svislé rovině)
+        if not self.predem:
+            for a in range(len(self.kabely)):
+                for c in range(a + 1, len(self.kabely)):
+                    ka, kc = self.kabely[a], self.kabely[c]
+                    mez = 0.5 * (ka.d_kanalku + kc.d_kanalku)
+                    prekryv = np.abs(self.zk[a] - self.zk[c]) < mez
+                    if mez > 0 and prekryv.any():
+                        xs = x[prekryv]
+                        K.text(f"⚠ Kanálky {ka.nazev} a {kc.nazev} se výškově překrývají v úseku x = "
+                               f"{fmt(xs.min(), 3)}–{fmt(xs.max(), 3)} m (svislá vzdálenost os < "
+                               f"{fmt(mez)} mm). V tomto úseku se při stanovení b_w,nom uvažují vedle sebe "
+                               "v téže úrovni; zkontrolujte vedení kabelů (křížení ve stojině).")
 
         # průřezové charakteristiky po délce (brutto / ideální)
         n = len(x)
@@ -1216,14 +1229,18 @@ class NosnikPB:
         b, nn = self.beton, self.n
         P = self.prurez
         K = self.protokol.kapitola("Smyková únosnost", 2)
-        K.text("Smyk podle 6.2: v oblastech bez ohybových trhlin (σ_d ≤ f_ctk,0,05/γ_c v MSÚ) únosnost (6.4), "
-               "jinak (6.2a,b). Je-li V_Ed > V_Rd,c, je únosnost dána smykovou výztuží (6.8/6.13) a tlakovou "
-               "diagonálou (6.9/6.14); cot θ je volen v mezích "
-               f"{fmt(nn.cot_theta_min)}–{fmt(nn.cot_theta_max)} pro maximální únosnost. V_Ed zahrnuje "
-               "příznivý účinek sklonu kabelů V_P (γ_P = 1,0).")
+        K.text("Smyk podle 6.2: v oblastech bez ohybových trhlin (σ_d ≤ f_ctk,0,05/γ_c v MSÚ) únosnost betonu (6.4) "
+               "jako minimum přes úrovně stojiny (6.2.2(2) pozn.), jinak (6.2a,b). Únosnost se smykovou výztuží je "
+               "min(V_Rd,s (6.8/6.13); V_Rd,max (6.9/6.14)), celková únosnost V_Rd = max(V_Rd,c; min(V_Rd,s; V_Rd,max)). "
+               f"cot θ je volen v mezích {fmt(nn.cot_theta_min)}–{fmt(nn.cot_theta_max)} pro maximální únosnost. "
+               "Účinná výška d je vzdálenost výslednice tahových sil na mezi únosnosti v ohybu od horního okraje, "
+               "z = 0,9·d. Šířka b_w,nom se v každé úrovni stojiny zmenšuje o k·Σφ kanálků procházejících touto "
+               "úrovní (6.2.3(6)). V_Ed zahrnuje příznivý účinek sklonu kabelů V_P (γ_P = 1,0). Přechod mezi "
+               "oblastí bez trhlin a s trhlinami je podle normy nespojitý (jiný model únosnosti betonu).")
         k_d = 0.5 if nn.kanalky == "ocel" else 1.2
         zt = P.zt
         S_t = float(P.staticky_moment(zt)[0])
+        vys_ohyb = {}
         self.msu_V = {}
         for f in self.faze:
             if not f.provoz:
@@ -1235,34 +1252,39 @@ class NosnikPB:
             Mg0 = self.zs_g0.M_max
             res = {}
             arr = {k: np.full_like(self.x, np.nan) for k in
-                   ("VEd", "VRd", "VRdc", "VRds", "VRdmax", "eta", "eta_max", "dF_eta", "cot")}
+                   ("VEd", "VRd", "VRdc", "VRds", "VRdmax", "eta", "eta_max", "dF_eta", "cot", "trhliny", "d",
+                    "bw_nom")}
+            vys_ohyb = self.msu_M.get(f.nazev, {}).get("vys", {})
             for i in np.nonzero(self.v_poli)[0]:
                 cand = [ob.V_max[i] + VP[i], ob.V_min[i] + VP[i]]
                 VEd = max(cand, key=abs)
-                # tažená výztuž
-                zs_list = [(z[i], k.Ap) for z, k in zip(self.zk, self.kabely) if z[i] < zt]
-                zs_list += [(v.z, v.As) for v in self.vyztuz if v.z < zt]
-                if not zs_list:
-                    zl = min(z[i] for z in self.zk)
-                    zs_list = [(zl, 0.0)]
-                A_sl = sum(a for _, a in zs_list)
-                z_s = sum(z * a for z, a in zs_list) / A_sl if A_sl > 0 else zs_list[0][0]
+                # tažená výztuž a účinná výška z rovnováhy na mezi únosnosti v ohybu (plynulé po délce)
+                ro = vys_ohyb.get(i)
+                if ro is not None and ro.konvergence and ro.rameno > 0:
+                    tah = [(v["z"], v["Ap"]) for v in ro.vrstvy_p if v["F"] > 0]
+                    tah += [(v["z"], v["As"]) for v in ro.vrstvy_s if v["F"] > 0]
+                    A_sl = sum(a for _, a in tah)
+                    z_s = ro.z_Fc - ro.rameno
+                else:
+                    zs_list = [(z[i], k.Ap) for z, k in zip(self.zk, self.kabely) if z[i] < zt]
+                    zs_list += [(v.z, v.As) for v in self.vyztuz if v.z < zt]
+                    if not zs_list:
+                        zs_list = [(min(z[i] for z in self.zk), 0.0)]
+                    A_sl = sum(a for _, a in zs_list)
+                    z_s = sum(z * a for z, a in zs_list) / A_sl if A_sl > 0 else zs_list[0][0]
                 d = P.h - z_s
-                zr = np.linspace(z_s, min(z_s + 0.9 * d, P.h), 40)
-                bw = float(P.sirka(zr).min())
-                # oslabení kanálky
-                sum_phi = 0.0
-                b_t_red = 0.0
+                # šířka stojiny v pásmu mezi tlačeným a taženým pásem, oslabení kanálky v každé úrovni
+                zr = np.linspace(max(z_s, 0.0), min(z_s + 0.9 * d, P.h), 80)
+                b_z = P.sirka(zr)
+                phi_z = np.zeros_like(zr)
                 if not self.predem:
                     for k, z in zip(self.kabely, self.zk):
-                        if k.d_kanalku > bw / 8:
-                            lvl = sum(kk.d_kanalku for kk, zz in zip(self.kabely, self.zk)
-                                      if abs(zz[i] - z[i]) < 0.5 * (kk.d_kanalku + k.d_kanalku))
-                            sum_phi = max(sum_phi, lvl)
-                            if abs(z[i] - zt) < k.d_kanalku / 2:
-                                b_t_red = max(b_t_red, lvl)
-                bw_nom = bw - k_d * sum_phi
-                b_t = float(P.sirka(zt)[0]) - k_d * b_t_red
+                        if k.d_kanalku > 0:
+                            v_kanalku = np.abs(zr - z[i]) < k.d_kanalku / 2
+                            phi_z += np.where(v_kanalku & (k.d_kanalku > b_z / 8), k.d_kanalku, 0.0)
+                bnom_z = b_z - k_d * phi_z
+                bw = float(b_z.min())
+                bw_nom = float(bnom_z.min())
                 # trhliny od ohybu v MSÚ
                 sd = float(self._napeti(0.0, NP[i], MP[i], 0.0, ob.M_max[i], idx=i))
                 sh = float(self._napeti(P.h, NP[i], MP[i], 0.0, ob.M_min[i], idx=i))
@@ -1271,10 +1293,19 @@ class NosnikPB:
                 if self.predem:
                     lx = min(self.x[i], self.L - self.x[i]) * 1000
                     al = min(lx / (1.2 * self.lpt), 1.0)
+                # (6.4) jako minimum přes úrovně stojiny se skutečným σ_cp(z) a b_nom(z)
+                S_z = P.staticky_moment(zr)
+                s_cp = -self._napeti(zr, NP[i], MP[i], 0.0, ob.M_max[i], idx=i)  # tlak kladně
+                arg = np.maximum(b.fctd ** 2 + al * s_cp * b.fctd, 0.0)
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    vz = np.where(S_z > 1e-6 * P.I, P.I * bnom_z / S_z * np.sqrt(arg) * 1e-3, np.inf)
+                jz = int(np.argmin(vz))
+                urov = dict(V=float(vz[jz]), I=P.I, b=float(bnom_z[jz]), S=float(S_z[jz]), z=float(zr[jz]),
+                            sigma_cp=float(s_cp[jz]))
                 sv = self._smykova_vyztuz_v(self.x[i])
                 r = smykova_unosnost(b, self.betonarska, abs(VEd), NP[i], self.secL[i, 0], self.secL[i, 2],
-                                     S_t, b_t, bw, bw_nom, d, A_sl, sv.Asw_s, sv.alpha, trhliny,
-                                     nn.cot_theta_min, nn.cot_theta_max, al)
+                                     S_t, float(P.sirka(zt)[0]), bw, bw_nom, d, A_sl, sv.Asw_s, sv.alpha, trhliny,
+                                     nn.cot_theta_min, nn.cot_theta_max, al, vrdc_uroven=urov)
                 res[i] = (r, VEd, sv)
                 arr["VEd"][i] = abs(VEd)
                 arr["VRd"][i] = r.V_Rd
@@ -1282,6 +1313,9 @@ class NosnikPB:
                 arr["VRds"][i] = r.V_Rd_s
                 arr["VRdmax"][i] = r.V_Rd_max
                 arr["cot"][i] = r.cot_theta
+                arr["trhliny"][i] = float(trhliny)
+                arr["d"][i] = d
+                arr["bw_nom"][i] = bw_nom
                 arr["eta"][i] = abs(VEd) / r.V_Rd if r.V_Rd > 0 else math.inf
                 if abs(VEd) > r.V_Rd_c:
                     arr["eta_max"][i] = abs(VEd) / r.V_Rd_max
@@ -1301,10 +1335,13 @@ class NosnikPB:
             K.krok("Účinná výška; šířka stojiny; nominální šířka", "d; b_{w}; b_{w,nom}", "",
                    f"{fmt(r.d)} mm; {fmt(r.bw)} mm; {fmt(r.bw_nom)} mm")
             if not r.trhliny:
-                K.krok("Oblast bez ohybových trhlin – únosnost betonu",
-                       "V_{Rd,c} = I·b/S·√(f_{ctd}^{2} + α_{l}·σ_{cp}·f_{ctd})",
-                       f"{fmt(r.mezi['I_c'])}·{fmt(r.mezi['b_t'])}/{fmt(r.mezi['S_t'])}·√({fmt(b.fctd)}^{{2}} + "
-                       f"{fmt(r.mezi['alpha_l'])}·{fmt(r.sigma_cp)}·{fmt(b.fctd)})·10^{{−3}}", r.V_Rd_c, "kN", "(6.4)")
+                u = r.mezi["uroven"]
+                K.krok("Oblast bez ohybových trhlin – rozhodující úroveň (minimum přes stojinu)", "z", "", u["z"], "mm",
+                       "6.2.2(2)")
+                K.krok("Únosnost betonu v této úrovni",
+                       "V_{Rd,c} = I·b_{nom}(z)/S(z)·√(f_{ctd}^{2} + α_{l}·σ_{cp}(z)·f_{ctd})",
+                       f"{fmt(u['I'])}·{fmt(u['b'])}/{fmt(u['S'])}·√({fmt(b.fctd)}^{{2}} + "
+                       f"{fmt(r.mezi['alpha_l'])}·{fmt(u['sigma_cp'])}·{fmt(b.fctd)})·10^{{−3}}", r.V_Rd_c, "kN", "(6.4)")
             else:
                 K.krok("Oblast s ohybovými trhlinami – únosnost betonu",
                        "V_{Rd,c} = [C_{Rd,c}·k·(100·ρ_{l}·f_{ck})^{1/3} + k_{1}·σ_{cp}]·b_{w}·d",
@@ -1319,8 +1356,8 @@ class NosnikPB:
                    "V_{Rd,max} = α_{cw}·b_{w,nom}·z·ν_{1}·f_{cd}·(cot θ + cot α)/(1 + cot^{2}θ)",
                    f"{fmt(r.alpha_cw)}·{fmt(r.bw_nom)}·{fmt(r.z)}·{fmt(r.nu1)}·{fmt(b.fcd)}·{fmt(r.cot_theta)}/(1 + {fmt(r.cot_theta)}^{{2}})·10^{{−3}}",
                    r.V_Rd_max, "kN", "(6.9), (6.14)")
-            K.krok("Smyková únosnost", "V_{Rd} = V_{Rd,c} (V_{Ed} ≤ V_{Rd,c}), jinak min(V_{Rd,s}; V_{Rd,max})",
-                   "", r.V_Rd, "kN")
+            K.krok("Smyková únosnost", "V_{Rd} = max(V_{Rd,c}; min(V_{Rd,s}; V_{Rd,max}))",
+                   f"max({fmt(r.V_Rd_c)}; min({fmt(r.V_Rd_s)}; {fmt(r.V_Rd_max)}))", r.V_Rd, "kN", "6.2.1")
             self.protokol.pridej_posudek(K, VysledekPosudku(
                 "Smyková únosnost", "MSÚ", abs(VEd), r.V_Rd, "kN", float(arr["eta"][i]), f.nazev,
                 "MSÚ – základní", float(self.x[i]), poznamka="bez trhlin" if not r.trhliny else "s trhlinami",
