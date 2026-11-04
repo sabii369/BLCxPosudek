@@ -64,10 +64,28 @@ def geometrie_kabelu(d: dict, L: float, i: int = 0, povinne: tuple = ()):
     return g, popis
 
 
-def _kabel(d: dict, L: float, vyztuz: PredpinaciVyztuz, i: int) -> Kabel:
+def postup_napinani(v, kde: str = "") -> list[tuple[float, float]]:
+    """Postup napínání [[napětí na lisu MPa, doba podržení min], …] (doba lze vynechat)."""
+    if not v:
+        return []
+    out = []
+    for krok in v:
+        hodn = list(krok) if isinstance(krok, (list, tuple)) else [krok]
+        if not 1 <= len(hodn) <= 2:
+            raise ValueError(f"{kde}postup napínání: krok {krok} – zadejte [napětí, doba podržení].")
+        sg, tm = float(hodn[0]), float(hodn[1]) if len(hodn) > 1 else 0.0
+        if sg < 0 or tm < 0:
+            raise ValueError(f"{kde}postup napínání: napětí ani doba podržení nesmí být záporné.")
+        out.append((sg, tm))
+    return out
+
+
+def _kabel(d: dict, L: float, vyztuz: PredpinaciVyztuz, i: int, postup_vychozi=None) -> Kabel:
     g, popis = geometrie_kabelu(d, L, i, povinne=("pocet_lan", "sigma_max"))
+    nazev = d.get("nazev", f"K{i + 1}")
+    postup = postup_napinani(d["postup"] if "postup" in d else postup_vychozi, f"Kabel {nazev}: ")
     return Kabel(
-        nazev=d.get("nazev", f"K{i + 1}"), pocet_lan=int(d["pocet_lan"]), vyztuz=vyztuz, geometrie=g,
+        nazev=nazev, pocet_lan=int(d["pocet_lan"]), vyztuz=vyztuz, geometrie=g, postup=postup,
         sigma_max=float(d["sigma_max"]), napinani=d.get("napinani", "levy"), mu=d.get("mu", 0.19),
         k=d.get("k", 0.005), pokluz=d.get("pokluz", 6.0), d_kanalku=d.get("d_kanalku", 0.0),
         popis_geometrie=popis,
@@ -121,7 +139,7 @@ def model_ze_slovniku(d: dict) -> NosnikPB:
     prurez = _prurez(d["prurez"])
     n = d.get("nosnik", {})
     L = float(n["L"])
-    kabely = [_kabel(k, L, predp, i) for i, k in enumerate(d.get("kabel", []))]
+    kabely = [_kabel(k, L, predp, i, n.get("postup_napinani")) for i, k in enumerate(d.get("kabel", []))]
     vyz = [VrstvaVyztuze(float(v["z"]), float(v["As"]), v.get("nazev", "")) for v in d.get("vyztuz", [])]
     smyk = [SmykovaVyztuz(**_vyber(s, SmykovaVyztuz)) for s in d.get("smykova_vyztuz", [])]
     pr = d.get("prostredi", {})
@@ -148,7 +166,7 @@ def model_ze_slovniku(d: dict) -> NosnikPB:
         charakteristiky=n.get("charakteristiky", "brutto"), pocet_napinani=n.get("pocet_napinani"),
         relaxace_pred_uvolnenim_h=pd.get("relaxace_pred_uvolnenim_h"),
         predem_eta_p1=pd.get("eta_p1", 3.2), predem_alpha1=pd.get("alpha1", 1.25),
-        predem_alpha2=pd.get("alpha2", 0.19), kombinace_vstup=komb,
+        predem_alpha2=pd.get("alpha2", 0.19), predem_eta_p2=pd.get("eta_p2", 1.2), kombinace_vstup=komb,
         kombinace_vcetne_g0=bool(zat.get("obsahuje_vlastni_tihu", False)), t_vneseni=zat.get("t_vneseni"),
     )
 

@@ -251,6 +251,16 @@ class PredpinaciVyztuz:
         val = A * self.rho1000 * np.exp(B * mu) * (t / 1000.0) ** (0.75 * (1.0 - mu)) * 1e-5
         return s * val
 
+    def cas_relaxace(self, sigma_pi: float | np.ndarray, rho: float | np.ndarray) -> np.ndarray:
+        """Inverze (3.28)–(3.30): doba [h], za kterou při napětí sigma_pi dosáhne relativní ztráta
+        relaxací Δσ_pr/σ_pi hodnoty rho (ekvivalentní čas)."""
+        A, B = RELAXACE_KOEF[int(self.trida_relaxace)]
+        s = np.asarray(sigma_pi, dtype=float)
+        mu = np.clip(s / self.fpk, 1e-6, 0.999)
+        r = np.maximum(np.asarray(rho, dtype=float), 0.0)
+        zaklad = r / (A * self.rho1000 * np.exp(B * mu) * 1e-5)
+        return 1000.0 * zaklad ** (1.0 / (0.75 * (1.0 - mu)))
+
     @property
     def popis_relaxace(self) -> str:
         A, B = RELAXACE_KOEF[int(self.trida_relaxace)]

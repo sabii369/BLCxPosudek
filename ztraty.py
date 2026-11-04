@@ -112,3 +112,49 @@ def ztrata_dlouhodoba_546(eps_cs: float, Ep: float, dsigma_pr: float, Ecm: float
     return citatel / jmenovatel, dict(alpha=alpha, citatel=citatel, jmenovatel=jmenovatel,
                                       clen_smrst=-eps_cs * Ep, clen_relax=0.8 * dsigma_pr,
                                       clen_dotv=-alpha * ct)
+
+
+def ztrata_pokluzem_obecne(x: np.ndarray, sigma0: np.ndarray, f_zpet: np.ndarray, w_mm: float, Ep: float,
+                           x_konec: float | None = None) -> VysledekPokluzu:
+    """Ztráta pokluzem pro obecný (i nemonotónní) průběh napětí, např. po přepnutí a povolení lisu.
+
+    Při pokluzu se kabel u kotvy zkracuje a tření působí opačně než při napínání:
+    σ_po(x) = min[σ0(x); σ_A·f_zpet(x)], f_zpet = e^{+μ(θ + k·x)} od kotvy, kde napětí v kotvě σ_A
+    je dáno podmínkou ∫ (σ0 − σ_po) dx = w·E_p. Kotva je v x[0].
+    """
+    x = np.asarray(x, float)
+    sigma0 = np.asarray(sigma0, float)
+    xd = x - x[0]
+    m = xd <= abs(x_konec - x[0]) + 1e-12 if x_konec is not None else np.ones_like(xd, bool)
+    xr, sr, fr = xd[m], sigma0[m], np.asarray(f_zpet, float)[m]
+    req = w_mm * 1e-3 * Ep
+
+    def plocha(sa: float) -> float:
+        return _integral(sr - np.minimum(sr, sa * fr), xr)
+
+    sigma = sigma0.copy()
+    if plocha(0.0) <= req:
+        # pokluz zasáhne celou oblast – posun o konstantu
+        c = (req - plocha(0.0)) / max(xr[-1], 1e-9)
+        sigma[m] = -c * np.ones_like(sr)
+        return VysledekPokluzu(sigma, float(xr[-1]), float(sr[0] - sigma[m][0]), req, True)
+    lo, hi = 0.0, float(sr[0])
+    for _ in range(100):
+        mid = 0.5 * (lo + hi)
+        if plocha(mid) > req:
+            lo = mid
+        else:
+            hi = mid
+    sa = 0.5 * (lo + hi)
+    po = np.minimum(sr, sa * fr)
+    zasah = np.nonzero(po < sr - 1e-9)[0]
+    cely = bool(len(zasah)) and zasah[-1] == len(xr) - 1
+    if len(zasah) and not cely:
+        # průsečík σ_A·f_zpet(x) = σ0(x) lineární interpolací mezi uzly
+        j = zasah[-1]
+        d1, d2 = sa * fr[j] - sr[j], sa * fr[j + 1] - sr[j + 1]
+        x_w = float(xr[j] + (xr[j + 1] - xr[j]) * (-d1) / (d2 - d1)) if d2 != d1 else float(xr[j + 1])
+    else:
+        x_w = float(xr[-1]) if len(zasah) else 0.0
+    sigma[m] = po
+    return VysledekPokluzu(sigma, x_w, float(sr[0] - po[0]), req, cely)

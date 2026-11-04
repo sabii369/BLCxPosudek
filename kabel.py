@@ -129,12 +129,24 @@ class Kabel:
     pokluz: float = 6.0            # pokluz v kotvě [mm]
     d_kanalku: float = 0.0         # vnější průměr kabelového kanálku [mm]
     poradi_napinani: int = 1       # pořadí při postupném napínání
+    # postup napínání před zakotvením na σ_p,max: [(napětí na lisu [MPa], doba podržení [min]), …]
+    postup: list = field(default_factory=list)
     popis_geometrie: str = ""
     extra: dict = field(default_factory=dict)
 
     @property
     def Ap(self) -> float:
         return self.pocet_lan * self.vyztuz.Ap_lano
+
+    @property
+    def kroky_lisu(self) -> list[tuple[float, float]]:
+        """Celý postup napínání včetně konečného napětí σ_p,max (při zakotvení bez podržení)."""
+        return [(float(a), float(b)) for a, b in self.postup] + [(float(self.sigma_max), 0.0)]
+
+    @property
+    def sigma_lis_max(self) -> float:
+        """Největší napětí na lisu během napínání [MPa]."""
+        return max(a for a, _ in self.kroky_lisu)
 
     @property
     def P_max(self) -> float:

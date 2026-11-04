@@ -10,7 +10,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
-from matplotlib.patches import Circle, Polygon  # noqa: E402
+from matplotlib.patches import Circle, Polygon, Rectangle  # noqa: E402
 
 # kategorická paleta (pevné pořadí) a stavové barvy
 C = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
@@ -334,12 +334,21 @@ def msu_pretvoreni(m, adr):
     sig = -m.beton.sigma_msu(eps)
     fig, axs = plt.subplots(1, 3, figsize=(11, 4.2), sharey=True)
     ax = axs[0]
-    ax.add_patch(Polygon(P.obrys, closed=True, fc="#e9eef6", ec=INK2))
+    obr = ax.add_patch(Polygon(P.obrys, closed=True, fc="#e9eef6", ec=INK2))
+    # tlačená oblast = obrys nad neutrálnou osou bez otvorů (otvory se kreslí přes ni)
+    ymin, ymax = P.obrys[:, 0].min(), P.obrys[:, 0].max()
+    tl = ax.add_patch(Rectangle((ymin, zn), ymax - ymin, P.h - zn, fc=C[0], alpha=0.35, lw=0, zorder=2))
+    tl.set_clip_path(obr)
+    for o in P.otvory:
+        ax.add_patch(Polygon(o, closed=True, fc=SURF, ec=INK2, lw=1.0, zorder=3))
+    zp, dz, bp = P.pasy()
+    Ac = float((bp * dz)[zp > zn].sum())
     ax.axhline(zn, color=BAD, ls="--", lw=1)
     for j, v in enumerate(r.vrstvy_p):
-        ax.plot([0], [v["z"]], "o", color=C[j % 8], ms=8)
+        ax.plot([0], [v["z"]], "o", color=C[j % 8], ms=8, zorder=4)
     ax.set_aspect("equal")
-    ax.set(title="Průřez a neutrálná osa", xlabel="y [mm]", ylabel="z [mm]")
+    ax.set(title=f"Průřez a neutrálná osa\ntlačená plocha A_c = {Ac / 1e3:.1f}·10³ mm²",
+           xlabel="y [mm]", ylabel="z [mm]")
     ax = axs[1]
     ax.plot(eps * 1e3, z, color=C[0], label="ε (rovina průřezu)")
     for j, v in enumerate(r.vrstvy_p):

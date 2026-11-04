@@ -157,7 +157,7 @@ class Formular(ttk.Frame):
                 w = ttk.Combobox(self, textvariable=v, values=volby, width=16)
             else:
                 v = tk.StringVar()
-                w = ttk.Entry(self, textvariable=v, width=18 if typ != "str" else 40)
+                w = ttk.Entry(self, textvariable=v, width=18 if typ not in ("str", "pary") else 40)
             w.grid(row=r, column=2 * c + 1, sticky="we", padx=(0, 14), pady=2)
             self.prom[k] = v
             self.widgety[k] = w
@@ -171,6 +171,8 @@ class Formular(ttk.Frame):
             v = d.get(k)
             if typ == "bool":
                 self.prom[k].set(bool(volby) if v is None else bool(v))
+            elif typ == "pary":
+                self.prom[k].set(_pary_na_text(v))
             else:
                 self.prom[k].set(_na_text(v))
 
@@ -202,6 +204,13 @@ class Formular(ttk.Frame):
                         raise ValueError(f"Pole „{popis}“ je povinné.")
                     continue
                 out[k] = int(c) if typ in ("int", "optint") else float(c)
+            elif typ == "pary":
+                try:
+                    pary = _text_na_pary(v)
+                except ValueError:
+                    raise ValueError(f"Pole „{popis}“: neplatný zápis „{v}“ (např. 1200:2; 800:0)")
+                if pary:
+                    out[k] = pary
             else:
                 if v.strip() != "":
                     out[k] = _cislo(v) if typ == "choice" and k == "trida_relaxace" else v
@@ -829,7 +838,7 @@ class Aplikace(tk.Tk):
         return out
 
     VYCH_NOSNIK = {"predpeti": "dodatecne", "charakteristiky": "brutto", "pocet_rezu": 41}
-    VYCH_PREDEM = {"eta_p1": 3.2, "alpha1": 1.25, "alpha2": 0.19}
+    VYCH_PREDEM = {"eta_p1": 3.2, "alpha1": 1.25, "alpha2": 0.19, "eta_p2": 1.2}
     VYCH_PROSTREDI = {"RH": 70.0, "t_s": 3.0}
     VYCH_CAS = {"t0": 7.0, "t_provoz": 120.0, "t_konec": 36500.0}
 
@@ -989,14 +998,17 @@ class Aplikace(tk.Tk):
             ("predpeti", "Předpětí", "choice", ["dodatecne", "predem"]),
             ("charakteristiky", "Průřezové char.", "choice", ["brutto", "idealni"]),
             ("pocet_rezu", "Počet řezů", "optint", None),
-            ("pocet_napinani", "Počet kroků napínání", "optint", None)], sloupcu=3, pri_zmene=self._naplanuj_nahled)
+            ("pocet_napinani", "Počet kroků napínání", "optint", None),
+            ("postup_napinani", "Postup napínání σ:min; …", "pary", None)], sloupcu=3,
+            pri_zmene=self._naplanuj_nahled)
         self.f_nosnik.pack(fill="x")
         self.f_nosnik.prom["predpeti"].trace_add("write", lambda *_: self._zmena_typu("predpeti"))
         lf = ttk.LabelFrame(horni, text="Předem předpjaté prvky", padding=6)
         lf.pack(side="left", fill="x", padx=(8, 0))
         self.f_predem = Formular(lf, [("relaxace_pred_uvolnenim_h", "Čas do uvolnění [h]", "optfloat", None),
                                       ("eta_p1", "η_p1", "optfloat", None), ("alpha1", "α1", "optfloat", None),
-                                      ("alpha2", "α2", "optfloat", None)], sloupcu=2)
+                                      ("alpha2", "α2", "optfloat", None), ("eta_p2", "η_p2", "optfloat", None)],
+                                 sloupcu=2)
         self.f_predem.pack(fill="x")
         lf = ttk.LabelFrame(z, text="Kabely / skupiny lan  (z = výška od spodního okraje [mm], x [m])", padding=6)
         lf.pack(fill="both", expand=True, pady=6)
@@ -1009,13 +1021,18 @@ class Aplikace(tk.Tk):
             ("sigma_max", "σ_p,max", 65, "float", None),
             ("napinani", "Napínání", 70, "choice", ["levy", "pravy", "oba"]), ("mu", "μ", 50, "optfloat", None),
             ("k", "k [rad/m]", 65, "optfloat", None), ("pokluz", "Pokluz [mm]", 70, "optfloat", None),
-            ("d_kanalku", "∅ kanálku", 70, "optfloat", None)], pri_zmene=self._naplanuj_nahled, vyska=5,
+            ("d_kanalku", "∅ kanálku", 70, "optfloat", None),
+            ("postup", "Postup napínání σ:min; … (jen tento kabel)", 200, "pary", None)],
+            pri_zmene=self._naplanuj_nahled, vyska=5,
             vychozi={"geometrie": "parabola", "napinani": "levy", "mu": 0.19, "k": 0.005, "pokluz": 6.0,
                      "d_kanalku": 0.0})
         self.t_kabely.pack(fill="both", expand=True)
         ttk.Label(lf, foreground="#52514e", text=(
             "parabola: z vlevo / z vrchol / z vpravo (+ x vrcholu, výchozí L/2); primka: z vlevo (+ z vpravo); "
-            "polygon: body „0:530; 3.18:115; 8.78:115; 11.96:530“ a volitelně poloměry zaoblení „0; 29; 29; 0“.")
+            "polygon: body „0:530; 3.18:115; 8.78:115; 11.96:530“ a volitelně poloměry zaoblení „0; 29; 29; 0“.\n"
+            "Postup napínání (dodatečné předpětí): napětí na lisu [MPa]:doba podržení [min] postupně, např. "
+            "„1200:2; 800:0; 1325.4:5“, nakonec se kabel napne na σ_p,max a zakotví. Pole „Postup napínání“ "
+            "u nosníku platí pro všechny kabely, sloupec v tabulce jen pro daný kabel."), justify="left"
                   ).pack(anchor="w")
         self.g_kabely = Graf(z, figsize=(9, 2.6))
         self.g_kabely.pack(fill="both", expand=True)
