@@ -44,9 +44,10 @@ def _prurez(d: dict) -> Prurez:
 _POVINNE_KABEL = {"parabola": ("z_L", "z_S"), "polygon": ("body",), "primka": ("z_L",)}
 
 
-def _kabel(d: dict, L: float, vyztuz: PredpinaciVyztuz, i: int) -> Kabel:
+def geometrie_kabelu(d: dict, L: float, i: int = 0, povinne: tuple = ()):
+    """Geometrie kabelu ze slovníku vstupu → (geometrie, popis). Používá ji i náhled v GUI."""
     typ = d.get("geometrie", "parabola")
-    chybi = [k for k in _POVINNE_KABEL.get(typ, ()) + ("pocet_lan", "sigma_max") if d.get(k) in (None, "", [])]
+    chybi = [k for k in _POVINNE_KABEL.get(typ, ()) + povinne if d.get(k) in (None, "", [])]
     if chybi:
         raise ValueError(f"Kabel {d.get('nazev', i + 1)} (geometrie {typ}): chybí {', '.join(chybi)}")
     if typ == "parabola":
@@ -60,6 +61,11 @@ def _kabel(d: dict, L: float, vyztuz: PredpinaciVyztuz, i: int) -> Kabel:
         popis = f"přímka z = {d['z_L']}" + (f" → {d['z_P']}" if d.get("z_P") is not None else "") + " mm"
     else:
         raise ValueError(f"Neznámá geometrie kabelu: {typ}")
+    return g, popis
+
+
+def _kabel(d: dict, L: float, vyztuz: PredpinaciVyztuz, i: int) -> Kabel:
+    g, popis = geometrie_kabelu(d, L, i, povinne=("pocet_lan", "sigma_max"))
     return Kabel(
         nazev=d.get("nazev", f"K{i + 1}"), pocet_lan=int(d["pocet_lan"]), vyztuz=vyztuz, geometrie=g,
         sigma_max=float(d["sigma_max"]), napinani=d.get("napinani", "levy"), mu=d.get("mu", 0.19),

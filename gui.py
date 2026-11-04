@@ -29,7 +29,7 @@ from .materialy import (BETONARSKA_VYZTUZ, PREDPINACI_VYZTUZ, RELAXACE_RHO1000, 
 from .model import Nastaveni
 from .protokol import fmt
 from .toml_zapis import dumps as toml_dumps
-from .vstup import model_ze_slovniku, nacti_soubor
+from .vstup import _prurez, geometrie_kabelu, model_ze_slovniku, nacti_soubor
 from .zatizeni import DRUHY_KOMBINACI
 
 TRIDY_BETONU = ["C20/25", "C25/30", "C30/37", "C35/45", "C40/50", "C45/55", "C50/60", "C55/67",
@@ -286,41 +286,51 @@ class Tabulka(ttk.Frame):
         return out
 
     def ziskej(self) -> list[dict]:
+        return [self._radek(n, iid) for n, iid in enumerate(self.tree.get_children(), 1)]
+
+    def ziskej_radky(self) -> list[tuple[int, dict | None, str | None]]:
+        """Každý řádek zvlášť: (číslo řádku, slovník nebo None, text chyby nebo None)."""
         out = []
         for n, iid in enumerate(self.tree.get_children(), 1):
-            vals = self.tree.item(iid, "values")
-            r = dict(self._navic.get(iid, {}))
-            for (k, popis, sirka, typ, volby), v in zip(self.sloupce, vals):
-                v = str(v)
-                try:
-                    if typ in ("float", "optfloat", "int"):
-                        c = _cislo(v)
-                        if c is None:
-                            if typ != "optfloat":
-                                raise ValueError("povinná hodnota")
-                            r.pop(k, None)
-                            continue
-                        r[k] = int(c) if typ == "int" else float(c)
-                    elif typ == "pary":
-                        p = _text_na_pary(v)
-                        if p is None:
-                            r.pop(k, None)
-                        else:
-                            r[k] = p
-                    elif typ == "seznam":
-                        p = _text_na_seznam(v)
-                        if p is None:
-                            r.pop(k, None)
-                        else:
-                            r[k] = p
-                    elif v.strip():
-                        r[k] = v
-                    else:
-                        r.pop(k, None)
-                except ValueError as e:
-                    raise ValueError(f"Řádek {n}, sloupec „{popis}“: neplatná hodnota „{v}“ ({e})")
-            out.append(r)
+            try:
+                out.append((n, self._radek(n, iid), None))
+            except ValueError as e:
+                out.append((n, None, str(e)))
         return out
+
+    def _radek(self, n: int, iid) -> dict:
+        vals = self.tree.item(iid, "values")
+        r = dict(self._navic.get(iid, {}))
+        for (k, popis, sirka, typ, volby), v in zip(self.sloupce, vals):
+            v = str(v)
+            try:
+                if typ in ("float", "optfloat", "int"):
+                    c = _cislo(v)
+                    if c is None:
+                        if typ != "optfloat":
+                            raise ValueError("povinná hodnota")
+                        r.pop(k, None)
+                        continue
+                    r[k] = int(c) if typ == "int" else float(c)
+                elif typ == "pary":
+                    p = _text_na_pary(v)
+                    if p is None:
+                        r.pop(k, None)
+                    else:
+                        r[k] = p
+                elif typ == "seznam":
+                    p = _text_na_seznam(v)
+                    if p is None:
+                        r.pop(k, None)
+                    else:
+                        r[k] = p
+                elif v.strip():
+                    r[k] = v
+                else:
+                    r.pop(k, None)
+            except ValueError as e:
+                raise ValueError(f"Řádek {n}, sloupec „{popis}“: neplatná hodnota „{v}“ ({e})")
+        return r
 
     # --- úpravy -----------------------------------------------------------
     def _zmena(self):
@@ -1303,6 +1313,11 @@ class Aplikace(tk.Tk):
 
     def _nahled(self):
         self._nahled_job = None
+        # vedení kabelů se kreslí samostatně – nesmí čekat na platnost celého modelu (zatížení, materiály …)
+        try:
+            self._nahled_kabely()
+        except Exception:  # noqa: BLE001
+            traceback.print_exc()
         try:
             d = self.ziskej_data()
             m = model_ze_slovniku(d)
@@ -1341,24 +1356,66 @@ class Aplikace(tk.Tk):
         ax.set_ylabel("z [mm]")
         fig.tight_layout()
         self.g_prurez.canvas.draw_idle()
-        # kabely
+        self._nahled_kombinaci(m)
+
+    def _nahled_kabely(self):
+        """Náhled vedení kabelů jen z nosníku, průřezu a tabulky kabelů; chybné řádky se vypíší do grafu."""
+        chyby: list[str] = []
+        L = L0 = None
+        try:
+            n = self.f_nosnik.ziskej()
+            L = float(n["L"])
+            L0 = float(n.get("L0") or L)
+            if L <= 0:
+                raise ValueError("Délka nosníku L musí být kladná.")
+        except Exception as e:  # noqa: BLE001
+            chyby.append(str(e))
+            L = None
+        h = zt = None
+        try:
+            P = _prurez(self._prurez_data())
+            h, zt = P.h, P.zt
+        except Exception:  # noqa: BLE001
+            pass  # chybu průřezu hlásí záložka Průřez; vedení kabelů lze nakreslit i bez něj
+        cary = []
+        if L:
+            for c, r, chyba in self.t_kabely.ziskej_radky():
+                if chyba is None:
+                    try:
+                        g, _ = geometrie_kabelu(r, L, c - 1)
+                        cary.append((c, r.get("nazev") or f"K{c}", np.asarray(g.x), np.asarray(g.z)))
+                        continue
+                    except Exception as e:  # noqa: BLE001
+                        chyba = str(e)
+                chyby.append(chyba)
+            if not self.t_kabely.tree.get_children():
+                chyby.append("Zadejte alespoň jeden kabel.")
+        if h is None:
+            h = max([float(z.max()) for *_, z in cary] + [100.0]) * 1.15
         fig = self.g_kabely.fig
         fig.clear()
         ax = fig.add_subplot(111)
-        ax.fill_between([0, m.L], 0, P.h, color="#e9eef6", lw=0)
-        ax.axhline(P.zt, color="#52514e", lw=0.8, ls="-.")
-        for j, k in enumerate(m.kabely):
-            ax.plot(k.geometrie.x, k.geometrie.z, color=grafy.C[j % 8], lw=2, label=k.nazev)
-        for xs_ in ((m.L - m.L0) / 2, (m.L + m.L0) / 2):
-            ax.plot([xs_], [-0.06 * P.h], marker="^", ms=9, color="#52514e")
-        ax.set_xlim(-0.2, m.L + 0.2)
-        ax.set_ylim(-0.12 * P.h, 1.05 * P.h)
+        Lk = L or 1.0
+        if L:
+            ax.fill_between([0, L], 0, h, color="#e9eef6", lw=0)
+            for xs_ in ((L - L0) / 2, (L + L0) / 2):
+                ax.plot([xs_], [-0.06 * h], marker="^", ms=9, color="#52514e")
+        if zt is not None:
+            ax.axhline(zt, color="#52514e", lw=0.8, ls="-.")
+        for c, nazev, x, z in cary:
+            ax.plot(x, z, color=grafy.C[(c - 1) % 8], lw=2, label=nazev)
+        ax.set_xlim(-0.2, Lk + 0.2)
+        ax.set_ylim(-0.12 * h, 1.05 * h)
         ax.set_xlabel("x [m]")
         ax.set_ylabel("z [mm]")
-        ax.legend(ncol=max(len(m.kabely), 1), fontsize=8, loc="upper center")
+        if cary:
+            ax.legend(ncol=len(cary), fontsize=8, loc="upper center")
+        if chyby:
+            ax.text(0.01, 0.97, "\n".join(f"⚠ {t}" for t in chyby[:4]), transform=ax.transAxes, va="top",
+                    ha="left", fontsize=8, color="#b3261e",
+                    bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#b3261e", alpha=0.9))
         fig.tight_layout()
         self.g_kabely.canvas.draw_idle()
-        self._nahled_kombinaci(m)
 
     def _nahled_kombinaci(self, m):
         fig = self.g_komb.fig
