@@ -811,8 +811,10 @@ class NosnikPB:
         # --- relaxace a výsledná ztráta (5.46) ----------------------------
         Kr = self.protokol.kapitola("Relaxace a celkové dlouhodobé ztráty (5.46)", 2)
         Kr.text("Ztráta relaxací podle 3.3.2(7): Δσ_pr = σ_pi·" + p.popis_relaxace +
-                f", čas od napnutí v hodinách (nejvýše {fmt(self.n.relaxace_t_max_h, 0)} h podle 3.3.2(8)), "
-                "σ_pi je napětí po okamžitých ztrátách.")
+                f", čas od napnutí v hodinách (nejvýše {fmt(self.n.relaxace_t_max_h, 0)} h podle 3.3.2(8)). "
+                "Podle 5.10.6(1) je σ_pi napětí σ_p(G + P_m0 + ψ2·Q): napětí po okamžitých ztrátách σ_pm0 "
+                "(obsahuje vlastní tíhu při vnesení) zvětšené o α_e·σ_c od ostatních stálých a kvazistálých "
+                "proměnných zatížení vnesených do daného času v úrovni kabelu.")
         if self.predem:
             Kr.text("U předem předpjatých lan proběhne relaxace Δσ_pr,0 již před uvolněním (při napětí σ_p,max). Po "
                     "uvolnění klesne napětí na σ_pm0, a proto se kapacita relaxace přepočte podle přílohy D: pro fiktivní "
@@ -832,8 +834,8 @@ class NosnikPB:
             Kr.text("Relaxace, která proběhne při podržení napětí na lisu, se do dalšího průběhu započítá metodou "
                     "ekvivalentního času (obdobně jako 10.3.2.2(2)): pro každé podržení se určí doba t_e, za kterou by "
                     "při daném napětí proběhla dosavadní poměrná relaxace ρ, a ρ se zvětší o relaxaci za dobu podržení; "
-                    "po zakotvení se z výsledné ρ určí ekvivalentní čas t_e při napětí σ_pm0. Relaxace po zakotvení "
-                    "je pak Δσ_pr = Δσ_pr(σ_pm0; t_e + t) − Δσ_pr(σ_pm0; t_e). Uvažuje se, že lis během podržení "
+                    "po zakotvení se z výsledné ρ určí ekvivalentní čas t_e při napětí σ_p(G + P_m0 + ψ2·Q). Relaxace po "
+                    "zakotvení je pak Δσ_pr = Δσ_pr(σ_p; t_e + t) − Δσ_pr(σ_p; t_e). Uvažuje se, že lis během podržení "
                     "udržuje napětí.")
             for ik, k in enumerate(self.kabely):
                 if not k.postup:
@@ -865,6 +867,9 @@ class NosnikPB:
                         float(zcp[im]), "mm")
                 for k, d in zip(self.kabely, det):
                     m = d["mezi"]
+                    Kr.krok(f"{k.nazev}: napětí pro relaxaci", "σ_{p}(G + P_{m0} + ψ_{2}Q) = σ_{pm0} + α_{e}·σ_{c,G+ψ2Q}",
+                            f"{fmt(float(self.sig_pm0[self.kabely.index(k)][im]))} + {fmt(float(d['ds_G'][im]))}",
+                            float(d["s_rel"][im]), "MPa", "5.10.6(1)")
                     Kr.krok(f"{k.nazev}: relaxace", "Δσ_{pr}", "", float(np.atleast_1d(d["d_pr"])[im]
                                                                           if np.ndim(d["d_pr"]) else d["d_pr"]), "MPa")
                     Kr.krok(f"{k.nazev}: dotvarovací člen", "Σφ(t,t_{k})·σ_{c,k}(z_{p})", "", float(d["creep"][im]), "MPa")
@@ -896,23 +901,32 @@ class NosnikPB:
         Psum = sum(s * k.Ap for s, k in zip(self.sig_pm0, self.kabely))
         zres = sum(s * k.Ap * z for s, k, z in zip(self.sig_pm0, self.kabely, self.zk)) / np.where(Psum > 0, Psum, 1)
         zcp = P.zt - zres
+        # 5.10.6(1): relaxace se stanoví pro napětí σ_p(G + P_m0 + ψ2·Q) – k σ_pm0 (obsahuje už g0)
+        # se přičte přírůstek od vnějších kvazistálých zatížení vnesených do času t (soudržné kabely)
+        M_ext = sum((Mk for t_k, _, _, Mk in self.kroky_dotv if t_k <= t), np.zeros_like(x))
+        alfa_e = p.Ep / b.Ecm
         sigs, det = [], []
         for ik, (k, s_pm0) in enumerate(zip(self.kabely, self.sig_pm0)):
+            ds_G = alfa_e * self._napeti(self.zk[ik], 0.0, 0.0, 0.0, M_ext)
             if self.predem:
                 # po uvolnění lan klesne napětí na σ_pm0 → kapacita relaxace se přepočte pro fiktivní napětí
-                # σ_pm0 + Δσ_pr,proběhlá s ekvivalentním časem t_e (EN 1992-1-1 příl. D, Navrátil 4.5.3)
+                # σ_p + Δσ_pr,proběhlá s ekvivalentním časem t_e (EN 1992-1-1 příl. D, Navrátil 4.5.3)
                 cor = float(p.relaxace(k.sigma_max, self.t_rel_h))
                 fr = self._faktor_prenosu()
                 s_plne = np.where(fr > 1e-9, s_pm0 / np.where(fr > 1e-9, fr, 1.0), k.sigma_max - cor)
-                s_f = np.maximum(s_plne, 1.0) + cor
+                s_rel = np.maximum(s_plne + ds_G, 1.0)
+                s_f = s_rel + cor
                 t_e = np.where(cor > 0, p.cas_relaxace(s_f, cor / s_f), 0.0)
                 t_h_tot = np.minimum(t_e + (t - self.t0) * 24.0, self.n.relaxace_t_max_h)
                 d_pr = p.relaxace(s_f, t_h_tot) - cor
             else:
                 t_max = self.n.relaxace_t_max_h
-                t_e = self.t_ekv[ik]
-                d_pr = (p.relaxace(s_pm0, np.minimum(t_e + (t - self.t0) * 24.0, t_max))
-                        - p.relaxace(s_pm0, np.minimum(t_e, t_max)))
+                s_rel = np.maximum(s_pm0 + ds_G, 1.0)
+                # relaxace proběhlá při podržení na lisu (poměrná ρ) → ekvivalentní čas při napětí s_rel
+                rho = self.rho_drzeni[ik]
+                t_e = np.where(rho > 0, p.cas_relaxace(s_rel, rho), 0.0)
+                d_pr = (p.relaxace(s_rel, np.minimum(t_e + (t - self.t0) * 24.0, t_max))
+                        - p.relaxace(s_rel, np.minimum(t_e, t_max)))
             d_pr = np.maximum(d_pr, 0.0) * np.ones_like(x)
             creep = np.zeros_like(x)
             for t_k, _, sk, _ in self.kroky_dotv:
@@ -923,7 +937,7 @@ class NosnikPB:
             if self.predem:
                 loss = loss * self._faktor_prenosu()
             sigs.append(s_pm0 - loss)
-            det.append(dict(d_pr=d_pr, creep=creep, loss=loss, mezi=mezi, zcp=zcp))
+            det.append(dict(d_pr=d_pr, creep=creep, loss=loss, mezi=mezi, zcp=zcp, ds_G=ds_G, s_rel=s_rel))
         return sigs, det, eps, phi0, zcp, zres
 
     def _phi(self, t: float, tk: float, first: bool = False) -> float:
