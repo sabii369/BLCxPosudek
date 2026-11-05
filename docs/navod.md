@@ -334,21 +334,20 @@ mostu a grafy).
 
 ### 8.3 Grafy zatížení mostu a napětí v řezech (protokol, karta 7)
 
-V kapitole „Zatížení z modelu mostu (BLC)“ HTML protokolu (a v seznamu grafů na kartě 7)
-jsou čtyři obrázky: **g0**, **g − g0**, **q – max M ve středu rozpětí**, **q – max V u podpory**.
-Každý obsahuje:
+**Kapitola zatížení** („Zatížení z modelu mostu (BLC)“) – půdorys mostu se zatížením
+(nosníky, spáry, osy podpor, posuzovaný nosník oranžově, řezy „střed“ a „podpora“ červeně):
 
-- půdorys mostu se zatížením stavu (nosníky, spáry, osy podpor, posuzovaný nosník oranžově,
-  řezy „střed“ a „podpora“); u q plošky kol vozidla v rozhodující poloze – poloha se hledá
-  mezi stejnými polohami jako obálka q: maximum M posuzovaného nosníku ve středu 1. pole
-  a maximum V v řezu d od osy první podpory,
-- napětí v betonu po výšce průřezu posuzovaného nosníku v řezu posudku nejbližším středu
-  rozpětí a řezu d od ložiska (tah +): plná čára celkem, čárkovaně jen daný stav,
-  tečkovaně stav před jeho vnesením; předpětí P_m,t: g0 – vnesení předpětí,
-  g − g0 – vnesení ostatních stálých zatížení, q – konec životnosti; q charakteristicky
-  v dané poloze vozidla; meze −0,6·f_ck a f_ctm.
+- vlastní tíha g0 | ostatní stálé g − g0 (chodníky, vozovka, zábradlí, svodidla),
+- vozidlo v poloze pro max M ve středu rozpětí | pro max V u podpory (řez d od osy ložiska);
+  poloha se hledá mezi stejnými polohami jako obálka q.
 
-Momenty: g0 z posudku (z průřezu), g − g0 a q z modelu mostu (posuzovaný nosník).
+**Kapitola napětí v betonu** – pod každý graf „Napětí v krajních vláknech po délce – fáze“
+je doplněn graf „Napětí v řezech“: napětí po výšce průřezu v řezu posudku ve středu
+rozpětí a v řezu u podpory (nejblíže vzdálenosti d od ložiska) pro tutéž fázi, se stejnými
+kombinacemi (stálá, resp. charakteristická, častá, kvazistálá) a obálkou P_sup/P_inf ×
+M_max/M_min jako graf po délce, meze tlaku a tahu shodné. Hodnoty v krajních vláknech
+souhlasí s grafem po délce (napětí je po výšce lineární, obálka variant je lomená).
+Grafy jsou i v seznamu grafů na kartě 7 (za grafem napětí příslušné fáze).
 
 ### 8.4 Soubor
 

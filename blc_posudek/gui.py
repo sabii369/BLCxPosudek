@@ -380,14 +380,22 @@ class AplikaceMost(Aplikace):
         self._na_pozadi(lambda: uloz_protokol_most(model, cil), hotovo, "Vytvářím HTML protokol…")
 
     def _sestav_seznam_grafu(self, m) -> dict:
-        """Grafy výsledků posudku + zatížení mostu s napětím v řezech."""
-        from .grafy_most import FUNKCE, GRAFY
+        """Grafy výsledků posudku + zatížení na mostě a napětí v řezech (pod napětím fáze)."""
+        from .grafy_most import seznam_grafu
         s = super()._sestav_seznam_grafu(m)
-        if getattr(m, "blc", None):
-            for k, (nazev, _, ucel) in GRAFY.items():
-                if ucel is None or ucel in m.blc["polohy"]:
-                    s[nazev] = FUNKCE[k]
-        return s
+        navic = seznam_grafu(m)
+        rezy = {k: v for k, v in navic.items() if not k.startswith("Zatížení")}
+        out = {}
+        for k, v in s.items():
+            out[k] = v
+            if k == "Vnitřní síly":
+                out.update({kk: vv for kk, vv in navic.items() if kk.startswith("Zatížení")})
+            if k.startswith("Napětí v betonu – "):
+                nazev = "Napětí v řezech – " + k[len("Napětí v betonu – "):]
+                if nazev in rezy:
+                    out[nazev] = rezy.pop(nazev)
+        out.update(rezy)
+        return out
 
     # =====================================================================
     # Zobrazení

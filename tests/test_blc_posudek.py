@@ -86,30 +86,46 @@ def test_zadany_nosnik_a_rezim(d, vysledek):
 
 
 def test_napeti_v_rezech(vysledek):
-    from blc_posudek.grafy_most import napeti_v_rezu, rezy_posudku
+    import numpy as np
+    from blc_posudek.grafy_most import profily_faze, rezy_posudku
     vys, o, model = vysledek
     rz = rezy_posudku(model)
-    i, x = rz["stred"]
-    pol = model.blc["polohy"]["M"]
-    d = napeti_v_rezu(model, "q", i, x, pol)
-    assert set(d["slozky"]) == {"P", "g0", "g-g0", "q"}
-    assert d["M"]["q"] == approx(pol.hodnota, rel=0.02)            # řez posudku ≈ střed
-    sq = d["slozky"]["q"]
-    assert sq[0] > 0 > sq[-1]                                       # kladný M: tah dole
     i, x = rz["podpora"]
-    assert 0.0 < x < 1.5 and d["faze"] == model.faze[-1].nazev
+    assert 0.0 < x < 1.5 and i != model.ia
+    for idx, f in enumerate(model.faze):
+        res = model.msp_napeti[f.nazev]
+        for ii in (rz["stred"][0], i):
+            prof = profily_faze(model, idx, ii)
+            assert list(prof) == list(res)                 # stejné kombinace jako graf po délce
+            for druh, (z, lo, hi) in prof.items():
+                sh = [v[0][ii] for v in res[druh].values()]
+                sd = [v[1][ii] for v in res[druh].values()]
+                assert lo[0] == approx(min(sd)) and hi[0] == approx(max(sd))    # dolní vlákna
+                assert lo[-1] == approx(min(sh)) and hi[-1] == approx(max(sh))  # horní vlákna
+                assert np.all(lo <= hi + 1e-12)
 
 
 def test_grafy_most(vysledek):
+    import matplotlib.pyplot as plt
     from pb_posudek import grafy
-    from blc_posudek.grafy_most import FUNKCE
+    from blc_posudek.grafy_most import seznam_grafu
     model = vysledek[2]
+    s = seznam_grafu(model)
+    assert len(s) == 2 + len(model.faze)
     with grafy.vracet_obrazky():
-        for fn in FUNKCE.values():
+        for nazev, fn in s.items():
             fig = fn(model, None)
-            assert fig is not None and len(fig.axes) == 3
-            import matplotlib.pyplot as plt
+            assert fig is not None and len(fig.axes) == 2, nazev
             plt.close(fig)
+
+
+def test_obrazky_v_kapitolach(vysledek):
+    model = vysledek[2]
+    kap = {k.nazev: [o.soubor for t, o in k.polozky if t == "obrazek"] for k in model.protokol.kapitoly}
+    assert kap["Zatížení z modelu mostu (BLC)"] == ["blc_zat_stale", "blc_zat_q"]
+    for idx, f in enumerate(model.faze):
+        obr = kap[f"Napětí v betonu – {f.nazev_t}"]
+        assert obr[obr.index(f"napeti_{idx}") + 1] == f"blc_rez_{idx}"   # hned pod grafem fáze
 
 
 def test_davka(tmp_path):
@@ -120,10 +136,10 @@ def test_davka(tmp_path):
     assert (tmp_path / "most" / "vnitrni_sily.json").exists()
     html = (tmp_path / "protokol.html").read_text(encoding="utf-8")
     assert "Zatížení z modelu mostu (BLC)" in html
-    for popis in ("vlastní tíha g0", "ostatní stálé g − g0", "q, max M ve středu rozpětí",
-                  "q, max V u podpory"):
-        assert f"<figcaption>Zatížení mostu – {popis}" in html
-    for k in ("blc_g0", "blc_g", "blc_qM", "blc_qV"):
+    assert "<figcaption>Zatížení na mostě – vlastní tíha g0" in html
+    assert "<figcaption>Zatížení na mostě – vozidlo v poloze pro max M" in html
+    assert html.count("<figcaption>Napětí po výšce průřezu v řezu ve středu rozpětí") == 4
+    for k in ("blc_zat_stale", "blc_zat_q", "blc_rez_0", "blc_rez_3"):
         assert (tmp_path / "obrazky" / f"{k}.png").exists()
 
 
@@ -153,9 +169,12 @@ def test_gui(tmp_path):
             time.sleep(0.05)
         assert app.model is not None
         assert len(app.t_blc.get_children()) == 10
-        assert "Zatížení mostu – q, max M ve středu rozpětí" in app._seznam_grafu
-        app._zobraz_graf("Zatížení mostu – q, max V u podpory")
-        assert app.var_graf.get() == "Zatížení mostu – q, max V u podpory"
+        nazvy = list(app._seznam_grafu)
+        assert "Zatížení mostu – vlastní tíha g0 a ostatní stálé g − g0" in nazvy
+        i = nazvy.index("Napětí v betonu – Konec životnosti")
+        assert nazvy[i + 1] == "Napětí v řezech – Konec životnosti"
+        app._zobraz_graf("Napětí v řezech – Konec životnosti")
+        assert app.var_graf.get() == "Napětí v řezech – Konec životnosti"
         d = app.ziskej_data()
         assert d["zatizeni"]["zpusob"] == "kombinace" and len(d["zatizeni"]["kombinace"]) == 5
         app.f_voz.prom["vozidlo"].set("MLC kolové")

@@ -47,8 +47,8 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
     `zatizeni_pb_dict`, `vloz_do_vstupu_pb`,
   - `vstup_sily.py` – vstupní TOML (`priklady/sily_KA67_12.toml`), `plotting_sily.py` – grafy.
 - `blc_posudek/`: `vypocet.py` (`parametry_blc` – L0, beton, A/Iy z průřezu, γ z [posouzeni]; `zatizeni_z_blc`,
-  `spocti` → `model.blc = {vys, o, polohy}`, `kapitola_blc` do protokolu, `uloz_protokol_most` = protokol posudku
-  + grafy mostu), `grafy_most.py` (půdorys se zatížením + napětí v řezu střed/podpora; tvar `fn(model, adr)` jako
+  `spocti` → `model.blc = {vys, o, polohy}`, `kapitola_blc` + `grafy_most.vloz_do_protokolu` (obrázky do kapitol), `uloz_protokol_most` = protokol posudku
+  + grafy mostu), `grafy_most.py` (půdorysy se zatížením do kapitoly zatížení, napětí v řezech střed/podpora pod graf každé fáze z `msp_napeti`; tvar `fn(model, adr)` jako
   `pb_posudek.grafy`), `gui.py` (`AplikaceMost`), `__main__.py`; vzor `priklady/most_KA67_12.toml`.
 - `vnitrni_sily.polohy_q(vys, o)` = rozhodující polohy vozidla (max M ve středu, max V v řezu d) z poloh obálky;
   `VysledekSil.model` a `q_nastaveni` drží 2D model a generátor poloh; `plotting_sily.kresli_most` = půdorys.

@@ -28,9 +28,9 @@ Prostředí je Posudek PB s novou první kartou:
 - Rozpětí L0, délka L a beton jsou společné (karta 0 ↔ 1, 3), A a Iy nosníku se berou
   z průřezu (karta 2), γ_G, ξ a kombinace MSÚ z nastavení (karta 6).
 - **F5** spočítá most (jen změnily-li se jeho vstupy) i posudek; HTML protokol obsahuje
-  kapitolu „Zatížení z modelu mostu (BLC)“ s tabulkou nosníků a grafy: půdorys mostu se
-  zatížením g0, g − g0 a vozidlem v poloze pro max M ve středu rozpětí a max V u podpory,
-  vedle nich napětí v betonu po výšce průřezu ve středu rozpětí a u podpory.
+  kapitolu „Zatížení z modelu mostu (BLC)“ s tabulkou nosníků a půdorysy mostu se zatížením
+  g0, g − g0 a vozidlem v poloze pro max M ve středu rozpětí a max V u podpory; v kapitole
+  napětí je pod grafem každé fáze napětí po výšce průřezu ve středu rozpětí a u podpory.
 - Soubor = vstup Posudku PB + sekce `[blc]`, vzor [`priklady/most_KA67_12.toml`](priklady/most_KA67_12.toml).
 - Balíček `pb_posudek` je převzat z repa `sabii369/PB_posudek` (git subtree) – viz `CLAUDE.md`.
 
