@@ -30,8 +30,7 @@ def main(argv=None) -> int:
     from blc.export_pb import uloz_vysledky
     from blc.vstup_sily import uloz_grafy
     from pb_posudek.protokol import fmt
-    from pb_posudek.report import uloz_protokol
-    from .vypocet import nacti, spocti
+    from .vypocet import nacti, spocti, uloz_protokol_most as uloz_protokol
     vystup = a.vystup or os.path.join(os.path.dirname(os.path.abspath(a.vstup)),
                                       "vystup_" + os.path.splitext(os.path.basename(a.vstup))[0])
     try:

@@ -47,7 +47,11 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
     `zatizeni_pb_dict`, `vloz_do_vstupu_pb`,
   - `vstup_sily.py` – vstupní TOML (`priklady/sily_KA67_12.toml`), `plotting_sily.py` – grafy.
 - `blc_posudek/`: `vypocet.py` (`parametry_blc` – L0, beton, A/Iy z průřezu, γ z [posouzeni]; `zatizeni_z_blc`,
-  `spocti`, `kapitola_blc` do protokolu), `gui.py` (`AplikaceMost`), `__main__.py`; vzor `priklady/most_KA67_12.toml`.
+  `spocti` → `model.blc = {vys, o, polohy}`, `kapitola_blc` do protokolu, `uloz_protokol_most` = protokol posudku
+  + grafy mostu), `grafy_most.py` (půdorys se zatížením + napětí v řezu střed/podpora; tvar `fn(model, adr)` jako
+  `pb_posudek.grafy`), `gui.py` (`AplikaceMost`), `__main__.py`; vzor `priklady/most_KA67_12.toml`.
+- `vnitrni_sily.polohy_q(vys, o)` = rozhodující polohy vozidla (max M ve středu, max V v řezu d) z poloh obálky;
+  `VysledekSil.model` a `q_nastaveni` drží 2D model a generátor poloh; `plotting_sily.kresli_most` = půdorys.
 - Vozidlo q: `vnitrni_sily(Ve=…)` nebo `vnitrni_sily(MLC=…, typ_MLC="k"|"p", dist=None|kolona)`; v `[blc]`
   `vozidlo = "Ve" | "MLC_k" | "MLC_p"`.
 - `tests/`: `test_nosnik_1d.py`, `test_deska_mkp.py`, `test_porovnani.py`, `test_vnitrni_sily.py`, `test_blc_posudek.py`,

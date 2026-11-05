@@ -85,6 +85,33 @@ def test_zadany_nosnik_a_rezim(d, vysledek):
     assert "Ve 80 t" in zat["promenne"][0]["nazev"]
 
 
+def test_napeti_v_rezech(vysledek):
+    from blc_posudek.grafy_most import napeti_v_rezu, rezy_posudku
+    vys, o, model = vysledek
+    rz = rezy_posudku(model)
+    i, x = rz["stred"]
+    pol = model.blc["polohy"]["M"]
+    d = napeti_v_rezu(model, "q", i, x, pol)
+    assert set(d["slozky"]) == {"P", "g0", "g-g0", "q"}
+    assert d["M"]["q"] == approx(pol.hodnota, rel=0.02)            # řez posudku ≈ střed
+    sq = d["slozky"]["q"]
+    assert sq[0] > 0 > sq[-1]                                       # kladný M: tah dole
+    i, x = rz["podpora"]
+    assert 0.0 < x < 1.5 and d["faze"] == model.faze[-1].nazev
+
+
+def test_grafy_most(vysledek):
+    from pb_posudek import grafy
+    from blc_posudek.grafy_most import FUNKCE
+    model = vysledek[2]
+    with grafy.vracet_obrazky():
+        for fn in FUNKCE.values():
+            fig = fn(model, None)
+            assert fig is not None and len(fig.axes) == 3
+            import matplotlib.pyplot as plt
+            plt.close(fig)
+
+
 def test_davka(tmp_path):
     from blc_posudek.__main__ import main
     rc = main([PRIKLAD, "-o", str(tmp_path)])
@@ -93,6 +120,11 @@ def test_davka(tmp_path):
     assert (tmp_path / "most" / "vnitrni_sily.json").exists()
     html = (tmp_path / "protokol.html").read_text(encoding="utf-8")
     assert "Zatížení z modelu mostu (BLC)" in html
+    for popis in ("vlastní tíha g0", "ostatní stálé g − g0", "q, max M ve středu rozpětí",
+                  "q, max V u podpory"):
+        assert f"<figcaption>Zatížení mostu – {popis}" in html
+    for k in ("blc_g0", "blc_g", "blc_qM", "blc_qV"):
+        assert (tmp_path / "obrazky" / f"{k}.png").exists()
 
 
 def _tk() -> bool:
@@ -121,6 +153,9 @@ def test_gui(tmp_path):
             time.sleep(0.05)
         assert app.model is not None
         assert len(app.t_blc.get_children()) == 10
+        assert "Zatížení mostu – q, max M ve středu rozpětí" in app._seznam_grafu
+        app._zobraz_graf("Zatížení mostu – q, max V u podpory")
+        assert app.var_graf.get() == "Zatížení mostu – q, max V u podpory"
         d = app.ziskej_data()
         assert d["zatizeni"]["zpusob"] == "kombinace" and len(d["zatizeni"]["kombinace"]) == 5
         app.f_voz.prom["vozidlo"].set("MLC kolové")

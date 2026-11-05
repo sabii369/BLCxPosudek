@@ -31,7 +31,7 @@ from typing import Optional
 
 from blc.export_pb import zatizeni_pb_dict
 from blc.stale_zatizeni import Vybaveni, LiniovaZatizeni
-from blc.vnitrni_sily import vnitrni_sily, Soucinitele, VysledekSil, NAZVY_STAVU
+from blc.vnitrni_sily import vnitrni_sily, polohy_q, Soucinitele, VysledekSil, NAZVY_STAVU
 
 VOZIDLA = {"Ve": "Ve – výjimečná zatížitelnost", "MLC_k": "MLC kolové", "MLC_p": "MLC pásové"}
 
@@ -195,6 +195,22 @@ def kapitola_blc(model, vys: VysledekSil, o: int) -> None:
     K.tabulka(["Výstup", "y [m]"] + [f"max M {k} [{jm}]" for k in stavy] +
               [f"max |V| {k} [{jv}]" for k in stavy] + [f"M_Ed [{jm}]", f"V_Ed [{jv}]"], rows,
               "Maxima vnitřních sil po nosnících (M_Ed, V_Ed: MSÚ 6.10 včetně g0); ◄ = posuzovaný")
+    b = getattr(model, "blc", None)
+    if b:
+        from .grafy_most import GRAFY, rezy_posudku
+        rz = rezy_posudku(model)
+        K.text("Zatížení na mostě a napětí v betonu posuzovaného nosníku v řezu ve středu rozpětí "
+               f"(x = {fmt(model.x[rz['stred'][0]])} m) a u podpory (x = {fmt(model.x[rz['podpora'][0]])} m, "
+               "tj. ve vzdálenosti d od osy ložiska; tah +, tlak −). Napětí zahrnuje předpětí P_{m,t} "
+               "příslušné fáze: g0 – vnesení předpětí, g − g0 – vnesení ostatních stálých zatížení, "
+               "q – konec životnosti (charakteristická hodnota q v dané poloze vozidla). Plná čára = "
+               "celkem, čárkovaně = jen daný stav, tečkovaně = stav před jeho vnesením; svislé "
+               "čárkované čáry: −0,6·f_{ck} a f_{ctm}.")
+        for p in b["polohy"].values():
+            K.text(p.popis + ".")
+        for klic, (nazev, stav, ucel) in GRAFY.items():
+            if ucel is None or ucel in b["polohy"]:
+                K.obrazek(klic, nazev)
     kap = model.protokol.kapitoly
     i = next((j for j, k in enumerate(kap) if k.nazev.startswith("Zatížení")), len(kap))
     kap.insert(i, K)
@@ -208,5 +224,35 @@ def spocti(d: dict, vys: Optional[VysledekSil] = None, o: Optional[int] = None):
     o = vyber_nosnik(vys, d) if o is None else o
     model = model_ze_slovniku(data_pro_posudek(vys, d, o))
     model.spocitej()
+    model.blc = dict(vys=vys, o=o, polohy=polohy_q(vys, o))
     kapitola_blc(model, vys, o)
     return vys, o, model
+
+
+def uloz_protokol_most(model, adresar="vystup", embed: bool = True):
+    """HTML protokol posudku včetně grafů zatížení mostu (kapitola BLC)."""
+    import json
+    from pathlib import Path
+    from pb_posudek.grafy import vykresli_vse
+    from pb_posudek.report import sestav_html
+    from .grafy_most import vykresli_most
+    adr = Path(adresar)
+    adr.mkdir(parents=True, exist_ok=True)
+    adr_obr = adr / "obrazky"
+    if not model.protokol.posudky:
+        model.spocitej()
+    obr = vykresli_vse(model, adr_obr)
+    if getattr(model, "blc", None):
+        obr.update(vykresli_most(model, adr_obr))
+    out = adr / "protokol.html"
+    out.write_text(sestav_html(model, obr, adr_obr, embed), encoding="utf-8")
+    vys = dict(
+        projekt=model.projekt,
+        posudky=[v.as_dict() for v in model.protokol.posudky],
+        x=model.x.tolist(),
+        faze=[dict(nazev=f.nazev, t=f.t, P_kN=(-model._sily_predpeti(f.sigma)[0]).tolist(),
+                   sigma_p=[s.tolist() for s in f.sigma]) for f in model.faze],
+    )
+    (adr / "vysledky.json").write_text(json.dumps(vys, ensure_ascii=False, indent=1, default=float),
+                                       encoding="utf-8")
+    return out

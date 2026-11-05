@@ -24,3 +24,7 @@ Thumbs.db
 
 # Claude Code – osobní nastavení
 .claude/settings.local.json
+
+# Výstupy spojeného programu (protokol posudku)
+vystup/
+vystup_*/

@@ -36,7 +36,8 @@ import numpy as np
 from .geometry import Konstrukce, E_betonu
 from .beam_1d import Nosnik1D, VE_ROZVOR, VE_B_K
 from .vehicles import kolove_vozidlo, pasove_vozidlo
-from .plate_fem import DeskaMKP, Vystupy, obalky_2D, sit_modelu, SitMKP
+from .plate_fem import (DeskaMKP, Vystupy, obalky_2D, sit_modelu, SitMKP, platky_z_naprav,
+                        posun)
 from .stale_zatizeni import Vybaveni, platky_plosne
 
 GAMMA_BETON = 25.0               # objemová tíha železobetonu [kN/m³]
@@ -156,6 +157,8 @@ class VysledekSil:
     kontrola: Dict[str, float] = field(default_factory=dict)
     sit: Optional[SitMKP] = None
     y_vyst: Optional[np.ndarray] = None
+    model: object = field(default=None, repr=False)        # 2D model MKP (pro další stavy)
+    q_nastaveni: Optional[dict] = field(default=None, repr=False)  # polohy vozidla q
 
     # ---- základní údaje --------------------------------------------------
     @property
@@ -208,7 +211,10 @@ class VysledekSil:
         """Průběh stavu `stav` ("g0" | "g-g0" | "q") na výstupu o (0-based)."""
         if stav not in self.stavy:
             raise ValueError(f"Stav '{stav}' nebyl spočten.")
-        s = self.stavy[stav]
+        return self.tabulka_stavu(o, self.stavy[stav])
+
+    def tabulka_stavu(self, o: int, s: StavSil) -> TabulkaSil:
+        """Průběh libovolného stavu (StavSil na síti 2D modelu) na výstupu o."""
         r = self._radky(o)
         k = np.array([a for a, _ in r], dtype=int)
         st = np.array([b for _, b in r])
@@ -478,7 +484,7 @@ def vnitrni_sily(
     y_c = float(y_Ve) if y_Ve is not None else vyb.y_osy_vozovky(B)
     if Ve and MLC:
         raise ValueError("Zadejte jedno vozidlo: Ve, nebo MLC.")
-    voz_popis, rozvor, b_k = "", VE_ROZVOR, VE_B_K
+    voz_popis, rozvor, b_k, q_nast = "", VE_ROZVOR, VE_B_K, None
     if Ve or MLC:
         nos = Nosnik1D(K)
         n_ob = max(1, int(math.ceil(K.Ltot / (krok * K.n_poli))))
@@ -486,7 +492,9 @@ def vnitrni_sily(
             if Ve < 0:
                 raise ValueError("Ve musí být kladné.")
             voz_popis = f"Ve {Ve:g} t"
-            gen = nos.stavy_Ve(Ve, n_ob, roz, extra=True)
+
+            def novy_gen():
+                return nos.stavy_Ve(Ve, n_ob, roz, extra=True)
         else:
             t = (typ_MLC or "k").lower()
             if t not in ("k", "p"):
@@ -497,7 +505,8 @@ def vnitrni_sily(
                 dist = None
             voz_popis = (f"{MLC} {'kolové' if t == 'k' else 'pásové'}" +
                          (f", kolona po {dist:g} m" if dist else ""))
-            gen = nos.stavy_MLC(t, MLC, n_ob, dist, roz, extra=True)
+            def novy_gen(t=t, dist=dist):
+                return nos.stavy_MLC(t, MLC, n_ob, dist, roz, extra=True)
         pul = 0.5 * (rozvor + b_k)
         if y_c - pul < vyb.chodnik_L - 1e-9 or y_c + pul > B - vyb.chodnik_P + 1e-9:
             varovani.append(f"Vozidlo {voz_popis} (šířka {2 * pul:.2f} m, osa y = {y_c:.2f} m) "
@@ -505,9 +514,11 @@ def vnitrni_sily(
         dx = K.x0(y_c)
 
         def stavy_q():
-            for ax, _ in gen:
+            for ax, _ in novy_gen():
                 yield [(q * dyn, s, e) for q, s, e in ax], None
 
+        q_nast = dict(stavy=stavy_q, y1=y_c - 0.5 * rozvor, y2=y_c + 0.5 * rozvor, b_k=b_k,
+                      roz=roz, dx=dx)
         ob = obalky_2D(model, stavy_q(), y_c - 0.5 * rozvor, y_c + 0.5 * rozvor, b_k, roz, dx)
         stavy["q"] = StavSil("q", f"vozidlo {voz_popis}, osa y = {y_c:.2f} m, "
                              f"δ = {dyn:g}, roznos {roz:.2f} m, krok {krok:g} m",
@@ -527,10 +538,92 @@ def vnitrni_sily(
                       dyn=dyn, y_Ve=y_c, roz=roz, vozidlo=voz_popis, rozvor=rozvor, b_k=b_k,
                       soucinitele=soucinitele or Soucinitele(), popis=popis,
                       varovani=varovani, kontrola=kontrola, sit=sit_modelu(model),
-                      y_vyst=np.asarray(vyst.y, float))
+                      y_vyst=np.asarray(vyst.y, float), model=model, q_nastaveni=q_nast)
     if tisk:
         vypis(vys)
     return vys
+
+
+@dataclass
+class PolohaVozidla:
+    """Rozhodující poloha pohyblivého zatížení pro jeden řez posuzovaného výstupu."""
+    ucel: str                  # "M" (max M) | "V" (max V)
+    x: float                   # lokální x řezu na výstupu [m] (od osy první podpory)
+    hodnota: float             # M [kNm] / V [kN] v řezu (deska: na 1 m)
+    napravy: list              # nápravy (q [kN/m], s, e) v globálním x 2D modelu, vč. δ
+    platky: list               # plošky kol (F, x0, x1, y0, y1) – pro vykreslení
+    stav: StavSil              # vnitřní síly všech výstupů v této poloze
+    popis: str = ""
+
+
+def polohy_q(vys: VysledekSil, o: int, x_M: Optional[float] = None,
+             x_V: Optional[float] = None, davka: int = 48) -> Dict[str, PolohaVozidla]:
+    """Polohy vozidla q s maximem M v řezu x_M (výchozí střed 1. pole) a maximem V
+    v řezu x_V (výchozí d od první podpory) na výstupu o.  Prohledají se stejné
+    polohy jako pro obálku q.  Vrací {"M": …, "V": …} (prázdné, není-li q)."""
+    qn, model = vys.q_nastaveni, vys.model
+    if qn is None or model is None:
+        return {}
+    Vy = vys.vyst
+    i0, i1 = int(Vy.i0[o]), int(Vy.i1[o])
+    xl = vys.x_lokalni(o)
+    x_M = 0.5 * vys.K.L[0] if x_M is None else float(x_M)
+    x_V = vys.K.d if x_V is None else float(x_V)
+    kk = np.arange(i0, i1 + 1)
+
+    def uzel(x):
+        return int(kk[np.argmin(np.abs(xl[kk] - x))])
+
+    kM, kV = uzel(x_M), uzel(x_V)
+    S = Vy.S[o]
+    best = {"M": [-np.inf, None], "V": [-np.inf, None]}
+
+    def zpracuj(buf):
+        U = model.res_batch(np.stack([f for f, _ in buf], axis=1))
+        PM, PVm, PVp = model.vyslednice(U)
+        M = np.einsum("s,sxb->xb", S, PM)
+        Vm = np.einsum("s,sxb->xb", S, PVm)
+        Vp = np.einsum("s,sxb->xb", S, PVp)
+        vM = M[kM]
+        vV = np.abs(Vp[kV]) if kV == i0 else np.abs(0.5 * (Vm[kV] + Vp[kV]))
+        for key, val in (("M", vM), ("V", vV)):
+            j = int(np.argmax(val))
+            if val[j] > best[key][0]:
+                best[key] = [float(val[j]), buf[j][1]]
+
+    buf = []
+    for ax, _ in qn["stavy"]():
+        axg = posun(ax, qn["dx"])
+        pl = platky_z_naprav(axg, qn["y1"], qn["y2"], qn["b_k"], qn["roz"])
+        f = model.zatizeni(pl)
+        if not np.any(f):
+            continue
+        buf.append((f, (axg, pl)))
+        if len(buf) >= davka:
+            zpracuj(buf)
+            buf = []
+    if buf:
+        zpracuj(buf)
+
+    jm, jv = vys.jednotky
+    out = {}
+    for key, x, k in (("M", x_M, kM), ("V", x_V, kV)):
+        if best[key][1] is None:
+            continue
+        axg, pl = best[key][1]
+        u = model.res(model.zatizeni(pl))
+        PM, PVm, PVp = model.vyslednice(u)
+        st = StavSil.staly(f"q-{key}", "", Vy.S @ PM, Vy.S @ PVm, Vy.S @ PVp)
+        if key == "M":
+            h = float(st.M_max[o, k])
+            st.popis = (f"{vys.vozidlo} – poloha pro max M v řezu x = {xl[k]:.2f} m: "
+                        f"M = {h:.1f} {jm}")
+        else:
+            h = float(st.Vp_max[o, k]) if k == i0 else float(st.Vs_max[o, k])
+            st.popis = (f"{vys.vozidlo} – poloha pro max V v řezu x = {xl[k]:.2f} m od podpory: "
+                        f"V = {h:.1f} {jv}")
+        out[key] = PolohaVozidla(key, float(xl[k]), h, axg, pl, st, st.popis)
+    return out
 
 
 def vypis(v: VysledekSil) -> None:

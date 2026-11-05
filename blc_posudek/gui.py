@@ -361,15 +361,33 @@ class AplikaceMost(Aplikace):
             self._zobraz_vysledky(model)
             if self._protokol_po_vypoctu:
                 self._protokol_po_vypoctu = False
-                super(AplikaceMost, self).protokol()
+                self.after(10, self.protokol)
         self._na_pozadi(prace, hotovo, "Výpočet mostu (BLC) a posudku nosníku…")
 
     def protokol(self):
+        """HTML protokol posudku včetně kapitoly a grafů zatížení mostu."""
         if self.model is None:
             self._protokol_po_vypoctu = True
             self.spocitej()
             return
-        super().protokol()
+        import webbrowser
+        from .vypocet import uloz_protokol_most
+        model, cil = self.model, self.vystup
+
+        def hotovo(p):
+            self.stav.set(f"Protokol uložen: {p}")
+            webbrowser.open(Path(p).resolve().as_uri())
+        self._na_pozadi(lambda: uloz_protokol_most(model, cil), hotovo, "Vytvářím HTML protokol…")
+
+    def _sestav_seznam_grafu(self, m) -> dict:
+        """Grafy výsledků posudku + zatížení mostu s napětím v řezech."""
+        from .grafy_most import FUNKCE, GRAFY
+        s = super()._sestav_seznam_grafu(m)
+        if getattr(m, "blc", None):
+            for k, (nazev, _, ucel) in GRAFY.items():
+                if ucel is None or ucel in m.blc["polohy"]:
+                    s[nazev] = FUNKCE[k]
+        return s
 
     # =====================================================================
     # Zobrazení

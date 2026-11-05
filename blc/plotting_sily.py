@@ -4,16 +4,132 @@ plotting_sily.py
 Grafy vnitřních sil pro posudek (vnitrni_sily.VysledekSil):
   plot_sily     průběhy M a V stavů g0, g − g0, q (obálka) na jednom výstupu,
   plot_pricne   příčné rozdělení: max M a max |V| stavů po výstupech + příčný řez
-                (chodníky, vozovka, liniová zatížení, poloha vozidla).
+                (chodníky, vozovka, liniová zatížení, poloha vozidla),
+  kresli_most   půdorys mostu se zatížením stavu g0, g − g0 nebo q v dané poloze
+                (do zadané osy), plot_zatizeni_most – samostatný graf.
 """
 
 from __future__ import annotations
+from typing import Optional, Sequence
+
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.patches import Polygon, Rectangle
 
-from .vnitrni_sily import VysledekSil, NAZVY_STAVU
+from .vnitrni_sily import VysledekSil, NAZVY_STAVU, PolohaVozidla
 
 BARVY = {"g0": "#7f7f7f", "g-g0": "#2e75b6", "q": "#e74c3c"}
+C_NOSNIK, C_SPARA, C_POS = "#d5e8f5", "#eeeeee", "#f39c12"
+
+
+def _x_glob(vys: VysledekSil, o: int, x_lok: float, y: float) -> float:
+    """Globální x 2D modelu pro lokální x výstupu o v příčné poloze y."""
+    if getattr(vys.vyst, "lokalni", False):
+        return x_lok + vys.K.x0(y)
+    return x_lok + float(vys.vyst.x0[o])
+
+
+def _pas(ax, vys, y0, y1, **kw):
+    """Pás mostovky y0 … y1 po celé délce (rovnoběžník podél šikmých podpor)."""
+    K = vys.K
+    a, b = K.x0(y0), K.x0(y1)
+    ax.add_patch(Polygon([(a, y0), (a + K.Ltot, y0), (b + K.Ltot, y1), (b, y1)], closed=True, **kw))
+
+
+def kresli_most(ax, vys: VysledekSil, o: int, stav: str, poloha: Optional[PolohaVozidla] = None,
+                rezy: Sequence[tuple] = ()):
+    """Půdorys mostu: nosníky (posuzovaný zvýrazněn), osy podpor a zatížení stavu
+    "g0" | "g-g0" | "q" (q = plošky kol v poloze `poloha`).  rezy = [(x_lok, popisek)]
+    – řezy na posuzovaném výstupu."""
+    K, vyb = vys.K, vys.vybaveni
+    B, L = K.B, K.Ltot
+    jm = "kN/m²" if vys.deska else "kN/m"
+    # nosná konstrukce
+    if vys.deska:
+        _pas(ax, vys, 0.0, B, fc=C_NOSNIK, ec="#2e75b6", lw=0.8)
+    else:
+        for k, y in enumerate(K.y_nos):
+            y0 = y - 0.5 * K.b
+            x0 = K.x0(y)
+            ax.add_patch(Rectangle((x0, y0), L, K.b, fc=C_NOSNIK, ec="#2e75b6", lw=0.6))
+            if K.spara and k < K.N - 1:
+                ax.add_patch(Rectangle((min(x0, K.x0(y + K.rozted)), y0 + K.b),
+                                       L, K.b_s, fc=C_SPARA, ec="#bbbbbb", lw=0.4))
+    # zatížení
+    if stav == "g0":
+        if vys.deska:
+            _pas(ax, vys, 0.0, B, fc=BARVY["g0"], alpha=0.35, hatch="//", ec="#555555", lw=0)
+        else:
+            for y in K.y_nos:
+                ax.add_patch(Rectangle((K.x0(y), y - 0.5 * K.b), L, K.b, fc=BARVY["g0"], alpha=0.35,
+                                       hatch="//", ec="#555555", lw=0))
+        txt = (f"g0 = {vys.g0:.2f} {jm}" +
+               ("" if vys.deska else " – každý nosník samostatně (bez spolupůsobení)"))
+        ax.text(K.x0(0.5 * B) + 0.5 * L, 0.5 * B, txt, ha="center", va="center", fontsize=9,
+                bbox=dict(fc="white", ec="#888888", alpha=0.9))
+    elif stav == "g-g0":
+        for nazev, g, y0, y1 in vyb.zony(B):
+            voz = "vozovka" in nazev
+            _pas(ax, vys, y0, y1, fc="#555555" if voz else "#bbbbbb", alpha=0.45, ec="none")
+            ym = 0.5 * (y0 + y1)
+            ax.text(K.x0(ym) + 0.72 * L, ym, f"{nazev} {g:g} kN/m²", ha="center", va="center",
+                    fontsize=7, color="w" if voz else "k")
+        for l in vyb.liniova_vse(B):
+            _pas(ax, vys, max(0.0, l.y - 0.5 * l.sirka), min(B, l.y + 0.5 * l.sirka),
+                 fc=BARVY["g-g0"], alpha=0.85, ec="none")
+            ax.text(K.x0(l.y) + 0.03 * L, l.y, f"{l.nazev} {l.g:g} kN/m", fontsize=6.5, va="center",
+                    color=BARVY["g-g0"], bbox=dict(fc="white", ec="none", alpha=0.75, pad=1))
+        if vys.g_spary:
+            ax.text(K.x0(0.0) + L, -0.08 * B, f"výplň spáry {vys.g_spary:g} kN/m (samostatně)",
+                    ha="right", va="top", fontsize=7)
+    elif stav == "q" and poloha is not None:
+        for F, x0, x1, y0, y1 in poloha.platky:
+            y0c, y1c = max(0.0, y0), min(B, y1)
+            xa = K.x0(0.5 * (y0c + y1c))
+            x0c, x1c = max(x0, xa), min(x1, xa + L)      # část mimo most jde do opěry
+            if x1c <= x0c or y1c <= y0c:
+                continue
+            ax.add_patch(Rectangle((x0c, y0c), x1c - x0c, y1c - y0c, fc=BARVY["q"], alpha=0.6,
+                                   ec="#a52a1a", lw=0.5))
+        ax.set_title(poloha.popis.replace(": ", ":\n", 1), fontsize=8.5)
+    # posuzovaný výstup
+    yo = float(vys.vyst.y[o])
+    if vys.deska:
+        w = vys.vyst.sirka_okna
+        _pas(ax, vys, yo - 0.5 * w, yo + 0.5 * w, fill=False, ec=C_POS, lw=2.2)
+    else:
+        ax.add_patch(Rectangle((K.x0(yo), yo - 0.5 * K.b), L, K.b, fill=False, ec=C_POS, lw=2.2))
+    ax.text(K.x0(yo) - 0.02 * L, yo, vys.popisky[o], ha="right", va="center", fontsize=8,
+            color=C_POS, fontweight="bold")
+    # osy podpor
+    for xp in K.x_podpor:
+        ax.plot([xp + K.x0(0.0), xp + K.x0(B)], [0.0, B], color="k", lw=1.0, ls="-.")
+    # řezy
+    hw = 0.5 * (vys.vyst.sirka_okna if vys.deska else K.b) + 0.25
+    for x_lok, pop in rezy:
+        xg = _x_glob(vys, o, x_lok, yo)
+        ax.plot([xg, xg], [yo - hw, yo + hw], color="#b42323", lw=1.8)
+        ax.text(xg, yo + hw, pop, ha="center", va="bottom", fontsize=7, color="#b42323",
+                bbox=dict(fc="white", ec="none", alpha=0.8, pad=1))
+    sx = abs(0.5 * B * K.cot)
+    ax.set_xlim(-sx - 0.06 * L, L + sx + 0.03 * L)
+    ax.set_ylim(B + 0.12 * B + 0.3, -0.12 * B - 0.3)      # y dolů = pohled shora po směru x
+    ax.set_aspect("equal")
+    ax.set_xlabel("x [m] – podél mostu")
+    ax.set_ylabel("y [m]")
+
+
+def plot_zatizeni_most(vys: VysledekSil, o: int, stav: str,
+                       poloha: Optional[PolohaVozidla] = None, rezy=(), show: bool = True):
+    """Samostatný graf půdorysu mostu se zatížením (viz kresli_most)."""
+    fig, ax = plt.subplots(figsize=(10, 4.5))
+    kresli_most(ax, vys, o, stav, poloha, rezy)
+    if stav != "q":
+        ax.set_title(NAZVY_STAVU.get(stav, stav))
+    fig.tight_layout()
+    if show:
+        plt.show()
+    return fig
 
 
 def plot_sily(vys: VysledekSil, o: int, show: bool = True):

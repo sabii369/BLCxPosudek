@@ -332,7 +332,25 @@ mostu a grafy).
 - Změní-li se vstup ovlivňující model mostu (i průřez nebo rozpětí), karta 0 a 5 to
   hlásí a F5 most přepočítá.
 
-### 8.3 Soubor
+### 8.3 Grafy zatížení mostu a napětí v řezech (protokol, karta 7)
+
+V kapitole „Zatížení z modelu mostu (BLC)“ HTML protokolu (a v seznamu grafů na kartě 7)
+jsou čtyři obrázky: **g0**, **g − g0**, **q – max M ve středu rozpětí**, **q – max V u podpory**.
+Každý obsahuje:
+
+- půdorys mostu se zatížením stavu (nosníky, spáry, osy podpor, posuzovaný nosník oranžově,
+  řezy „střed“ a „podpora“); u q plošky kol vozidla v rozhodující poloze – poloha se hledá
+  mezi stejnými polohami jako obálka q: maximum M posuzovaného nosníku ve středu 1. pole
+  a maximum V v řezu d od osy první podpory,
+- napětí v betonu po výšce průřezu posuzovaného nosníku v řezu posudku nejbližším středu
+  rozpětí a řezu d od ložiska (tah +): plná čára celkem, čárkovaně jen daný stav,
+  tečkovaně stav před jeho vnesením; předpětí P_m,t: g0 – vnesení předpětí,
+  g − g0 – vnesení ostatních stálých zatížení, q – konec životnosti; q charakteristicky
+  v dané poloze vozidla; meze −0,6·f_ck a f_ctm.
+
+Momenty: g0 z posudku (z průřezu), g − g0 a q z modelu mostu (posuzovaný nosník).
+
+### 8.4 Soubor
 
 Vstup Posudku PB rozšířený o sekci `[blc]` (popis klíčů v `blc_posudek/vypocet.py`).
 Uložený soubor obsahuje i sekci `[zatizeni]` z posledního výpočtu mostu, takže jde otevřít

@@ -130,6 +130,34 @@ def test_q_obalka_proti_1D(vys):
     assert "q" in vys.stavy and vys.stavy["q"].pohyblivy
 
 
+def test_polohy_q_odpovidaji_obalce(vys):
+    from blc.vnitrni_sily import polohy_q
+    o = vys.rozhodujici("M")
+    p = polohy_q(vys, o)
+    assert set(p) == {"M", "V"}
+    t = vys.tabulka(o, "q")
+    k = int(np.argmin(np.abs(t.x - p["M"].x)))
+    assert p["M"].hodnota == approx(t.M_max[k], rel=1e-9)        # stejné polohy jako obálka
+    k = int(np.argmin(np.abs(t.x - p["V"].x)))
+    assert p["V"].hodnota == approx(t.V_max[k], rel=1e-9)
+    assert p["M"].x == approx(L0 / 2, abs=0.13) and p["V"].x == approx(0.55, abs=0.13)
+    F = sum(pl[0] for pl in p["M"].platky)
+    assert F == approx(60.0 * 10.0)                                # Ve 60 t, vše na mostě
+
+
+def test_kresli_most():
+    import matplotlib.pyplot as plt
+    from blc.plotting_sily import plot_zatizeni_most
+    from blc.vnitrni_sily import polohy_q
+    v = vnitrni_sily(L=[10.0, 12.0], N=4, b=1.0, Iy=0.03, beton="C30/37", spara=True, b_s=0.3,
+                     Iy_s=0.01, alfa=110.0, vybaveni=VYB, g0=8.0, MLC="MLC40", krok=0.5, tisk=False)
+    p = polohy_q(v, 1)
+    for stav, pol in (("g0", None), ("g-g0", None), ("q", p["M"])):
+        fig = plot_zatizeni_most(v, 1, stav, pol, rezy=[(5.0, "střed")], show=False)
+        assert fig.axes
+        plt.close(fig)
+
+
 def test_q_dynamicky_soucinitel():
     a = vnitrni_sily(**NOSNIKY, Ve=60.0, krok=0.5, tisk=False)
     b = vnitrni_sily(**NOSNIKY, Ve=60.0, krok=0.5, dyn=1.2, tisk=False)
