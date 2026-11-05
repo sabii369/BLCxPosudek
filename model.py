@@ -1289,6 +1289,11 @@ class NosnikPB:
             stojina = (zz >= 0.1 * P.h) & (zz <= 0.9 * P.h)
         zz, bz = zz[stojina], bz[stojina]
         Sz = P.staticky_moment(zz)
+        # hustá síť po celé výšce se zdvojenými body u zlomů šířky (skoky τ na rozhraní stojina/pásnice)
+        zl = np.unique(np.concatenate([P.obrys[:, 1]] + [o[:, 1] for o in P.otvory]))
+        zl = zl[(zl > 0) & (zl < P.h)]
+        zf = np.unique(np.concatenate([np.linspace(0, P.h, 121), zl - 0.01, zl + 0.01]))
+        Sf = P.staticky_moment(zf)
         Mg0 = self.zs_g0.M_max
         self.hlavni = {}
         for f in self.faze:
@@ -1315,9 +1320,20 @@ class NosnikPB:
                         eta_x[i] = max(eta_x[i], eta[j])
                         if eta[j] > best[0]:
                             best = (float(eta[j]), i, j, float(s1[j]), float(s3[j]), float(fctb[j]))
-                            prof = (sx.copy(), tau.copy(), s1.copy(), s3.copy(), fctb.copy())
+                            prof = (NP[i], MP[i], Mg0[i], Mx, V, r)
             eta, i, j, s1, s3, fctb = best
-            self.hlavni[f.nazev] = dict(z=zz, x=self.x, eta_x=eta_x, i=i, prof=prof)
+            # průběh po celé výšce průřezu v rozhodujícím řezu (pro graf; posudek jen ve stojině)
+            if prof is not None:
+                NPi, MPi, Mg0i, Mx, V, r = prof
+                bf = P.sirka(zf)
+                tf = np.divide(V * 1e3 * Sf, self.secL[i, 2] * bf, out=np.zeros_like(zf), where=bf > 1.0)
+                sf = self._napeti(zf, NPi, MPi, Mg0i, Mx, r, idx=i)
+                rf = np.sqrt((sf / 2) ** 2 + tf ** 2)
+                s3f = sf / 2 - rf
+                prof = (sf, tf, sf / 2 + rf, s3f,
+                        np.where(s3f < 0, (1 - 0.8 * np.abs(s3f) / b.fck) * b.fctk005, b.fctk005))
+            self.hlavni[f.nazev] = dict(z=zf, x=self.x, eta_x=eta_x, i=i, prof=prof,
+                                        z_stojina=(float(zz.min()), float(zz.max())), z_rozh=float(zz[j]))
             K.krok(f"{f.nazev}: rozhodující místo", "x; z", "", f"{fmt(self.x[i], 3)} m; {fmt(zz[j])} mm")
             K.krok("Hlavní napětí", "σ_{1,3} = σ_{x}/2 ± √((σ_{x}/2)^{2} + τ^{2})", "", f"{fmt(s1)}; {fmt(s3)}", "MPa")
             K.krok("Směrově závislá pevnost v tahu", "f_{ctb} = (1 − 0,8·|σ_{3}|/f_{ck})·f_{ctk,0,05}",

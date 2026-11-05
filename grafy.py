@@ -281,11 +281,17 @@ def hlavni_napeti(m, adr):
     z = h["z"]
     fig, axs = plt.subplots(1, 2, figsize=(10, 4.2))
     ax = axs[0]
+    z0, z1 = h["z_stojina"]
+    ax.axhspan(z0, z1, color=INK2, alpha=0.08, lw=0, label="posuzovaná oblast")
     ax.plot(sx, z, color=C[0], label="σ_x")
-    ax.plot(tau, z, color=C[1], label="τ")
+    ax.plot(np.abs(tau), z, color=C[1], lw=1.8, label="|τ|")
     ax.plot(s1, z, color=C[2], label="σ_1")
     ax.plot(s3, z, color=C[6], label="σ_3")
     ax.plot(fctb, z, color=BAD, ls="--", lw=1.2, label="f_ctb")
+    zr = h["z_rozh"]
+    ax.plot(np.interp(zr, z, s1), zr, "o", color=C[2], ms=5)
+    ax.axvline(0, color=INK2, lw=0.8)
+    ax.set_ylim(0, z[-1])
     ax.set(xlabel="napětí [MPa]", ylabel="z [mm]", title=f"Řez x = {m.x[h['i']]:.2f} m – {f}")
     ax.legend(fontsize=8)
     ax = axs[1]
