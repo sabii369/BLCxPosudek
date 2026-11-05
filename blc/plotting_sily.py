@@ -11,7 +11,6 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .beam_1d import VE_ROZVOR, VE_B_K
 from .vnitrni_sily import VysledekSil, NAZVY_STAVU
 
 BARVY = {"g0": "#7f7f7f", "g-g0": "#2e75b6", "q": "#e74c3c"}
@@ -72,11 +71,11 @@ def plot_pricne(vys: VysledekSil, show: bool = True):
     for l in vyb.liniova_vse(B):
         aR.add_patch(plt.Rectangle((l.y - 0.5 * l.sirka, 0.4), l.sirka, 0.35, color="#2e75b6"))
         aR.text(l.y, 0.85, f"{l.nazev}\n{l.g:g}", ha="center", va="bottom", fontsize=6)
-    if vys.Ve:
-        for yc in (vys.y_Ve - 0.5 * VE_ROZVOR, vys.y_Ve + 0.5 * VE_ROZVOR):
-            aR.add_patch(plt.Rectangle((yc - 0.5 * VE_B_K, -0.45), VE_B_K, 0.3,
+    if "q" in vys.stavy:
+        for yc in (vys.y_Ve - 0.5 * vys.rozvor, vys.y_Ve + 0.5 * vys.rozvor):
+            aR.add_patch(plt.Rectangle((yc - 0.5 * vys.b_k, -0.45), vys.b_k, 0.3,
                                        color="#e74c3c", alpha=0.7))
-        aR.text(vys.y_Ve, -0.75, f"Ve = {vys.Ve:g} t", ha="center", fontsize=7, color="#e74c3c")
+        aR.text(vys.y_Ve, -0.75, vys.vozidlo, ha="center", fontsize=7, color="#e74c3c")
     if not vys.deska:
         for k in range(vys.K.N):
             y0 = k * vys.K.rozted

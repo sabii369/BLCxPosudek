@@ -130,7 +130,7 @@ def toml_zatizeni_pb(vys: VysledekSil, o: int, L_nosniku: Optional[float] = None
         hl.append(f"# {st.nazev}: {st.popis}")
     hl.append(f"# Součinitele: γ_G = {s.gamma_G:g}, γ_G,inf = {s.gamma_G_inf:g}, ξ = {s.xi:g}, "
               f"γ_Q = {s.gamma_Q:g}, ψ0 = {s.psi0:g}, ψ1 = {s.psi1:g}, ψ2 = {s.psi2:g} "
-              "(pro Ve ověřit)")
+              "(pro vozidlo ověřit)")
     for w in vys.varovani:
         hl.append(f"# ! {w}")
     out = hl + ["", "[zatizeni]", f'zpusob = "{rezim}"', "obsahuje_vlastni_tihu = false"]
@@ -163,7 +163,7 @@ def toml_zatizeni_pb(vys: VysledekSil, o: int, L_nosniku: Optional[float] = None
             tq = _odstran_dvojice_x(tq)
             Vq = np.where(np.abs(tq.V_max) >= np.abs(tq.V_min), tq.V_max, tq.V_min)
             out += ["", "[[zatizeni.promenne]]",
-                    f"nazev = {_retezec('Pohyblivé q – Ve ' + format(vys.Ve, 'g') + ' t (BLC ' + pop + ')')}",
+                    f"nazev = {_retezec('Pohyblivé q – ' + vys.vozidlo + ' (BLC ' + pop + ')')}",
                     f"psi0 = {s.psi0:g}", f"psi1 = {s.psi1:g}", f"psi2 = {s.psi2:g}",
                     f"gamma = {s.gamma_Q:g}",
                     "[zatizeni.promenne.tabulka]", f"x = {_pole(tq.x, 3)}",
@@ -230,7 +230,8 @@ def vysledky_json(vys: VysledekSil, o_posudek: int) -> dict:
                      "g_zabradli": vyb.g_zabradli, "g_svodidla": vyb.g_svodidla,
                      "liniova": [vars(l) for l in vyb.liniova],
                      "tiha_na_metr": vyb.tiha_na_metr(K.B)},
-        "g0": vys.g0, "g_spary": vys.g_spary, "Ve": vys.Ve, "dyn": vys.dyn,
+        "g0": vys.g0, "g_spary": vys.g_spary, "vozidlo": vys.vozidlo, "Ve": vys.Ve,
+        "dyn": vys.dyn,
         "y_Ve": vys.y_Ve, "roznos": vys.roz,
         "soucinitele": vars(s),
         "stavy": {k: {"nazev": NAZVY_STAVU[k], "popis": v.popis, "n_stavu": v.n_stavu}

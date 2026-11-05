@@ -11,7 +11,8 @@ Sekce:
   [stale]        A_nosniku [m²] nebo g0, gamma_beton, g_spary, chodnik_L, chodnik_P,
                  g_chodnik [kN/m²], g_vozovka [kN/m²], g_zabradli, g_svodidla [kN/m],
                  [[stale.liniova]] nazev, g, y, sirka
-  [pohyblive]    Ve [t], dyn, y_Ve, roznos, t_voz, krok
+  [pohyblive]    Ve [t] nebo MLC + typ_MLC ("k" | "p") + dist (kolona), dyn, y_Ve,
+                 roznos, t_voz, krok
   [vypocet]      ex
   [soucinitele]  gamma_G, gamma_G_inf, xi, gamma_Q, psi0, psi1, psi2
   [export]       slozka, vystup, kriterium, rezim, msu, L_nosniku, pb_vstup, t_stale,
@@ -67,7 +68,7 @@ def parametry(d: dict) -> dict:
         if a in s:
             kw[a] = s[a]
     p = d.get("pohyblive", {})
-    for a in ("Ve", "dyn", "y_Ve", "roznos", "t_voz", "krok"):
+    for a in ("Ve", "MLC", "typ_MLC", "dist", "dyn", "y_Ve", "roznos", "t_voz", "krok"):
         if a in p:
             kw[a] = p[a]
     if "ex" in d.get("vypocet", {}):

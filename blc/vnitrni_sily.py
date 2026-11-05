@@ -12,9 +12,10 @@ stavů pro posudek nosníku (modul Posudek PB):
            skladba vozovky, skladba chodníků, svodidla, zábradlí, další liniová;
            u nosníků se spárou navíc tíha výplně spáry g_spary [kN/m] – nese ji
            SAMOSTATNĚ sousední dvojice nosníků (každý polovinu, před zmonolitněním),
-  q      pohyblivé zatížení – pojezd vozidla po 2D desce (obálka max/min);
-           zatím vozidlo Ve (výjimečná zatížitelnost) v ose vozovky,
-           volitelně dynamický součinitel.
+  q      pohyblivé zatížení – pojezd JEDNOHO vybraného vozidla po 2D desce
+           (obálka max/min, oba směry jízdy): Ve (výjimečná zatížitelnost) nebo
+           vozidlo MLC (kolové / pásové; volitelně kolona), osa vozidla v ose
+           vozovky nebo zadaná, volitelně dynamický součinitel.
 
 Model konstrukce (MKP, okrajové podmínky, šikmost, spáry) je totožný
 s porovnáním MLC / Ve (comparison.py).  Výsledky jsou na síti 2D modelu;
@@ -34,6 +35,7 @@ import numpy as np
 
 from .geometry import Konstrukce, E_betonu
 from .beam_1d import Nosnik1D, VE_ROZVOR, VE_B_K
+from .vehicles import kolove_vozidlo, pasove_vozidlo
 from .plate_fem import DeskaMKP, Vystupy, obalky_2D, sit_modelu, SitMKP
 from .stale_zatizeni import Vybaveni, platky_plosne
 
@@ -141,9 +143,12 @@ class VysledekSil:
     stavy: Dict[str, StavSil]
     g0: float                           # nosníky: g0 [kN/m] na nosník; deska: [kN/m²]
     g_spary: float = 0.0                # tíha výplně spáry [kN/m]
-    Ve: float = 0.0                     # [t]
+    Ve: float = 0.0                     # [t] (jen vozidlo Ve)
     dyn: float = 1.0
-    y_Ve: float = 0.0                   # osa vozidla Ve [m]
+    y_Ve: float = 0.0                   # osa vozidla [m]
+    vozidlo: str = ""                   # popis vozidla („Ve 80 t“, „MLC80 kolové“)
+    rozvor: float = VE_ROZVOR           # osová vzdálenost stop vozidla [m]
+    b_k: float = VE_B_K                 # šířka stopy [m]
     roz: float = 0.0                    # podélný / příčný roznos plošky [m]
     soucinitele: Soucinitele = field(default_factory=Soucinitele)
     popis: str = ""
@@ -353,6 +358,9 @@ def vnitrni_sily(
     g_spary: float = 0.0,
     # ---- pohyblivé zatížení ----
     Ve: Optional[float] = None,
+    MLC: Optional[str] = None,
+    typ_MLC: str = "k",
+    dist: Optional[float] = None,
     dyn: float = 1.0,
     y_Ve: Optional[float] = None,
     roznos: bool = True,
@@ -377,7 +385,10 @@ def vnitrni_sily(
         gamma_beton: objemová tíha [kN/m³].
         g_spary:     tíha výplně spáry [kN/m] (nese ji samostatně sousední dvojice
                      nosníků, každý polovinu) – přičte se ke g − g0.
-        Ve:          výjimečná zatížitelnost [t]; None / 0 = bez stavu q.
+        Ve:          vozidlo Ve – výjimečná zatížitelnost [t].
+        MLC, typ_MLC: vozidlo MLC (např. "MLC80"), "k" kolové | "p" pásové.
+                     Zadává se Ve NEBO MLC; bez vozidla se stav q nepočítá.
+        dist:        MLC: vzdálenost vozidel v koloně [m]; None = jedno vozidlo.
         dyn:         dynamický součinitel pohyblivého zatížení [-].
         y_Ve:        příčná poloha osy vozidla [m] (None = osa vozovky).
         roznos, t_voz: roznos plošky kola do střednice desky (+ tloušťka vozovky [m]).
@@ -462,27 +473,43 @@ def vnitrni_sily(
 
     stavy = {"g0": s_g0, "g-g0": s_g}
 
-    # ---- q: pojezd vozidla Ve -----------------------------------------------
+    # ---- q: pojezd vybraného vozidla ----------------------------------------
     roz = (K.h_ekv if roznos else 0.0) + 2.0 * t_voz
     y_c = float(y_Ve) if y_Ve is not None else vyb.y_osy_vozovky(B)
-    if Ve:
-        if Ve < 0:
-            raise ValueError("Ve musí být kladné.")
-        pul = 0.5 * (VE_ROZVOR + VE_B_K)
-        if y_c - pul < vyb.chodnik_L - 1e-9 or y_c + pul > B - vyb.chodnik_P + 1e-9:
-            varovani.append(f"Vozidlo Ve (šířka {2 * pul:g} m, osa y = {y_c:.2f} m) "
-                            "přesahuje vozovku.")
+    if Ve and MLC:
+        raise ValueError("Zadejte jedno vozidlo: Ve, nebo MLC.")
+    voz_popis, rozvor, b_k = "", VE_ROZVOR, VE_B_K
+    if Ve or MLC:
         nos = Nosnik1D(K)
         n_ob = max(1, int(math.ceil(K.Ltot / (krok * K.n_poli))))
+        if Ve:
+            if Ve < 0:
+                raise ValueError("Ve musí být kladné.")
+            voz_popis = f"Ve {Ve:g} t"
+            gen = nos.stavy_Ve(Ve, n_ob, roz, extra=True)
+        else:
+            t = (typ_MLC or "k").lower()
+            if t not in ("k", "p"):
+                raise ValueError("Typ vozidla MLC musí být 'k' (kolové) nebo 'p' (pásové).")
+            v = kolove_vozidlo(MLC) if t == "k" else pasove_vozidlo(MLC)
+            rozvor, b_k = v.rozvor, v.b_k
+            if dist is not None and dist <= 0:
+                dist = None
+            voz_popis = (f"{MLC} {'kolové' if t == 'k' else 'pásové'}" +
+                         (f", kolona po {dist:g} m" if dist else ""))
+            gen = nos.stavy_MLC(t, MLC, n_ob, dist, roz, extra=True)
+        pul = 0.5 * (rozvor + b_k)
+        if y_c - pul < vyb.chodnik_L - 1e-9 or y_c + pul > B - vyb.chodnik_P + 1e-9:
+            varovani.append(f"Vozidlo {voz_popis} (šířka {2 * pul:.2f} m, osa y = {y_c:.2f} m) "
+                            "přesahuje vozovku.")
         dx = K.x0(y_c)
 
         def stavy_q():
-            for ax, _ in nos.stavy_Ve(Ve, n_ob, roz, extra=True):
+            for ax, _ in gen:
                 yield [(q * dyn, s, e) for q, s, e in ax], None
 
-        ob = obalky_2D(model, stavy_q(), y_c - 0.5 * VE_ROZVOR, y_c + 0.5 * VE_ROZVOR,
-                       VE_B_K, roz, dx)
-        stavy["q"] = StavSil("q", f"vozidlo Ve = {Ve:g} t, osa y = {y_c:.2f} m, "
+        ob = obalky_2D(model, stavy_q(), y_c - 0.5 * rozvor, y_c + 0.5 * rozvor, b_k, roz, dx)
+        stavy["q"] = StavSil("q", f"vozidlo {voz_popis}, osa y = {y_c:.2f} m, "
                              f"δ = {dyn:g}, roznos {roz:.2f} m, krok {krok:g} m",
                              ob.M_max, ob.M_min, ob.Vm_max, ob.Vm_min, ob.Vp_max, ob.Vp_min,
                              ob.Vs_max, ob.Vs_min, pohyblivy=True, n_stavu=ob.n_stavu)
@@ -497,7 +524,7 @@ def vnitrni_sily(
 
     vys = VysledekSil(K=K, vybaveni=vyb, xs=model.xs.copy(), vyst=vyst, stavy=stavy,
                       g0=g0_, g_spary=g_spary if K.spara else 0.0, Ve=float(Ve or 0.0),
-                      dyn=dyn, y_Ve=y_c, roz=roz,
+                      dyn=dyn, y_Ve=y_c, roz=roz, vozidlo=voz_popis, rozvor=rozvor, b_k=b_k,
                       soucinitele=soucinitele or Soucinitele(), popis=popis,
                       varovani=varovani, kontrola=kontrola, sit=sit_modelu(model),
                       y_vyst=np.asarray(vyst.y, float))

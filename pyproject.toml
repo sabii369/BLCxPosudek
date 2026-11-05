@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "blc"
-version = "1.1.0"
+version = "1.2.0"
 description = "Bridge Load Calculator – přechodnost vozidel MLC vs Ve a vnitřní síly g0, g−g0, q pro posudek nosníku (1D + 2D MKP)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -16,9 +16,10 @@ dev = ["pytest"]
 
 [project.scripts]
 blc = "blc.__main__:main"
+blc-posudek = "blc_posudek.__main__:main"
 
 [tool.setuptools]
-packages = ["blc"]
+packages = ["blc", "pb_posudek", "blc_posudek"]
 
 [tool.setuptools.package-data]
 blc = ["data/*.xlsx"]

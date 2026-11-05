@@ -1,10 +1,41 @@
-# BLC × Posudek – vnitřní síly pro posudek nosníku
+# BLC × Posudek PB – most → zatížení nosníku → posudek předpjatého nosníku
 
-Upravená verze **Bridge Load Calculator (BLC)** rozšířená o výpočet průběhů vnitřních sil
-od zatěžovacích stavů **g0** (vlastní tíha), **g − g0** (skladba vozovky a chodníků, svodidla,
-zábradlí) a **q** (pojezd vozidla Ve) na každém nosníku. Průběhy nejzatíženějšího nosníku se
-exportují jako vstup modulu **Posudek PB** (posudek předpjatého nosníku, repo `PB_posudek`)
-a slouží pro parametrické studie – viz [Vnitřní síly pro posudek](#vnitřní-síly-pro-posudek).
+Jeden program: **model celého mostu** (BLC – 2D MKP, příčný roznos) spočítá vnitřní síly
+od **g0** (vlastní tíha), **g − g0** (skladba vozovky a chodníků, svodidla, zábradlí)
+a **q** (přejezd vybraného vozidla) na každém nosníku, vybere **nejzatíženější nosník**
+a jeho obálky převezme jako zatížení **posudku předpjatého nosníku** (Posudek PB,
+ČSN EN 1992-1-1/-2) – bez ručního zadávání zatížení.
+
+## Spojený program (rychlý start)
+
+```bat
+setup.bat                :: jednou – instalace knihoven
+spustit_posudek.bat      :: GUI (dvojklik; přetažením .toml se otevře soubor)
+```
+
+nebo `python -m blc_posudek` (GUI s příkladem), `python -m blc_posudek most.toml -o vystup`
+(dávkově: most → posudek → HTML protokol + vnitřní síly mostu).
+
+Prostředí je Posudek PB s novou první kartou:
+
+| karta | obsah |
+|---|---|
+| **0 Most a zatížení (BLC)** | konstrukce mostu (N, b, d, spára, uložení, šikmost, k_v), vybavení (šířka chodníku vlevo/vpravo, tíha skladby chodníku a vozovky, zábradlí, svodidla, další liniová), **vozidlo** (Ve [t], MLC kolové / pásové, volitelně kolona), dynamický součinitel, ψ; tabulka nosníků, grafy průběhů a příčného rozdělení |
+| 1–4 | materiály, průřez, nosník a předpětí, výztuž (Posudek PB) |
+| **5 Zatížení a čas** | prostředí a časová osa; **vnější zatížení se nezadává** – je převzato z obálek posuzovaného nosníku (náhled kombinací) |
+| 6, 7 | nastavení posouzení, výsledky (Posudek PB) |
+
+- Rozpětí L0, délka L a beton jsou společné (karta 0 ↔ 1, 3), A a Iy nosníku se berou
+  z průřezu (karta 2), γ_G, ξ a kombinace MSÚ z nastavení (karta 6).
+- **F5** spočítá most (jen změnily-li se jeho vstupy) i posudek; HTML protokol obsahuje
+  kapitolu „Zatížení z modelu mostu (BLC)“ s tabulkou nosníků.
+- Soubor = vstup Posudku PB + sekce `[blc]`, vzor [`priklady/most_KA67_12.toml`](priklady/most_KA67_12.toml).
+- Balíček `pb_posudek` je převzat z repa `sabii369/PB_posudek` (git subtree) – viz `CLAUDE.md`.
+
+## Samostatné části
+
+Upravená verze **Bridge Load Calculator (BLC)** počítá vnitřní síly g0, g − g0, q i samostatně
+(`python -m blc --sily`, export TOML do Posudku PB) – viz [Vnitřní síly pro posudek](#vnitřní-síly-pro-posudek).
 
 Původní funkce BLC zůstávají: posouzení přechodnosti vojenských vozidel (třídy MLC dle
 NATO AEP-3.12.1.5) na silničních mostech a porovnání s výjimečnou zatížitelností **Ve**.
@@ -93,6 +124,8 @@ python -m pytest
 - `tests/test_porovnani.py` – celý výpočet `porovnani_zatizeni`, rovnováha Σ nosníků = statika, síť MKP, prefabrikáty,
 - `tests/test_vnitrni_sily.py` – g0 proti analytice (prostý i spojitý nosník, deska), rovnováha g − g0,
   vybavení, obálka q proti 1D, kombinace, export TOML pro posudek,
+- `tests/test_blc_posudek.py` – spojený program: vstupy z posudku, výběr vozidla, zatížení z obálek,
+  posudek, dávkový výpočet, GUI,
 - `tests/test_regrese.py` – výsledky v kontrolních řezech proti uloženým referenčním hodnotám
   (`tests/referencni_hodnoty.json`). Po **záměrné** změně modelu se přegenerují
   příkazem `python tests/referencni_pripady.py` a změna se zkontroluje v `git diff`.
@@ -100,8 +133,8 @@ python -m pytest
 ## Struktura
 
 ```
-bridge-load-calculator/
-├── blc/                     balíček programu
+BLCxPosudek/
+├── blc/                     balíček BLC
 │   ├── __main__.py          spouštění (python -m blc: GUI / --demo)
 │   ├── gui.py               grafické rozhraní (Tkinter)
 │   ├── comparison.py        porovnání MLC vs Ve po kontrolních řezech (porovnani_zatizeni)
@@ -118,10 +151,16 @@ bridge-load-calculator/
 │   ├── prefabrikaty.py      načtení tabulky prefabrikátů
 │   ├── plotting.py          grafy
 │   └── data/Prefabrikáty.xlsx
-├── priklady/               vstupy pro výpočet vnitřních sil (sily_KA67_12.toml)
+├── blc_posudek/             spojený program BLC × Posudek PB
+│   ├── gui.py               okno posudku + karta 0 „Most a zatížení (BLC)“ (AplikaceMost)
+│   ├── vypocet.py           most → zatížení nosníku z obálek → posudek (spocti, parametry_blc)
+│   └── __main__.py          python -m blc_posudek (GUI / dávka)
+├── pb_posudek/              Posudek PB (git subtree z sabii369/PB_posudek – needitovat zde)
+├── priklady/                most_KA67_12.toml (spojený vstup), sily_KA67_12.toml (jen BLC)
 ├── tests/                   testy (pytest) + referenční hodnoty
 ├── docs/navod.md            uživatelský návod
-├── setup.bat, spustit.bat   instalace a spuštění na Windows
+├── setup.bat, spustit.bat   instalace a spuštění BLC (MLC vs Ve)
+├── spustit_posudek.bat      spuštění spojeného programu
 ├── requirements.txt, pyproject.toml
 └── CLAUDE.md                pokyny pro vývoj s Claude Code
 ```

@@ -354,11 +354,13 @@ class Nosnik1D:
     def stavy_MLC(self, typ: str, MLC: str, n: int, dist: float, roz: float,
                   extra: bool = True):
         """Generátor dvojic (nápravy, nápravy s podélným roznosem); oba směry jízdy.
+        dist = vzdálenost vozidel v koloně [m]; None / 0 = jedno vozidlo.
         extra=False: jen pravidelná mřížka poloh (pro 2D obálky)."""
         K, Lt = self.K, self.Lt
         typ = typ.lower()
         v = kolove_vozidlo(MLC) if typ == "k" else pasove_vozidlo(MLC)
-        Nveh = math.ceil(Lt / dist) + 1
+        Nveh = math.ceil(Lt / dist) + 1 if dist else 0
+        dist = dist or 0.0
 
         def kolona(x1):
             ax = []

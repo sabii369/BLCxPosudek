@@ -294,5 +294,46 @@ Další liniová zatížení (římsa apod.) lze zadat ve vstupním souboru (`[[
 - Posudek PB řeší prostý nosník; u spojitých konstrukcí je export jen orientační
   (dvojice hodnot V nad vnitřní podporou se sloučí).
 - U šikmých nosníkových mostů se x měří od osy podpory daného nosníku.
-- Vozidlo Ve stojí v jedné příčné poloze (osa vozovky nebo zadaná y_Ve); další
+- Vozidlo stojí v jedné příčné poloze (osa vozovky nebo zadaná y_Ve); další
   pohyblivá zatížení (Vn, Vr, LM1 …) zatím nejsou.
+- Vozidlo: Ve (`Ve=` [t]) nebo MLC (`MLC="MLC80", typ_MLC="k"|"p"`, `dist` = kolona,
+  bez `dist` jedno vozidlo); vždy jen jedno zvolené vozidlo.
+
+## 8. Spojený program BLC × Posudek PB
+
+Spuštění: `spustit_posudek.bat` (dvojklik, nebo přetažení souboru .toml), `python -m blc_posudek`
+(GUI s příkladem `priklady/most_KA67_12.toml`), `python -m blc_posudek most.toml -o vystup`
+(dávkově – vytvoří `protokol.html`, `vysledky.json` posudku a ve složce `most/` vnitřní síly
+mostu a grafy).
+
+### 8.1 Postup
+
+1. **Karta 0 – Most a zatížení (BLC):** rozpětí L0, délka L, beton (stejná pole jako na
+   kartách 1 a 3), počet a šířka nosníků, účinná výška, spára, uložení a šikmost, vybavení
+   (chodníky vlevo/vpravo, tíha skladby chodníku a vozovky, zábradlí, svodidla, další liniová),
+   **vozidlo** (Ve [t] / MLC kolové / MLC pásové, kolona jen u MLC), dynamický součinitel,
+   posuzovaný nosník (auto = nejzatíženější podle M, M− nebo V), způsob předání, γ_Q a ψ.
+2. Karty 1–4: materiály, průřez (z něj A a Iy nosníku pro model mostu – lze vypnout
+   a zadat ručně), kabely, výztuž.
+3. Karta 5: prostředí, časová osa a stáří, od kterého působí g − g0 / kvazistálá kombinace.
+   Vnější zatížení se nezadává – zobrazí se kombinace převzaté z obálek.
+4. **F5** – spočítá model mostu (jen pokud se změnily jeho vstupy) a posudek; tlačítko
+   *Vnitřní síly mostu* na kartě 0 spočítá jen most (tabulka nosníků, grafy).
+5. *HTML protokol* – protokol posudku s kapitolou „Zatížení z modelu mostu (BLC)“.
+
+### 8.2 Převzetí zatížení
+
+- Posuzovaný nosník: zadaný, nebo nejzatíženější podle MSÚ 6.10 (včetně g0). V tabulce na
+  kartě 0 je zvýrazněn; dvojklikem na řádek se zvolí jiný.
+- Předává se g − g0 a q (g0 počítá posudek z průřezu), výchozí jako obálky kombinací
+  6.10a, 6.10b (nebo 6.10 podle karty 6), charakteristické, časté a kvazistálé.
+- Součinitele: γ_G, γ_G,inf, ξ a kombinace MSÚ z karty 6 (stejné pro g0 i g − g0),
+  γ_Q, ψ0, ψ1, ψ2 z karty 0 (pro zvolené vozidlo ověřit).
+- Změní-li se vstup ovlivňující model mostu (i průřez nebo rozpětí), karta 0 a 5 to
+  hlásí a F5 most přepočítá.
+
+### 8.3 Soubor
+
+Vstup Posudku PB rozšířený o sekci `[blc]` (popis klíčů v `blc_posudek/vypocet.py`).
+Uložený soubor obsahuje i sekci `[zatizeni]` z posledního výpočtu mostu, takže jde otevřít
+i v samostatném Posudku PB.

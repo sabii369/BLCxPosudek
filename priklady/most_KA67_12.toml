@@ -1,0 +1,188 @@
+# Vstupní data – BLC × Posudek PB (most z nosníků KA-67/12)
+[projekt]
+nazev = "Nosník KA-67/12"
+popis = "Dodatečně předpjatý komorový mostní nosník KA-67, délka 11,96 m, rozpětí 11,40 m; 13 kabelů z drátů P 4,5."
+
+[beton]
+trida = "C35/45"
+cement = "N"
+
+[predpinaci_vyztuz]
+typ = "PD4,5"
+fpk = 1640.0
+
+[betonarska_vyztuz]
+typ = "B500B"
+
+[prurez]
+nazev = "KA-67"
+obrys = [[-490.0, 0.0], [490.0, 0.0], [490.0, 50.0], [450.0, 60.0], [450.0, 490.0], [470.0, 500.0], [470.0, 600.0], [-470.0, 600.0], [-470.0, 500.0], [-450.0, 490.0], [-450.0, 60.0], [-490.0, 50.0]]
+otvory = [[[-110, 100], [110, 100], [350, 180], [350, 420], [110, 490], [-110, 490], [-350, 420], [-350, 180]]]
+
+[nosnik]
+L = 11.96
+L0 = 11.4
+predpeti = "dodatecne"
+charakteristiky = "idealni"
+pocet_rezu = 41
+pocet_napinani = 13
+postup_napinani = [[1200.0, 2.0], [800.0, 0.0], [1325.4, 5.0]]
+
+[[kabel]]
+nazev = "K1 (2×)"
+pocet_lan = 14
+geometrie = "polygon"
+body = [[0.0, 550.0], [2.08, 550.0], [9.88, 550.0], [11.96, 550.0]]
+polomery = [0.0, 44.8, 44.8, 0.0]
+sigma_max = 1325.4
+napinani = "levy"
+mu = 0.19
+k = 0.005
+pokluz = 4.0
+d_kanalku = 85.0
+
+[[kabel]]
+nazev = "K2 levý"
+pocet_lan = 12
+geometrie = "polygon"
+body = [[0.0, 550.0], [2.9505, 115.0], [9.0095, 115.0], [11.96, 550.0]]
+polomery = [0.0, 29.0, 29.0, 0.0]
+sigma_max = 1325.4
+napinani = "levy"
+mu = 0.19
+k = 0.005
+pokluz = 4.0
+d_kanalku = 60.0
+
+[[kabel]]
+nazev = "K2 pravý"
+pocet_lan = 12
+geometrie = "polygon"
+body = [[0.0, 550.0], [2.9505, 115.0], [9.0095, 115.0], [11.96, 550.0]]
+polomery = [0.0, 29.0, 29.0, 0.0]
+sigma_max = 1325.4
+napinani = "levy"
+mu = 0.19
+k = 0.005
+pokluz = 4.0
+d_kanalku = 60.0
+
+[[kabel]]
+nazev = "K3 levý"
+pocet_lan = 12
+geometrie = "polygon"
+body = [[0.0, 475.0], [2.8993, 50.0], [9.0607, 50.0], [11.96, 475.0]]
+polomery = [0.0, 29.0, 29.0, 0.0]
+sigma_max = 1325.4
+napinani = "levy"
+mu = 0.19
+k = 0.005
+pokluz = 4.0
+d_kanalku = 60.0
+
+[[kabel]]
+nazev = "K3 pravý"
+pocet_lan = 12
+geometrie = "polygon"
+body = [[0.0, 475.0], [2.8993, 50.0], [9.0607, 50.0], [11.96, 475.0]]
+polomery = [0.0, 29.0, 29.0, 0.0]
+sigma_max = 1325.4
+napinani = "levy"
+mu = 0.19
+k = 0.005
+pokluz = 4.0
+d_kanalku = 60.0
+
+[[kabel]]
+nazev = "K4–K6 (6×)"
+pocet_lan = 66
+geometrie = "primka"
+z_L = 50.0
+sigma_max = 1325.4
+napinani = "levy"
+mu = 0.19
+k = 0.005
+pokluz = 4.0
+d_kanalku = 147.0
+
+[[kabel]]
+nazev = "K7"
+pocet_lan = 11
+geometrie = "polygon"
+body = [[0.0, 40.0], [1.98, 50.0], [9.98, 50.0], [11.96, 40.0]]
+polomery = [0.0, 62.5, 62.5, 0.0]
+sigma_max = 1325.4
+napinani = "levy"
+mu = 0.19
+k = 0.005
+pokluz = 4.0
+d_kanalku = 60.0
+
+[[smykova_vyztuz]]
+Asw = 201.0
+s = 200.0
+alpha = 90.0
+
+[prostredi]
+RH = 75.0
+t_s = 1.0
+
+[casova_osa]
+t0 = 28.0
+t_provoz = 90.0
+t_konec = 36500.0
+
+[predem]
+eta_p1 = 3.2
+alpha1 = 1.25
+alpha2 = 0.19
+
+[[vyztuz]]
+nazev = "14"
+z = 25.0
+As = 201.0
+
+[posouzeni]
+k1_nap = 1.0
+k2_nap = 1.0
+k7 = 1.0
+k8 = 1.0
+
+# ---- Most a zatížení (BLC) – karta 0 ----
+# Zatížení nosníku ([zatizeni]) se nezadává: vytvoří se z obálek vnitřních sil
+# nejzatíženějšího nosníku. Rozpětí L0, délka L, beton a průřez (A, Iy) se berou z posudku.
+[blc]
+typ_konstrukce = "nosniky"
+N = 10                       # počet nosníků
+b = 1.0                      # šířka nosníku v mostovce (rozteč) [m]
+prurez_z_posudku = true      # A a Iy nosníku z karty Průřez
+nu = 0.2
+d = 0.55                     # statická účinná výška [m]
+spara = false
+alfa = 90.0
+sikmost = "prava"
+k_v = 2000.0                 # [MN/m na 1 m podpory]; 0 = tuhá
+uloz = "tvrde"
+spoj = "kloub"
+chodnik_L = 1.5              # [m]
+chodnik_P = 0.75             # [m]
+g_chodnik = 5.0              # [kN/m²]
+g_vozovka = 2.6              # [kN/m²]
+g_zabradli = 0.5             # [kN/m] každá strana
+g_svodidla = 0.6             # [kN/m] každá strana
+vozidlo = "Ve"               # "Ve" | "MLC_k" | "MLC_p"
+Ve = 80.0                    # [t]
+MLC = "MLC80"
+dyn = 1.0
+roznos = true
+t_voz = 0.0
+krok = 0.25
+ex = 0.125
+vystup = "auto"              # "auto" = nejzatíženější nosník, jinak např. "N6"
+kriterium = "M"              # "M" | "M-" | "V"
+rezim = "kombinace"          # "kombinace" | "zatezovaci_stavy"
+gamma_Q = 1.35
+psi0 = 0.75
+psi1 = 0.75
+psi2 = 0.0
+t_vneseni = 60.0             # kvazistálá kombinace působí od stáří [dny]

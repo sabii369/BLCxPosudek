@@ -9,9 +9,21 @@ který posuzuje nejzatíženější nosník. Modul je základ parametrické stud
 
 Komunikace česky. Jednotky: kN, m, MPa; k_v v MN/m na 1 m podpory (interně kN/m).
 
+**Spojený program** `blc_posudek` = GUI Posudku PB (`AplikaceMost(pb_posudek.gui.Aplikace)`) s novou
+kartou 0 „Most a zatížení (BLC)“; karta 5 nezadává zatížení – bere se z obálek posuzovaného nosníku.
+Balíček `pb_posudek/` je **git subtree** z `sabii369/PB_posudek` – needitovat zde (úpravy dělat v repu
+Posudek PB a stáhnout), rozšíření dělat v `blc_posudek` (dědičnost, přepsání metod).
+Aktualizace posudku:
+```bash
+git clone "C:/Users/OEM/Desktop/Posudek PB" <tmp> && git -C <tmp> subtree split --prefix=pb_posudek -b pb_split
+git subtree pull --prefix=pb_posudek <tmp> pb_split -m "Aktualizace pb_posudek"
+```
+
 ## Příkazy (z kořene repa)
 ```bash
-python -m pytest                      # všechny testy (~30 s)
+python -m blc_posudek                 # spojený program (GUI s priklady/most_KA67_12.toml)
+python -m blc_posudek priklady/most_KA67_12.toml -o vystup   # dávka: most → posudek → protokol
+python -m pytest                      # všechny testy (~40 s)
 python -m pytest tests/test_vnitrni_sily.py
 python -m blc --sily priklady/sily_KA67_12.toml [--pb "../Posudek PB/examples/nosnik_KA67_12.toml"]
 python -m blc --demo                  # konzolový výpočet MLC vs Ve + PNG do vystupy/demo (gitignore)
@@ -34,7 +46,11 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
   - `export_pb.py` – `uloz_vysledky` (JSON, CSV, `zatizeni_PB.toml`, kopie vstupu PB), `toml_zatizeni_pb`,
     `zatizeni_pb_dict`, `vloz_do_vstupu_pb`,
   - `vstup_sily.py` – vstupní TOML (`priklady/sily_KA67_12.toml`), `plotting_sily.py` – grafy.
-- `tests/`: `test_nosnik_1d.py`, `test_deska_mkp.py`, `test_porovnani.py`, `test_vnitrni_sily.py`,
+- `blc_posudek/`: `vypocet.py` (`parametry_blc` – L0, beton, A/Iy z průřezu, γ z [posouzeni]; `zatizeni_z_blc`,
+  `spocti`, `kapitola_blc` do protokolu), `gui.py` (`AplikaceMost`), `__main__.py`; vzor `priklady/most_KA67_12.toml`.
+- Vozidlo q: `vnitrni_sily(Ve=…)` nebo `vnitrni_sily(MLC=…, typ_MLC="k"|"p", dist=None|kolona)`; v `[blc]`
+  `vozidlo = "Ve" | "MLC_k" | "MLC_p"`.
+- `tests/`: `test_nosnik_1d.py`, `test_deska_mkp.py`, `test_porovnani.py`, `test_vnitrni_sily.py`, `test_blc_posudek.py`,
   `test_regrese.py` + `referencni_pripady.py` + `referencni_hodnoty.json` (výsledky ověřeného stavu z 21. 10. 2026).
 - `docs/navod.md` = uživatelský návod (kap. 7 = vnitřní síly pro posudek) – při změně chování aktualizovat.
 - Verze: `blc/__init__.py` `__version__` a `pyproject.toml` (držet shodně); označení verzí nepatří do názvů souborů ani komentářů – historii nese git.
