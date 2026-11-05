@@ -7,6 +7,8 @@ Použití (ze složky repozitáře):
   python -m blc                  – spustí GUI
   python -m blc --demo           – ukázkový výpočet v konzoli + grafy do vystupy/demo
   python -m blc --demo --vystup DIR
+  python -m blc --sily vstup.toml [--vystup DIR] [--pb posudek.toml]
+                                 – vnitřní síly g0, g−g0, q pro posudek (export PB)
 """
 
 import argparse
@@ -73,13 +75,25 @@ def main(argv=None):
                                  description="Bridge Load Calculator – přechodnost vozidel MLC vs Ve")
     ap.add_argument("--demo", action="store_true",
                     help="ukázkový výpočet v konzoli a uložení grafů (bez GUI)")
-    ap.add_argument("--vystup", default=os.path.join("vystupy", "demo"),
-                    help="složka pro grafy dema (výchozí vystupy/demo)")
+    ap.add_argument("--vystup", default=None,
+                    help="výstupní složka (demo: vystupy/demo; --sily: podle vstupu)")
+    ap.add_argument("--sily", metavar="VSTUP",
+                    help="vnitřní síly g0, g−g0, q ze vstupu TOML/JSON a export do posudku PB")
+    ap.add_argument("--pb", metavar="POSUDEK",
+                    help="vstup Posudku PB (.toml) – vytvoří jeho kopii se zatížením z BLC")
     args = ap.parse_args(argv)
-    if args.demo:
+    if args.sily:
         import matplotlib
         matplotlib.use("Agg")
-        demo(args.vystup)
+        from .vstup_sily import spocti_ze_souboru
+        _, soubory = spocti_ze_souboru(args.sily, args.vystup, args.pb)
+        print("Uloženo:")
+        for s_ in soubory:
+            print("  " + os.path.abspath(s_))
+    elif args.demo:
+        import matplotlib
+        matplotlib.use("Agg")
+        demo(args.vystup or os.path.join("vystupy", "demo"))
     else:
         from . import spustit_gui
         spustit_gui()

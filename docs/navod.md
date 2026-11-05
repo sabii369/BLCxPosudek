@@ -219,3 +219,80 @@ Grafy (tlačítka dole; „Řez“ vybírá kontrolní řez, „(rozhodující)�
   kritéria (nejde o úplné prohledání všech poloh ve 2D).
 - Náhradní deska nosníku má torzní tuhost plného průřezu – u šikmých mostů z nosníků
   bez spáry může být vliv šikmosti nadhodnocen.
+
+## 7. Vnitřní síly pro posudek nosníku (g0, g − g0, q)
+
+Samostatný výpočet průběhů vnitřních sil na každém nosníku (u desky na každém pásu
+1 m) od tří zatěžovacích stavů. Průběhy nejzatíženějšího nosníku jsou vstupem modulu
+**Posudek PB** (repo `PB_posudek`, posudek předpjatého nosníku) a slouží
+pro parametrické studie.
+
+### 7.1 Zatěžovací stavy
+
+| Stav | Obsah | Model |
+|---|---|---|
+| **g0** | vlastní tíha nosné konstrukce | nosníky: každý nosník **samostatně, bez spolupůsobení** (1D spojitý nosník se stejným uložením), g0 = A·γ_b; deska: 2D MKP, g0 = h·γ_b |
+| **g − g0** | skladba vozovky, skladba chodníků, svodidla, zábradlí, další liniová zatížení | 2D MKP (příčný roznos); tíha výplně spáry g_s se nese samostatně – každý ze sousedních nosníků polovinu |
+| **q** | pojezd vozidla Ve (výjimečná zatížitelnost) v ose vozovky, × dynamický součinitel δ | 2D MKP – obálka max/min přes polohy vozidla (krok 0,25 m + polohy hrany zatížení v řezech d) |
+
+Model konstrukce (síť, spáry, uložení, šikmost, k_v, k_φ) je totožný s porovnáním
+MLC / Ve.
+
+### 7.2 Nové vstupy
+
+| Vstup | Jednotka | Poznámka |
+|---|---|---|
+| šířka chodníku vlevo / vpravo | m | chodníky leží u okrajů mostovky šířky B, vozovka mezi nimi |
+| tíha skladby chodníku | kN/m² | na obou chodnících |
+| tíha skladby vozovky | kN/m² | mezi chodníky |
+| zábradlí | kN/m | na každé straně, pás 0,2 m u vnějšího okraje |
+| svodidlo | kN/m | na každé straně, pás 0,2 m na chodníku u okraje vozovky |
+| plocha nosníku A, γ_b | m², kN/m³ | g0 = A·γ_b (deska: h·γ_b); lze zadat i přímo g0 |
+| tíha výplně spáry | kN/m | jen nosníky se spárou |
+| dynamický součinitel δ | – | násobí zatížení Ve |
+| osa vozidla y_Ve | m | prázdné = osa vozovky |
+
+Další liniová zatížení (římsa apod.) lze zadat ve vstupním souboru (`[[stale.liniova]]`).
+
+### 7.3 Ovládání
+
+- **GUI:** sekce „Vnitřní síly pro posudek“ pod tlačítkem výpočtu, tlačítko
+  *Vnitřní síly pro posudek*. Okno výsledků: tabulka max M a |V| všech stavů po
+  nosnících, M_Ed a V_Ed (MSÚ 6.10 včetně g0), žlutě nejzatíženější nosník (kritérium
+  M, M− nebo V), grafy *Průběhy sil* a *Příčné rozdělení*, export do posudku.
+- **Příkazová řádka:** `python -m blc --sily priklady/sily_KA67_12.toml
+  [--pb cesta/k/vstupu_posudku.toml] [--vystup složka]`.
+- **Python:** `vnitrni_sily(...)` → `VysledekSil` (`tabulka(o, stav)`, `kombinace(o, druh)`,
+  `souhrn()`, `rozhodujici()`), `uloz_vysledky(...)`, `zatizeni_pb_dict(...)` (sekce
+  `[zatizeni]` jako slovník – parametrická studie bez souborů).
+
+### 7.4 Výstupy a napojení na Posudek PB
+
+| Soubor | Obsah |
+|---|---|
+| `vnitrni_sily.json` | metadata, souhrn, průběhy g0, g − g0, q (x, M_max, M_min, V_max, V_min) na všech výstupech |
+| `souhrn.csv` | max M, \|V\| po nosnících (Excel: `;`, desetinná čárka) |
+| `<nosník>_stavy.csv` | průběhy stavů posuzovaného nosníku |
+| `zatizeni_PB.toml` | sekce `[zatizeni]` pro Posudek PB |
+| `<vstup>_BLC.toml` | kopie vstupu posudku se zatížením z BLC (při zadání `--pb`) |
+| `prubehy_sil.png`, `pricne_rozdeleni.png` | grafy |
+
+- x v posudku = x od osy první podpory + (L − L0)/2 (L = délka nosníku, L0 = rozpětí);
+  na převislých koncích se doplní nulové hodnoty.
+- Vlastní tíhu nosníku počítá posudek sám z průřezu → exportuje se jen g − g0 a q
+  (`obsahuje_vlastni_tihu = false`); g0 z BLC je v komentáři souboru pro kontrolu.
+- Režim **kombinace** (výchozí): obálky 6.10a, 6.10b (nebo 6.10), charakteristické,
+  časté a kvazistálé kombinace s plnými M_max, M_min, V_max, V_min.
+  Režim **zatezovaci_stavy**: g − g0 jako stálý stav (tabulka) a q jako proměnný stav
+  (M_max a V s větší absolutní hodnotou) – kombinace sestaví posudek.
+- Součinitele kombinací (γ_G, γ_G,inf, ξ, γ_Q, ψ0, ψ1, ψ2) jsou vstupem; výchozí
+  hodnoty odpovídají TS podle ČSN EN 1990 (tab. A2.1) – **pro Ve je nutné je ověřit**.
+- Znaménka: kladný M táhne dolní vlákna, V = dM/dx (stejně jako Posudek PB).
+
+### 7.5 Omezení
+
+- Posudek PB řeší prostý nosník; u spojitých konstrukcí je export jen orientační
+  (dvojice hodnot V nad vnitřní podporou se sloučí).
+- U šikmých nosníkových mostů se x měří od osy podpory daného nosníku.
+- Vozidlo Ve stojí v jedné příčné poloze (osa vozovky nebo zadaná y_Ve); další
+  pohyblivá zatížení (Vn, Vr, LM1 …) zatím nejsou.

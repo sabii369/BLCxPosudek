@@ -28,6 +28,8 @@ from .prefabrikaty import nacti_prefabrikaty
 from .comparison import porovnani_zatizeni, ComparisonResult
 from .plotting import (plot_obalky, plot_obalky_nosniky, plot_vyuziti_rezy,
                        plot_pricny_roznos, plot_profily_nosniky, plot_zatizeni, plot_sit)
+from .stale_zatizeni import Vybaveni
+from .vnitrni_sily import vnitrni_sily, VysledekSil
 
 DEFAULTS = {
     "n_poli": 2, "L": "12", "N": "15", "b": "1", "beton": "C35/45", "beton_s": "C30/37",
@@ -48,6 +50,7 @@ class App(tk.Tk):
         self.resizable(True, True)
         self._cr: ComparisonResult | None = None
         self._vysledek = None
+        self._vysledek_sily = None
         self._build_ui()
         # výška okna max. podle obrazovky
         self.update_idletasks()
@@ -346,6 +349,36 @@ class App(tk.Tk):
         self._lbl_stav = ttk.Label(bf, text="", foreground="gray")
         self._lbl_stav.pack()
 
+        # ── vnitřní síly pro posudek (g0, g − g0, q) ─────────────────────
+        r += 1
+        ttk.Separator(left, orient="horizontal").grid(
+            row=r, column=0, columnspan=3, sticky="ew", pady=(8, 2))
+        r += 1
+        ttk.Label(left, text="Vnitřní síly pro posudek (g0, g − g0, q = Ve)",
+                  font=("", 9, "bold")).grid(row=r, column=0, columnspan=3, sticky="w", padx=6)
+        for label, key, default, unit in (
+            ("Šířka chodníku vlevo", "ch_L", "1.5", "[m]"),
+            ("Šířka chodníku vpravo", "ch_P", "1.5", "[m]"),
+            ("Tíha skladby chodníku", "g_ch", "5.0", "[kN/m²]"),
+            ("Tíha skladby vozovky", "g_voz", "2.6", "[kN/m²]"),
+            ("Zábradlí (každá strana)", "g_zab", "0.5", "[kN/m]  (u vnějšího okraje)"),
+            ("Svodidlo (každá strana)", "g_svo", "0.6", "[kN/m]  (na okraji vozovky)"),
+            ("Plocha nosníku A", "A_nos", "", "[m²]  (g0 = A·γ; deska: h·γ)"),
+            ("Objemová tíha γ", "gamma_b", "25", "[kN/m³]"),
+            ("Tíha výplně spáry", "g_sp", "0", "[kN/m]  (½ na sousední nosníky)"),
+            ("Dynamický součinitel δ", "dyn", "1.0", "[-]  (násobí Ve)"),
+            ("Osa vozidla Ve y", "y_Ve", "", "[m]  (prázdné = osa vozovky)"),
+            ("Krok poloh Ve", "krok_q", "0.25", "[m]"),
+        ):
+            plain_entry(label, key, default, unit)
+        r += 1
+        bf2 = ttk.Frame(left); bf2.grid(row=r, column=0, columnspan=3, pady=8)
+        self._btn_sily = ttk.Button(bf2, text="▶  Vnitřní síly pro posudek",
+                                    command=self._run_sily, width=28)
+        self._btn_sily.pack(pady=4)
+        self._lbl_stav_sily = ttk.Label(bf2, text="", foreground="gray")
+        self._lbl_stav_sily.pack()
+
         self._prepni_sparu()
         self._prepni_typ()
         self._prepni_uloz()
@@ -597,30 +630,13 @@ class App(tk.Tk):
         # vstupy se čtou v hlavním vlákně (Tk není vláknově bezpečné)
         try:
             e = self._entries
-            deska = self._je_deska()
-            spara = bool(e["spara"].get()) and not deska
             y_c = None if self._chk_stred_var.get() else self._slider_var.get()
             kw = dict(
-                typ=e["typ"].get(), MLC=e["MLC"].get(), L=self._get_L(),
+                typ=e["typ"].get(), MLC=e["MLC"].get(),
                 n=self._get("n", int), dist=self._get("dist"), Ve=self._get("Ve"),
-                N=1 if deska else self._get("N", int), beton=e["beton"].get(),
-                Iy=0.0 if deska else self._get("Iy"),
-                spara=spara,
-                b_s=self._get("b_s") if spara else 0.0,
-                Iy_s=self._get("Iy_s") if spara else 0.0,
-                beton_s=e["beton_s"].get() if spara else None,
-                typ_konstrukce="deska" if deska else "nosniky",
-                h=self._get("h") if deska else 0.0,
-                alfa=self._get("alfa"), sikmost=e["sikmost"].get(),
-                k_pod=self._k_pod(),
-                uloz=e["uloz"].get(), k_rot=self._k_rot(),
-                beta_s_pevne=bool(e["beta_s_pevne"].get()),
-                b=self._get("b"), nu=self._get("nu"), d=self._get("d"),
-                y_center_MLC=y_c, spoj=e["spoj"].get(),
-                roznos=bool(e["roznos"].get()), t_voz=self._get("t_voz"),
-                ex=self._get("ex"), obalky=bool(e["obalky"].get()),
-                krok_obalky=self._get("krok_ob"), tisk=False,
-            )
+                y_center_MLC=y_c, roznos=bool(e["roznos"].get()), t_voz=self._get("t_voz"),
+                obalky=bool(e["obalky"].get()), krok_obalky=self._get("krok_ob"), tisk=False,
+                **self._kw_konstrukce())
         except ValueError as exc:
             messagebox.showerror("Chyba vstupu", str(exc))
             return
@@ -637,6 +653,82 @@ class App(tk.Tk):
         gc.disable()
         threading.Thread(target=self._compute, args=(kw,), daemon=True).start()
         self.after(150, self._cekej, y_c)
+
+    def _kw_konstrukce(self) -> dict:
+        """Parametry konstrukce a MKP společné pro porovnání MLC/Ve i vnitřní síly."""
+        e = self._entries
+        deska = self._je_deska()
+        spara = bool(e["spara"].get()) and not deska
+        return dict(
+                L=self._get_L(),
+                N=1 if deska else self._get("N", int), beton=e["beton"].get(),
+                Iy=0.0 if deska else self._get("Iy"),
+                spara=spara,
+                b_s=self._get("b_s") if spara else 0.0,
+                Iy_s=self._get("Iy_s") if spara else 0.0,
+                beton_s=e["beton_s"].get() if spara else None,
+                typ_konstrukce="deska" if deska else "nosniky",
+                h=self._get("h") if deska else 0.0,
+                alfa=self._get("alfa"), sikmost=e["sikmost"].get(),
+                k_pod=self._k_pod(),
+                uloz=e["uloz"].get(), k_rot=self._k_rot(),
+                beta_s_pevne=bool(e["beta_s_pevne"].get()),
+                b=self._get("b"), nu=self._get("nu"), d=self._get("d"),
+                spoj=e["spoj"].get(), ex=self._get("ex"),
+        )
+
+    # ── Vnitřní síly pro posudek ────────────────────────────────────────
+    def _opt(self, key):
+        """Nepovinná hodnota (prázdné → None)."""
+        txt = self._entries[key].get().strip().replace(",", ".")
+        if not txt:
+            return None
+        try:
+            return float(txt)
+        except ValueError:
+            raise ValueError(f"Neplatná hodnota pro parametr '{key}'.")
+
+    def _run_sily(self):
+        try:
+            e = self._entries
+            vyb = Vybaveni(chodnik_L=self._get("ch_L"), chodnik_P=self._get("ch_P"),
+                           g_chodnik=self._get("g_ch"), g_vozovka=self._get("g_voz"),
+                           g_zabradli=self._get("g_zab"), g_svodidla=self._get("g_svo"))
+            kw = dict(vybaveni=vyb, A_nosniku=self._opt("A_nos"),
+                      gamma_beton=self._get("gamma_b"), g_spary=self._opt("g_sp") or 0.0,
+                      Ve=self._get("Ve"), dyn=self._get("dyn"), y_Ve=self._opt("y_Ve"),
+                      roznos=bool(e["roznos"].get()), t_voz=self._get("t_voz"),
+                      krok=self._get("krok_q"), tisk=False, **self._kw_konstrukce())
+        except ValueError as exc:
+            messagebox.showerror("Chyba vstupu", str(exc))
+            return
+        self._btn_sily.configure(state="disabled")
+        self._lbl_stav_sily.configure(text="Počítám…")
+        self._vysledek_sily = None
+        gc.collect()
+        gc.disable()
+
+        def vypocet():
+            try:
+                self._vysledek_sily = ("ok", vnitrni_sily(**kw))
+            except Exception as exc:
+                self._vysledek_sily = ("chyba", str(exc))
+        threading.Thread(target=vypocet, daemon=True).start()
+        self.after(150, self._cekej_sily)
+
+    def _cekej_sily(self):
+        if self._vysledek_sily is None:
+            self.after(150, self._cekej_sily)
+            return
+        stav, val = self._vysledek_sily
+        gc.enable()
+        gc.collect()
+        self._btn_sily.configure(state="normal")
+        self._lbl_stav_sily.configure(text="")
+        if stav == "ok":
+            OknoSil(self, val)
+        else:
+            messagebox.showerror("Chyba výpočtu", val)
 
     def _compute(self, kw):
         """Běží ve vedlejším vlákně – nesahá na Tk, jen uloží výsledek."""
@@ -812,6 +904,163 @@ class App(tk.Tk):
             plot_zatizeni(self._cr, i=j, show=False)
         import matplotlib.pyplot as plt
         plt.show()
+
+
+class OknoSil(tk.Toplevel):
+    """Výsledky vnitřních sil g0, g − g0, q po výstupech + export do Posudku PB."""
+
+    def __init__(self, master, vys: VysledekSil):
+        super().__init__(master)
+        self.vys = vys
+        jm, jv = vys.jednotky
+        self.title("Vnitřní síly pro posudek – g0, g − g0, q")
+        frm = ttk.Frame(self, padding=8)
+        frm.pack(fill="both", expand=True)
+        txt = vys.popis + "\n" + "\n".join(f"{s.nazev}: {s.popis}" for s in vys.stavy.values())
+        if vys.varovani:
+            txt += "\n" + "\n".join("! " + w for w in vys.varovani)
+        ttk.Label(frm, text=txt, wraplength=980, justify="left").pack(anchor="w")
+
+        stavy = list(vys.stavy)
+        cols = ["vyst", "y"] + [f"M_{s}" for s in stavy] + [f"V_{s}" for s in stavy] + \
+               ["M_Ed", "V_Ed"]
+        heads = ["Výstup", "y [m]"] + [f"M {s}" for s in stavy] + [f"|V| {s}" for s in stavy] + \
+                ["M_Ed", "V_Ed"]
+        self._tree = ttk.Treeview(frm, columns=cols, show="headings",
+                                  height=min(18, max(6, vys.n_vyst)))
+        for c, h in zip(cols, heads):
+            self._tree.heading(c, text=h)
+            self._tree.column(c, width=80 if c != "vyst" else 90, anchor="e")
+        self._tree.tag_configure("gov", background="#fff3cd")
+        self._tree.pack(fill="both", expand=True, pady=6)
+        self._tree.bind("<<TreeviewSelect>>", self._vyber_radek)
+        ttk.Label(frm, text=f"Jednotky {jm}, {jv}; M_Ed, V_Ed = MSÚ 6.10 včetně g0 "
+                            "(součinitele níže). Žlutě nejzatíženější výstup.",
+                  foreground="gray").pack(anchor="w")
+
+        r1 = ttk.Frame(frm); r1.pack(fill="x", pady=4)
+        ttk.Label(r1, text="Posuzovaný výstup:").pack(side="left")
+        self._vyst_var = tk.StringVar()
+        self._cb = ttk.Combobox(r1, textvariable=self._vyst_var, values=vys.popisky,
+                                width=12, state="readonly")
+        self._cb.pack(side="left", padx=4)
+        ttk.Label(r1, text="kritérium").pack(side="left", padx=(10, 2))
+        self._krit = tk.StringVar(value="M")
+        kcb = ttk.Combobox(r1, textvariable=self._krit, values=["M", "M-", "V"], width=4,
+                           state="readonly")
+        kcb.pack(side="left")
+        kcb.bind("<<ComboboxSelected>>", lambda _: self._obnov())
+        ttk.Button(r1, text="Průběhy sil", command=self._graf_sil).pack(side="left", padx=6)
+        ttk.Button(r1, text="Příčné rozdělení", command=self._graf_pricne).pack(side="left")
+
+        # součinitele a export
+        lf = ttk.LabelFrame(frm, text="Export do Posudku PB", padding=6)
+        lf.pack(fill="x", pady=6)
+        s = vys.soucinitele
+        self._souc = {}
+        r2 = ttk.Frame(lf); r2.pack(fill="x")
+        for key, lab in (("gamma_G", "γ_G"), ("gamma_G_inf", "γ_G,inf"), ("xi", "ξ"),
+                         ("gamma_Q", "γ_Q"), ("psi0", "ψ0"), ("psi1", "ψ1"), ("psi2", "ψ2")):
+            ttk.Label(r2, text=lab).pack(side="left", padx=(6, 2))
+            v = tk.StringVar(value=f"{getattr(s, key):g}")
+            ent = ttk.Entry(r2, textvariable=v, width=6)
+            ent.pack(side="left")
+            ent.bind("<FocusOut>", lambda _: self._obnov())
+            ent.bind("<Return>", lambda _: self._obnov())
+            self._souc[key] = v
+        ttk.Label(r2, text="(pro Ve ověřit)", foreground="gray").pack(side="left", padx=6)
+        r3 = ttk.Frame(lf); r3.pack(fill="x", pady=4)
+        ttk.Label(r3, text="Režim").pack(side="left", padx=(6, 2))
+        self._rezim = tk.StringVar(value="kombinace")
+        ttk.Combobox(r3, textvariable=self._rezim, values=["kombinace", "zatezovaci_stavy"],
+                     width=16, state="readonly").pack(side="left")
+        ttk.Label(r3, text="MSÚ").pack(side="left", padx=(10, 2))
+        self._msu = tk.StringVar(value="6.10ab")
+        ttk.Combobox(r3, textvariable=self._msu, values=["6.10ab", "6.10"], width=7,
+                     state="readonly").pack(side="left")
+        ttk.Label(r3, text="Délka nosníku L").pack(side="left", padx=(10, 2))
+        self._Lnos = tk.StringVar(value=f"{vys.K.Ltot:g}")
+        ttk.Entry(r3, textvariable=self._Lnos, width=8).pack(side="left")
+        ttk.Label(r3, text="[m] (L0 = rozpětí; se vstupem PB se bere z něj)",
+                  foreground="gray").pack(side="left", padx=4)
+        r4 = ttk.Frame(lf); r4.pack(fill="x")
+        self._pb = tk.StringVar(value="")
+        ttk.Label(r4, text="Vstup posudku PB (.toml)").pack(side="left", padx=(6, 2))
+        ttk.Entry(r4, textvariable=self._pb, width=60).pack(side="left")
+        ttk.Button(r4, text="…", width=3, command=self._vyber_pb).pack(side="left", padx=2)
+        ttk.Button(r4, text="Uložit výsledky a export…", command=self._export
+                   ).pack(side="left", padx=10)
+        self._obnov()
+
+    def _soucinitele(self):
+        from .vnitrni_sily import Soucinitele
+        try:
+            return Soucinitele(**{k: float(v.get().replace(",", "."))
+                                  for k, v in self._souc.items()})
+        except ValueError:
+            raise ValueError("Neplatný součinitel kombinace.")
+
+    def _obnov(self):
+        try:
+            self.vys.soucinitele = self._soucinitele()
+        except ValueError as exc:
+            messagebox.showerror("Chyba vstupu", str(exc), parent=self)
+            return
+        gov = self.vys.rozhodujici(self._krit.get())
+        self._tree.delete(*self._tree.get_children())
+        stavy = list(self.vys.stavy)
+        for o, d in enumerate(self.vys.souhrn()):
+            vals = [d["vystup"], f"{d['y']:.2f}"] + [f"{d['M_' + s]:.1f}" for s in stavy] + \
+                   [f"{d['V_' + s]:.1f}" for s in stavy] + [f"{d['M_Ed']:.1f}", f"{d['V_Ed']:.1f}"]
+            self._tree.insert("", "end", iid=str(o), values=vals,
+                              tags=("gov",) if o == gov else ())
+        self._vyst_var.set(self.vys.popisky[gov])
+
+    def _vyber_radek(self, _=None):
+        sel = self._tree.selection()
+        if sel:
+            self._vyst_var.set(self.vys.popisky[int(sel[0])])
+
+    def _o(self) -> int:
+        return self.vys.index(self._vyst_var.get())
+
+    def _graf_sil(self):
+        from .plotting_sily import plot_sily
+        plot_sily(self.vys, self._o(), show=True)
+
+    def _graf_pricne(self):
+        from .plotting_sily import plot_pricne
+        plot_pricne(self.vys, show=True)
+
+    def _vyber_pb(self):
+        from tkinter import filedialog
+        p = filedialog.askopenfilename(parent=self, title="Vstup Posudku PB",
+                                       filetypes=[("TOML", "*.toml"), ("vše", "*.*")])
+        if p:
+            self._pb.set(p)
+
+    def _export(self):
+        from tkinter import filedialog
+        from .export_pb import uloz_vysledky
+        from .vstup_sily import uloz_grafy
+        try:
+            self.vys.soucinitele = self._soucinitele()
+            Ln = float(self._Lnos.get().replace(",", ".")) if self._Lnos.get().strip() else None
+        except ValueError as exc:
+            messagebox.showerror("Chyba vstupu", str(exc), parent=self)
+            return
+        slozka = filedialog.askdirectory(parent=self, title="Složka pro výsledky")
+        if not slozka:
+            return
+        try:
+            soubory = uloz_vysledky(self.vys, slozka, vystup=self._vyst_var.get(),
+                                    L_nosniku=Ln, rezim=self._rezim.get(), msu=self._msu.get(),
+                                    pb_vstup=self._pb.get().strip() or None)
+            soubory += uloz_grafy(self.vys, slozka, self._vyst_var.get())
+        except Exception as exc:
+            messagebox.showerror("Chyba exportu", str(exc), parent=self)
+            return
+        messagebox.showinfo("Uloženo", "\n".join(soubory), parent=self)
 
 
 def spustit_gui():

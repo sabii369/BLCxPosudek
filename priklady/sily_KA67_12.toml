@@ -1,0 +1,62 @@
+# Vnitřní síly pro posudek – most z 10 nosníků KA-67/12 (prostý nosník 11,4 m)
+# python -m blc --sily priklady/sily_KA67_12.toml [--pb "cesta/k/nosnik_KA67_12.toml"]
+# Jednotky: m, kN, kN/m, kN/m², MN/m/m (k_v), t (Ve).
+
+[konstrukce]
+typ_konstrukce = "nosniky"     # "nosniky" | "deska"
+prefabrikat = "KA-67 / 12"     # předvyplní L, b, Iy, spáru (lze přepsat níže)
+L = [11.4]                     # rozpětí polí (osy ložisek) [m]
+N = 10                         # počet nosníků
+beton = "C35/45"
+nu = 0.2
+d = 0.55                       # statická účinná výška [m]
+alfa = 90.0                    # šikmost [°] (90 = kolmý)
+sikmost = "prava"
+k_v = 2000                     # tuhost podpory [MN/m na 1 m podpory]; 0 = tuhá
+uloz = "tvrde"                 # "tvrde" | "mekke" | "vetknuti"
+spoj = "kloub"                 # propojení nosníků bez spáry
+
+[stale]
+A_nosniku = 0.3116             # plocha průřezu nosníku [m²] → g0 = A·γ_b (každý nosník samostatně)
+gamma_beton = 25.0             # [kN/m³]
+chodnik_L = 1.5                # šířka chodníku vlevo [m]
+chodnik_P = 0.75               # šířka chodníku vpravo [m]
+g_chodnik = 5.0                # tíha skladby chodníku [kN/m²]
+g_vozovka = 2.6                # tíha skladby vozovky [kN/m²]
+g_zabradli = 0.5               # zábradlí na každé straně [kN/m]
+g_svodidla = 0.6               # svodidlo na každé straně (okraj vozovky) [kN/m]
+# [[stale.liniova]]            # další liniová zatížení
+# nazev = "římsa"
+# g = 3.0                      # [kN/m]
+# y = 0.3                      # osa od levého okraje [m]
+# sirka = 0.6                  # [m]
+
+[pohyblive]
+Ve = 80.0                      # výjimečná zatížitelnost [t]
+dyn = 1.0                      # dynamický součinitel
+# y_Ve = 5.0                   # osa vozidla [m] (výchozí osa vozovky)
+roznos = true                  # roznos kola do střednice desky
+t_voz = 0.0                    # tloušťka vozovky pro roznos [m]
+krok = 0.25                    # krok poloh vozidla [m]
+
+[vypocet]
+ex = 0.125                     # velikost prvku MKP [m]
+
+[soucinitele]                  # ČSN EN 1990 – pro Ve ověřit
+gamma_G = 1.35
+gamma_G_inf = 1.0
+xi = 0.85
+gamma_Q = 1.35
+psi0 = 0.75
+psi1 = 0.75
+psi2 = 0.0
+
+[export]
+slozka = "../vystupy/sily_KA67_12"
+# vystup = "N6"                # posuzovaný nosník; výchozí nejzatíženější
+kriterium = "M"                # "M" | "M-" | "V" (MSÚ 6.10 vč. g0)
+rezim = "kombinace"            # "kombinace" | "zatezovaci_stavy"
+msu = "6.10ab"                 # "6.10ab" | "6.10"
+L_nosniku = 11.96              # délka nosníku pro posudek [m] (se vstupem PB se bere z něj)
+# pb_vstup = "../../Posudek PB/examples/nosnik_KA67_12.toml"
+# t_vneseni = 60               # kvazistálá kombinace působí od [dny]

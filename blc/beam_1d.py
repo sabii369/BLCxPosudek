@@ -51,6 +51,14 @@ from .vehicles import pasove_vozidlo, kolove_vozidlo
 
 Axle = Tuple[float, float, float]     # (q [kN/m], s [m], e [m])
 
+# Vozidlo Ve: 9 náprav po 1,5 m, celková tíha Ve [t] → 10·Ve kN,
+# délka plošky kola 0,15 m; osová vzdálenost stop 1,5 m, šířka plošky 1,2 m
+VE_POCET_NAPRAV = 9
+VE_ROZTEC_NAPRAV = 1.5
+VE_DELKA_PLOSKY = 0.15
+VE_ROZVOR = 1.5
+VE_B_K = 1.2
+
 
 # ---------------------------------------------------------------------------
 # Generování náprav
@@ -370,18 +378,18 @@ class Nosnik1D:
 
     def stavy_Ve(self, Ve: float, n: int, roz: float, extra: bool = True):
         K, Lt = self.K, self.Lt
-        bw, a = 0.15, 1.5
-        F = (10.0 / 9.0) * Ve / bw
+        bw, a, nn = VE_DELKA_PLOSKY, VE_ROZTEC_NAPRAV, VE_POCET_NAPRAV
+        F = (10.0 / nn) * Ve / bw
 
         def vlak(x1):
-            return [(F, x1 + k * a - 0.5 * bw, x1 + k * a + 0.5 * bw) for k in range(9)]
+            return [(F, x1 + k * a - 0.5 * bw, x1 + k * a + 0.5 * bw) for k in range(nn)]
 
         # vozidlo vjíždí na most a sjíždí z něj (nápravy mimo most se oříznou),
         # vozidlo je symetrické → stačí jeden směr jízdy
         n_tot = max(1, n * K.n_poli)
-        ext = 8 * a + 0.5 * bw + roz
+        ext = (nn - 1) * a + 0.5 * bw + roz
         pol = self._polohy(vlak, n_tot, roz, -ext, Lt + 0.5 * bw + roz, extra)
-        for x1 in (0.5 * bw, Lt - 8 * a - 0.5 * bw):    # vozidlo celé na mostě u čel
+        for x1 in (0.5 * bw, Lt - (nn - 1) * a - 0.5 * bw):    # vozidlo celé na mostě u čel
             pol.append(x1)
         for x1 in pol:
             ax = vlak(x1)
@@ -402,5 +410,5 @@ def vypocet_MLC(nos: Nosnik1D, typ: str, MLC: str, n: int, dist: float,
 
 def vypocet_Ve(nos: Nosnik1D, Ve: float, n: int, roz: float = 0.0) -> Beam1DResult:
     res = nos.prohledej(nos.stavy_Ve(Ve, n, roz))
-    res.rozvor, res.b_k = 1.5, 1.2
+    res.rozvor, res.b_k = VE_ROZVOR, VE_B_K
     return res
