@@ -164,22 +164,25 @@ class Beton:
 # Předpínací výztuž
 # ---------------------------------------------------------------------------
 
-#: Předvolby předpínací výztuže (EN 10138 / běžné systémy).
+#: Předvolby předpínací výztuže (EN 10138 / běžné systémy). E_p se odvozuje z druhu výztuže.
 PREDPINACI_VYZTUZ = {
-    "Y1860S7-15,7": dict(fpk=1860.0, fp01k=1640.0, Ep=195000.0, Ap_lano=150.0, d_lana=15.7,
+    "Y1860S7-15,7": dict(druh="lano", fpk=1860.0, fp01k=1640.0, Ap_lano=150.0, d_lana=15.7,
                          trida_relaxace=2, rho1000=2.5),
-    "Y1860S7-15,2": dict(fpk=1860.0, fp01k=1640.0, Ep=195000.0, Ap_lano=140.0, d_lana=15.2,
+    "Y1860S7-15,2": dict(druh="lano", fpk=1860.0, fp01k=1640.0, Ap_lano=140.0, d_lana=15.2,
                          trida_relaxace=2, rho1000=2.5),
-    "Y1860S7-12,9": dict(fpk=1860.0, fp01k=1640.0, Ep=195000.0, Ap_lano=100.0, d_lana=12.9,
+    "Y1860S7-12,9": dict(druh="lano", fpk=1860.0, fp01k=1640.0, Ap_lano=100.0, d_lana=12.9,
                          trida_relaxace=2, rho1000=2.5),
-    "Y1860S7-12,5": dict(fpk=1860.0, fp01k=1640.0, Ep=195000.0, Ap_lano=93.0, d_lana=12.5,
+    "Y1860S7-12,5": dict(druh="lano", fpk=1860.0, fp01k=1640.0, Ap_lano=93.0, d_lana=12.5,
                          trida_relaxace=2, rho1000=2.5),
-    "Y1770S7-15,7": dict(fpk=1770.0, fp01k=1560.0, Ep=195000.0, Ap_lano=150.0, d_lana=15.7,
+    "Y1770S7-15,7": dict(druh="lano", fpk=1770.0, fp01k=1560.0, Ap_lano=150.0, d_lana=15.7,
                          trida_relaxace=2, rho1000=2.5),
     # drát PD 4,5 (podle přiloženého Excelu – σ0,2 = 1200 MPa, f_pk = 1650 MPa)
-    "PD4,5": dict(fpk=1650.0, fp01k=1262.25, Ep=195000.0, Ap_lano=15.904, d_lana=4.5,
+    "PD4,5": dict(druh="drat", fpk=1650.0, fp01k=1262.25, Ap_lano=15.904, d_lana=4.5,
                   trida_relaxace=1, rho1000=8.0),
 }
+
+#: Druhy předpínací výztuže a jejich modul pružnosti E_p [MPa] (3.3.6(2), (3)).
+DRUHY_PREDPINACI_VYZTUZE = {"drat": 205000.0, "lano": 195000.0}
 
 #: součinitele relaxace podle třídy (3.28)–(3.30): (A, B) pro A·ρ1000·e^{B·μ}
 RELAXACE_KOEF = {1: (5.39, 6.7), 2: (0.66, 9.1), 3: (1.98, 8.0)}
@@ -191,6 +194,7 @@ class PredpinaciVyztuz:
     """Předpínací výztuž (lano / drát / tyč) podle 3.3 ČSN EN 1992-1-1."""
 
     typ: str = "Y1860S7-15,7"
+    druh: str | None = None        # drat | lano (určuje výchozí E_p)
     fpk: float | None = None
     fp01k: float | None = None
     Ep: float | None = None
@@ -199,7 +203,8 @@ class PredpinaciVyztuz:
     trida_relaxace: int | None = None
     rho1000: float | None = None
     gamma_s: float = 1.15
-    eps_uk: float = 0.035
+    taznost: float = 35.0          # ε_uk [‰] – tažnost (poměrné přetvoření při maximální síle)
+    zpevneni: bool = True          # True = stoupající větev do k·f_pd při ε_uk, False = vodorovná větev f_pd
     eps_ud_ku_eps_uk: float = 0.9  # ε_ud = 0,9·ε_uk (3.3.6(7) pozn.)
 
     def __post_init__(self):
@@ -211,8 +216,14 @@ class PredpinaciVyztuz:
             self.trida_relaxace = 2
         if self.rho1000 is None:
             self.rho1000 = RELAXACE_RHO1000[self.trida_relaxace]
+        druh = str(self.druh or "lano").strip().lower().replace("á", "a")
+        if druh not in DRUHY_PREDPINACI_VYZTUZE:
+            raise ValueError(f"Předpínací výztuž: neznámý druh '{self.druh}' (drat / lano)")
+        self.druh = druh
         if self.Ep is None:
-            self.Ep = 195000.0
+            self.Ep = DRUHY_PREDPINACI_VYZTUZE[druh]
+        if not self.taznost or self.taznost <= 0:
+            raise ValueError("Předpínací výztuž: tažnost ε_uk musí být kladná [‰]")
         missing = [k for k in ("fpk", "fp01k", "Ap_lano") if getattr(self, k) is None]
         if missing:
             raise ValueError(f"Předpínací výztuž '{self.typ}': chybí {missing}")
@@ -220,6 +231,10 @@ class PredpinaciVyztuz:
     @property
     def fpd(self) -> float:
         return self.fp01k / self.gamma_s
+
+    @property
+    def eps_uk(self) -> float:
+        return self.taznost * 1e-3
 
     @property
     def eps_ud(self) -> float:
@@ -230,13 +245,17 @@ class PredpinaciVyztuz:
         return self.fpk / self.fp01k
 
     def sigma_msu(self, eps: np.ndarray) -> np.ndarray:
-        """Návrhový bilineární diagram se stoupající větví (obr. 3.10)."""
+        """Návrhový bilineární diagram (obr. 3.10): se zpevněním stoupající větev do k·f_pd při ε_uk,
+        bez zpevnění vodorovná větev na úrovni f_pd. Mezní přetvoření ε_ud se kontroluje v obou případech."""
         eps = np.asarray(eps, dtype=float)
         e_y = self.fpd / self.Ep
-        f_u = self.k * self.fpd  # při ε_uk
         a = np.abs(eps)
-        sig = np.where(a <= e_y, self.Ep * a,
-                       self.fpd + (f_u - self.fpd) * (a - e_y) / (self.eps_uk - e_y))
+        if self.zpevneni:
+            f_u = self.k * self.fpd  # při ε_uk
+            horni = self.fpd + (f_u - self.fpd) * (a - e_y) / max(self.eps_uk - e_y, 1e-12)
+        else:
+            horni = np.full_like(a, self.fpd)
+        sig = np.where(a <= e_y, self.Ep * a, horni)
         return np.sign(eps) * sig
 
     def relaxace(self, sigma_pi: float | np.ndarray, t_h: float | np.ndarray) -> np.ndarray:

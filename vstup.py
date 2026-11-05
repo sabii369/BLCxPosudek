@@ -134,7 +134,10 @@ def _kombinace(d: dict) -> KombinaceVstup:
 def model_ze_slovniku(d: dict) -> NosnikPB:
     beton = Beton(**{**_vyber(d.get("beton", {}), Beton),
                      **({"Ecm_zadany": d["beton"]["Ecm"]} if "Ecm" in d.get("beton", {}) else {})})
-    predp = PredpinaciVyztuz(**_vyber(d.get("predpinaci_vyztuz", {}), PredpinaciVyztuz))
+    dp = dict(d.get("predpinaci_vyztuz", {}))
+    if "eps_uk" in dp and "taznost" not in dp:  # starší zápis: ε_uk jako poměrné číslo
+        dp["taznost"] = float(dp["eps_uk"]) * 1e3
+    predp = PredpinaciVyztuz(**_vyber(dp, PredpinaciVyztuz))
     bet = BetonarskaVyztuz(**_vyber(d.get("betonarska_vyztuz", {}), BetonarskaVyztuz))
     prurez = _prurez(d["prurez"])
     n = d.get("nosnik", {})

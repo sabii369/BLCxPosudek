@@ -24,8 +24,8 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Circle, Polygon
 
 from . import __version__, grafy
-from .materialy import (BETONARSKA_VYZTUZ, PREDPINACI_VYZTUZ, RELAXACE_RHO1000, Beton, BetonarskaVyztuz,
-                        PredpinaciVyztuz)
+from .materialy import (BETONARSKA_VYZTUZ, DRUHY_PREDPINACI_VYZTUZE, PREDPINACI_VYZTUZ, RELAXACE_RHO1000, Beton,
+                        BetonarskaVyztuz, PredpinaciVyztuz)
 from .model import Nastaveni
 from .protokol import fmt
 from .toml_zapis import dumps as toml_dumps
@@ -778,11 +778,15 @@ class Aplikace(tk.Tk):
         lf = ttk.LabelFrame(f, text="Předpínací výztuž (hodnoty se doplní podle typu, lze je přepsat)", padding=6)
         lf.pack(fill="x", pady=4)
         self.f_predp = Formular(lf, [
-            ("typ", "Typ", "choice", list(PREDPINACI_VYZTUZ)), ("fpk", "f_pk [MPa]", "optfloat", None),
+            ("typ", "Typ", "choice", list(PREDPINACI_VYZTUZ)),
+            ("druh", "Druh (drat → E_p 205 GPa, lano → 195 GPa)", "choice", list(DRUHY_PREDPINACI_VYZTUZE)),
+            ("fpk", "f_pk [MPa]", "optfloat", None),
             ("fp01k", "f_p0,1k [MPa]", "optfloat", None), ("Ep", "E_p [MPa]", "optfloat", None),
-            ("Ap_lano", "A_p lana [mm²]", "optfloat", None), ("d_lana", "Průměr lana [mm]", "optfloat", None),
+            ("Ap_lano", "A_p lana / drátu [mm²]", "optfloat", None), ("d_lana", "Průměr [mm]", "optfloat", None),
             ("trida_relaxace", "Třída relaxace", "choice", ["1", "2", "3"]),
-            ("rho1000", "ρ1000 [%]", "optfloat", None), ("gamma_s", "γ_s", "optfloat", None)],
+            ("rho1000", "ρ1000 [%]", "optfloat", None), ("gamma_s", "γ_s", "optfloat", None),
+            ("taznost", "Tažnost ε_uk [‰]", "optfloat", None),
+            ("zpevneni", "Zpevnění (stoupající větev diagramu)", "bool", True)],
             sloupcu=2, pri_zmene=self._info_materialy)
         self.f_predp.pack(fill="x")
         lf = ttk.LabelFrame(f, text="Betonářská výztuž", padding=6)
@@ -802,6 +806,7 @@ class Aplikace(tk.Tk):
         self.f_beton.prom["trida"].trace_add("write", lambda *_: self._zmena_typu("beton"))
         self.f_predp.prom["typ"].trace_add("write", lambda *_: self._zmena_typu("predp"))
         self.f_predp.prom["trida_relaxace"].trace_add("write", lambda *_: self._zmena_typu("relaxace"))
+        self.f_predp.prom["druh"].trace_add("write", lambda *_: self._zmena_typu("druh"))
         self.f_bet.prom["typ"].trace_add("write", lambda *_: self._zmena_typu("bet"))
 
     # --- výchozí hodnoty --------------------------------------------------
@@ -818,8 +823,9 @@ class Aplikace(tk.Tk):
         if typ not in PREDPINACI_VYZTUZ:
             return None
         p = PredpinaciVyztuz(typ)
-        return {"fpk": p.fpk, "fp01k": p.fp01k, "Ep": p.Ep, "Ap_lano": p.Ap_lano, "d_lana": p.d_lana,
-                "trida_relaxace": p.trida_relaxace, "rho1000": p.rho1000, "gamma_s": p.gamma_s}
+        return {"druh": p.druh, "fpk": p.fpk, "fp01k": p.fp01k, "Ep": p.Ep, "Ap_lano": p.Ap_lano,
+                "d_lana": p.d_lana, "trida_relaxace": p.trida_relaxace, "rho1000": p.rho1000,
+                "gamma_s": p.gamma_s, "taznost": p.taznost, "zpevneni": p.zpevneni}
 
     @staticmethod
     def _vych_bet(typ: str) -> dict | None:
@@ -855,6 +861,10 @@ class Aplikace(tk.Tk):
             if v:
                 v.pop("gamma_s")
                 self.f_predp.doplnit(v, prepsat=True)
+        elif co == "druh":
+            druh = self.f_predp.prom["druh"].get().strip().lower().replace("á", "a")
+            if druh in DRUHY_PREDPINACI_VYZTUZE:
+                self.f_predp.doplnit({"Ep": DRUHY_PREDPINACI_VYZTUZE[druh]}, prepsat=True)
         elif co == "relaxace":
             try:
                 t = int(_cislo(self.f_predp.prom["trida_relaxace"].get()))
@@ -887,7 +897,7 @@ class Aplikace(tk.Tk):
         if vp:
             self.f_predp.doplnit(vp)
         else:
-            self.f_predp.doplnit({"gamma_s": 1.15})
+            self.f_predp.doplnit({"gamma_s": 1.15, "druh": "lano", "taznost": 35.0})
         vs = self._vych_bet(self.f_bet.prom["typ"].get())
         if vs:
             self.f_bet.doplnit(vs)
@@ -928,6 +938,8 @@ class Aplikace(tk.Tk):
                 f"f_ctk,0,05 = {be.fctk005:.2f}   E_cm = {be.Ecm:.0f}   f_cd = {be.fcd:.2f}   f_ctd = {be.fctd:.2f} MPa\n"
                 f"Předpínací výztuž {pv.typ}:  f_pk = {pv.fpk:g}   f_p0,1k = {pv.fp01k:g}   E_p = {pv.Ep:g} MPa   "
                 f"A_p = {pv.Ap_lano:g} mm²   třída relaxace {pv.trida_relaxace}, ρ1000 = {pv.rho1000:g} %\n"
+                f"{'Dráty' if pv.druh == 'drat' else 'Lana'}, diagram MSÚ {'se zpevněním' if pv.zpevneni else 'bez zpevnění'}:"
+                f"   f_pd = {pv.fpd:.0f} MPa   ε_uk = {pv.taznost:g} ‰   ε_ud = 0,9·ε_uk = {pv.eps_ud * 1e3:.1f} ‰\n"
                 f"σ_p,max = min(0,8·f_pk; 0,9·f_p0,1k) = {min(0.8 * pv.fpk, 0.9 * pv.fp01k):.0f} MPa,   "
                 f"σ_pm0 ≤ min(0,75·f_pk; 0,85·f_p0,1k) = {min(0.75 * pv.fpk, 0.85 * pv.fp01k):.0f} MPa"))
         except Exception as e:  # noqa: BLE001

@@ -223,9 +223,15 @@ class NosnikPB:
                 f"{fmt(b.alpha_ct)}·{fmt(b.fctk005)}/{fmt(b.gamma_c)}", b.fctd, "MPa", "3.1.6")
         K2.krok("Mezní přetvoření (parabola-obdélník)", "ε_{c2}; ε_{cu2}; n",
                 "", f"{fmt(b.eps_c2 * 1e3)} ‰; {fmt(b.eps_cu2 * 1e3)} ‰; {fmt(b.n)}", "", "tab. 3.1")
-        K2.text(f"Předpínací výztuž {p.typ}: A_p,1 = {fmt(p.Ap_lano)} mm², f_pk = {fmt(p.fpk)} MPa, "
+        K2.text(f"Předpínací výztuž {p.typ} ({'dráty' if p.druh == 'drat' else 'lana'}): "
+                f"A_p,1 = {fmt(p.Ap_lano)} mm², f_pk = {fmt(p.fpk)} MPa, "
                 f"f_p0,1k = {fmt(p.fp01k)} MPa, E_p = {fmt(p.Ep)} MPa, třída relaxace {p.trida_relaxace} "
-                f"(ρ1000 = {fmt(p.rho1000)} %), γ_s = {fmt(p.gamma_s)}.")
+                f"(ρ1000 = {fmt(p.rho1000)} %), γ_s = {fmt(p.gamma_s)}, tažnost ε_uk = {fmt(p.taznost)} ‰.")
+        K2.text("Modul pružnosti E_p: dráty 205 GPa, lana 195 GPa (3.3.6(2), (3)). "
+                + ("Pracovní diagram se zpevněním – stoupající větev do k·f_pd při ε_uk, k = f_pk/f_p0,1k."
+                   if p.zpevneni else
+                   "Pracovní diagram bez zpevnění – vodorovná větev na úrovni f_pd.")
+                + " Mezní přetvoření ε_ud se kontroluje v obou případech (obr. 3.10).")
         K2.krok("Návrhová pevnost předpínací výztuže", "f_{pd} = f_{p0,1k}/γ_{s}",
                 f"{fmt(p.fp01k)}/{fmt(p.gamma_s)}", p.fpd, "MPa", "3.3.6")
         K2.krok("Mezní přetvoření předpínací výztuže", "ε_{ud} = 0,9·ε_{uk}",
