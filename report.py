@@ -43,6 +43,7 @@ h3{font-size:16px;margin:24px 0 8px}
 table{border-collapse:collapse;width:100%;margin:8px 0 16px;font-size:13px;font-variant-numeric:tabular-nums}
 th,td{border-bottom:1px solid var(--line);padding:4px 8px;text-align:left;vertical-align:top}
 td.num{text-align:right}
+tr.sum td{font-weight:600;border-top:1.5px solid var(--ink2)}
 th{background:var(--soft);font-weight:600;text-align:center}
 td:first-child,th:first-child{text-align:left}
 caption{caption-side:top;text-align:left;font-weight:600;color:var(--ink2);padding:4px 0}
@@ -197,7 +198,8 @@ def sestav_html(model, obrazky: dict[str, str], adr_obr: Path, embed: bool = Tru
             elif typ == "tabulka":
                 t: Tabulka = obj
                 h = "".join(f"<th>{_mat(html.escape(str(c)))}</th>" for c in t.hlavicka)
-                rows = "".join("<tr>" + "".join(_td(c) for c in r) + "</tr>" for r in t.radky)
+                rows = "".join(("<tr class=sum>" if t.souhrn and i == len(t.radky) - 1 else "<tr>")
+                               + "".join(_td(c) for c in r) + "</tr>" for i, r in enumerate(t.radky))
                 parts.append(f'<div class="wrap"><table><caption>{html.escape(t.popisek)}</caption>'
                              f"<tr>{h}</tr>{rows}</table></div>")
             elif typ == "obrazek":

@@ -55,6 +55,7 @@ class Tabulka:
     hlavicka: list[str]
     radky: list[list[Any]]
     popisek: str = ""
+    souhrn: bool = False   # poslední řádek je souhrnný (zvýrazní se)
 
 
 @dataclass
@@ -105,8 +106,8 @@ class Kapitola:
         self.polozky.append(("krok", Krok(popis, vzorec, dosazeni, vysledek, jednotka, odkaz)))
         return self
 
-    def tabulka(self, hlavicka: list[str], radky: list[list[Any]], popisek: str = ""):
-        self.polozky.append(("tabulka", Tabulka(hlavicka, radky, popisek)))
+    def tabulka(self, hlavicka: list[str], radky: list[list[Any]], popisek: str = "", souhrn: bool = False):
+        self.polozky.append(("tabulka", Tabulka(hlavicka, radky, popisek, souhrn)))
         return self
 
     def obrazek(self, soubor: str, popisek: str = ""):

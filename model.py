@@ -160,6 +160,7 @@ class NosnikPB:
         self._zatizeni()
         self._ztraty_okamzite()
         self._faze_a_dlouhodobe_ztraty()
+        self._prehled_ztrat()
         self._vnitrni_sily()
         self._msp()
         if self.n.hlavni_napeti:
@@ -896,6 +897,84 @@ class NosnikPB:
                 f"({fmt(P0)} − {fmt(Pk)})/{fmt(P0)}", 100 * (P0 - Pk) / P0, "%")
         Kr.obrazek("ztraty_rozklad", "Rozklad ztrát předpětí ve středu rozpětí")
         Kr.obrazek("sila_v_case", "Předpínací síla ve středu rozpětí v čase")
+
+    def _rozklad_ztrat(self, j: int, i: int) -> dict:
+        """Rozklad ztrát kabelu j v řezu i na konci životnosti [MPa] (součet složek = σ_p,max − σ_p,∞)."""
+        k, f = self.kabely[j], self.faze[-1]
+        fr = float(self._faktor_prenosu()[i])
+        s_tr, s_pk = float(self.sig_tr[j][i]), float(self.sig_pokl[j][i])
+        mez = f.ztraty["kabely"][j]["mezi"]
+
+        def v(a):
+            return float(np.broadcast_to(np.asarray(a, dtype=float), self.x.shape)[i])
+
+        jm = v(mez["jmenovatel"])
+        d = {
+            "treni": k.sigma_max - s_tr,
+            "pokluz": s_tr - s_pk,
+            "prenos": (1.0 - fr) * s_pk,
+            "pruzne": float(self.d_el[j][i]),
+            "smrstovani": v(mez["clen_smrst"]) / jm * fr,
+            "dotvarovani": v(mez["clen_dotv"]) / jm * fr,
+            "relaxace": v(mez["clen_relax"]) / jm * fr,
+        }
+        d["okamzite"] = d["treni"] + d["pokluz"] + d["prenos"] + d["pruzne"]
+        d["dlouhodobe"] = d["smrstovani"] + d["dotvarovani"] + d["relaxace"]
+        d["celkem"] = k.sigma_max - float(f.sigma[j][i])
+        d["sigma_max"], d["sigma_konec"] = k.sigma_max, float(f.sigma[j][i])
+        return d
+
+    def _prehled_ztrat(self):
+        """Přehledná tabulka ztrát předpětí na konci životnosti v procentech σ_p,max."""
+        K = self.protokol.kapitola("Přehled ztrát předpětí na konci životnosti", 2)
+        f = self.faze[-1]
+        im = self.im
+        Ap = np.array([k.Ap for k in self.kabely])
+        sloupce = ([("relaxace před uvolněním", "pokluz"), ("nepřenesené v kotevní oblasti", "prenos")]
+                   if self.predem else [("tření", "treni"), ("pokluz", "pokluz")])
+        sloupce += [("pružné přetvoření", "pruzne"), ("smršťování", "smrstovani"), ("dotvarování", "dotvarovani"),
+                    ("relaxace", "relaxace")]
+        roz = [self._rozklad_ztrat(j, im) for j in range(len(self.kabely))]
+        if self.predem and all(abs(r["prenos"]) < 1e-9 for r in roz):
+            sloupce = [s for s in sloupce if s[1] != "prenos"]
+        klice = [s[1] for s in sloupce] + ["okamzite", "dlouhodobe", "celkem"]
+        # vážený průměr podle A_p: Σ Δσ·A_p / Σ σ_p,max·A_p
+        smaxAp = sum(r["sigma_max"] * a for r, a in zip(roz, Ap))
+        celk = {kl: sum(r[kl] * a for r, a in zip(roz, Ap)) / smaxAp for kl in klice}
+        self.prehled_ztrat = {"x": float(self.x[im]), "kabely": roz, "celkem_pct": {k: 100 * v for k, v in celk.items()}}
+
+        K.text(f"Ztráty jsou vztaženy k napínacímu napětí σ_p,max příslušného kabelu, čas t = {fmt(f.t, 0)} dní "
+               f"({f.nazev.lower()}). Dlouhodobá ztráta podle (5.46) je rozdělena na složky podle členů čitatele "
+               "(ε_cs·E_p, 0,8·Δσ_pr, α_p·Σφ·σ_c) dělených společným jmenovatelem; záporná hodnota znamená "
+               "přírůstek napětí. Řádek „Celkem“ je průměr vážený plochou předpínací výztuže "
+               f"(odpovídá úbytku předpínací síly). Řez ve středu rozpětí x = {fmt(self.x[im], 3)} m:")
+        rows = []
+        for k, r in zip(self.kabely, roz):
+            rows.append([k.nazev, fmt(r["sigma_max"], 1)] + [fmt(100 * r[kl] / r["sigma_max"], 1) for kl in klice]
+                        + [fmt(r["sigma_konec"], 1)])
+        s_kon = sum(r["sigma_konec"] * a for r, a in zip(roz, Ap)) / Ap.sum()
+        rows.append(["Celkem", fmt(smaxAp / Ap.sum(), 1)] + [fmt(100 * celk[kl], 1) for kl in klice]
+                    + [fmt(s_kon, 1)])
+        K.tabulka(["Kabel", "σ_p,max [MPa]"] + [f"{n} [%]" for n, _ in sloupce]
+                  + ["okamžité [%]", "dlouhodobé [%]", "celkem [%]", "σ_p,∞ [MPa]"], rows,
+                  "Ztráty předpětí na konci životnosti ve středu rozpětí [% σ_p,max]", souhrn=True)
+
+        # celková ztráta po délce (řezy mezi podporami)
+        idx = [i for i in self.i_tab if self.v_poli[i]]
+        rows = []
+        for j, k in enumerate(self.kabely):
+            rows.append([k.nazev] + [fmt(100 * (k.sigma_max - float(f.sigma[j][i])) / k.sigma_max, 1) for i in idx])
+        tot = []
+        for i in idx:
+            sm = sum(k.sigma_max * a for k, a in zip(self.kabely, Ap))
+            sk = sum(float(f.sigma[j][i]) * a for j, a in enumerate(Ap))
+            tot.append(fmt(100 * (sm - sk) / sm, 1))
+        rows.append(["Celkem"] + tot)
+        K.tabulka(["Kabel"] + [f"x = {fmt(self.x[i], 3)} m" for i in idx], rows,
+                  "Celková ztráta předpětí na konci životnosti po délce nosníku [% σ_p,max]", souhrn=True)
+        if self.predem:
+            K.text("V kotevní oblasti předem předpjatých lan obsahuje celková ztráta i nepřenesenou část předpětí "
+                   "(lineární náběh na délce přenosu l_pt1).")
 
     def _dlouhodobe(self, t: float):
         """Napětí v kabelech po dlouhodobých ztrátách v čase t (5.46 se superpozicí dotvarování)."""
