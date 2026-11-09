@@ -440,14 +440,17 @@ class AplikaceMost(Aplikace):
             v.configure(text=f"Ve > {res.Ve_max:.0f} t", foreground="#0a7d0a")
         else:
             v.configure(text=f"Ve = {m_all.Ve:.1f} t", foreground="#0a7d0a" if not nok else "#8a5a00")
+        upoz = model.protokol.upozorneni
         det.configure(text=(f"{res.n_vypoctu} výpočtů posudku" +
-                            (f"; {nok} posudků nevyhovuje nezávisle na Ve" if nok else "")))
+                            (f"; {nok} posudků nevyhovuje nezávisle na Ve" if nok else "") +
+                            (f"; upozornění {len(upoz)}" if upoz else "")))
         self.lbl_souhrn.configure(
             text=("Zatížitelnost " + (f"Ve = {m_all.Ve:.1f} t" if m_all else f"Ve > {res.Ve_max:.0f} t")),
             foreground="#0a7d0a" if not nok else "#8a5a00")
         self.stav.set(f"Zatížitelnost: " + (f"Ve = {m_all.Ve:.1f} t ({m_all.klic[0]} {m_all.klic[1]} – "
                                              f"{m_all.klic[2]})" if m_all else "neomezena")
-                      + f"; protokol a grafy pro toto Ve.")
+                      + f"; protokol a grafy pro toto Ve"
+                      + (f"; upozornění {len(upoz)} (karta Výsledky)." if upoz else "."))
 
     def protokol(self):
         """HTML protokol posudku včetně kapitoly a grafů zatížení mostu."""

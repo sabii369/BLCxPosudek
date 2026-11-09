@@ -73,6 +73,11 @@ def test_spocti_posudek(d, vysledek):
     assert zat["kombinace"][0]["x"][-1] == approx(d["nosnik"]["L"])
     assert zat["t_vneseni"] == 60
     assert model.kombinace_vcetne_g0 is False
+    # mez lineárního dotvarování (7.2(3)) není posudek – v příkladu je překročena → upozornění
+    assert not any("dotvarování" in p.nazev for p in model.protokol.posudky)
+    upoz = model.protokol.upozorneni
+    assert upoz and all("mez lineárního dotvarování" in t for t in upoz)
+    assert any(t.startswith("Uvedení do provozu") for t in upoz)
 
 
 def test_zadany_nosnik_a_rezim(d, vysledek):
@@ -156,6 +161,7 @@ def test_davka(tmp_path):
     assert html.count("<figcaption>Napětí po výšce průřezu v řezu ve středu rozpětí") == 4
     for k in ("blc_zat_stale", "blc_zat_q", "blc_rez_0", "blc_rez_3"):
         assert (tmp_path / "obrazky" / f"{k}.png").exists()
+    assert '<div class="upoz"><b>Upozornění</b>' in html          # souhrn upozornění
 
 
 def _tk() -> bool:
@@ -184,6 +190,8 @@ def test_gui(tmp_path):
             time.sleep(0.05)
         assert app.model is not None
         assert len(app.t_blc.get_children()) == 10
+        assert "mez lineárního dotvarování" in app.lbl_upozorneni.cget("text")   # upozornění v GUI
+        assert app.lbl_upozorneni.winfo_manager() == "pack"
         nazvy = list(app._seznam_grafu)
         assert "Zatížení mostu – vlastní tíha g0 a ostatní stálé g − g0" in nazvy
         i = nazvy.index("Napětí v betonu – Konec životnosti")

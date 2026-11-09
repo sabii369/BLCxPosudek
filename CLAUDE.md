@@ -57,7 +57,8 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
   (v exportu „zatezovaci_stavy“ stejná `skupina = "BLC"`); `extremy_kombinace(druh)` = max/min M, V po nosnících.
 - Posudek (pb_posudek, větev `aktualni-stari-koroze` v repu Posudek PB): fáze „Aktuální stáří“ (`[casova_osa] t_akt`),
   oslabení korozí `[degradace]` → `Faze.k_Ap/k_As/k_Asw` ve fázích t ≥ t_akt (jinak jen konec životnosti),
-  `_sily_predpeti(sigma, k_Ap)`; GUI karta 4 (oslabení), karta 5 (t_akt).
+  `_sily_predpeti(sigma, k_Ap)`; GUI karta 4 (oslabení), karta 5 (t_akt). Mez lineárního dotvarování (7.2(3))
+  není posudek: krok výpočtu + při překročení `Protokol.upozorneni` (souhrn HTML, GUI `lbl_upozorneni`, výpis dávky).
 - Zatížitelnost: `blc_posudek/zatizitelnost.py` – `zatizitelnost(d, vys)` → `VysledekZatizitelnosti` (Ve pro η = 1
   každého posudku; `vys_pro_Ve` přeškáluje q z referenčního Ve; Illinois se sdílenými výpočty posudku; stavy
   nezávisí / neomezuje / klesá); `model.zatizitelnost`, kapitola na začátek protokolu; GUI `AplikaceMost._zobraz_vysledky`.
@@ -66,6 +67,8 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
 - `tests/`: `test_nosnik_1d.py`, `test_deska_mkp.py`, `test_porovnani.py`, `test_vnitrni_sily.py`, `test_blc_posudek.py`,
   `test_regrese.py` + `referencni_pripady.py` + `referencni_hodnoty.json` (výsledky ověřeného stavu z 21. 10. 2026).
 - `docs/navod.md` = uživatelský návod (kap. 7 = vnitřní síly pro posudek) – při změně chování aktualizovat.
+- `docs/podklad_pro_AI.md` = podklad pro AI k parametrické studii (tok dat, vstupy `[blc]`, co se přepočítává,
+  API bez protokolu, časy, pasti) – při změně chování aktualizovat.
 - Verze: `blc/__init__.py` `__version__` a `pyproject.toml` (držet shodně); označení verzí nepatří do názvů souborů ani komentářů – historii nese git.
 
 ## Modelová rozhodnutí (neměnit bez dohody)

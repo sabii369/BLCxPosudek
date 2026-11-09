@@ -397,7 +397,17 @@ v dávce `--zatizitelnost`): místo posouzení při zadaném zatížení se pro 
   pro neoslabenou výztuž.
 - Úprava je v balíčku posudku (`pb_posudek`, repo Posudek PB, větev `aktualni-stari-koroze`).
 
-### 8.7 Soubor
+### 8.7 Upozornění (mez lineárního dotvarování)
+
+Tlak v betonu vůči mezi lineárního dotvarování k2·f_ck(t) (k2 = 0,45; ČSN EN 1992-1-1, 7.2(3))
+**není mezní stav** – nevstupuje do využití, výsledku VYHOVUJE / NEVYHOVUJE ani do zatížitelnosti.
+Kontroluje se ve fázích po vnesení předpětí (stálá kombinace, v provozu kvazistálá); v protokolu je
+krok výpočtu s poměrem |σc|/(k2·f_ck(t)). Při překročení program zobrazí **upozornění**, že je
+třeba uvažovat nelineární dotvarování: v souhrnu protokolu a u příslušné fáze, na kartě 7 (pruh pod
+souhrnnými kartami, počet ve stavovém řádku) a ve výpisu dávky (`! Upozornění: …`). Ztráty předpětí
+a průhyb se počítají s lineárním dotvarováním (nelineární jen od předpětí při vnesení, k_σ > 0,45).
+
+### 8.8 Soubor
 
 Vstup Posudku PB rozšířený o sekci `[blc]` (popis klíčů v `blc_posudek/vypocet.py`).
 Uložený soubor obsahuje i sekci `[zatizeni]` z posledního výpočtu mostu, takže jde otevřít

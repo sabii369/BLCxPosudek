@@ -63,6 +63,8 @@ def main(argv=None) -> int:
                                      if m else f"Ve > {res.Ve_max:.0f} t"))
         for t in res.poznamky:
             print("! " + t)
+        for t in model.protokol.upozorneni:
+            print(f"! Upozornění (Ve = {vys.Ve:.1f} t): {t}")
         print(f"Protokol (pro Ve = {vys.Ve:.1f} t): {out}\nVnitřní síly mostu: {most}")
         return 0
     print(f"{'MS':4} {'Posudek':42} {'Fáze':28} {'x [m]':>7} {'η':>7}")
@@ -70,6 +72,8 @@ def main(argv=None) -> int:
         print(f"{v.mezni_stav:4} {v.nazev[:42]:42} {v.faze[:28]:28} "
               f"{fmt(v.x, 3) if v.x is not None else '–':>7} {v.vyuziti * 100:6.1f}% "
               f"{'OK' if v.vyhovuje else 'NEVYHOVUJE'}")
+    for t in model.protokol.upozorneni:
+        print(f"! Upozornění: {t}")
     ok = all(v.vyhovuje for v in model.protokol.posudky)
     print(f"\nProtokol: {out}\nVnitřní síly mostu: {most}\nCelkem: {'VYHOVUJE' if ok else 'NEVYHOVUJE'}")
     return 0 if ok else 1
