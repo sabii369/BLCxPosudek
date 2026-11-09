@@ -355,8 +355,9 @@ Grafy jsou i v seznamu grafů na kartě 7 (za grafem napětí příslušné fáz
 Kapitola „Zatížení z modelu mostu (BLC)“ obsahuje postupně: popis stavů, zatížení na mostě,
 **tabulku dílčích součinitelů γ a součinitelů kombinace ψ** pro skupiny g0 + (g − g0),
 q – chodci a q – doprava (char., častá, kvazistálá, 6.10a, 6.10b, 6.10; u stálých v 6.10b
-ψ = ξ), **graf vnitřních sil M, V na nosnících** od jednotlivých stavů (všechny nosníky šedě,
-posuzovaný barevně, u proměnných obálka max/min), tabulku maxim po nosnících od stavů
+ψ = ξ), **graf vnitřních sil M, V na nosnících** od jednotlivých stavů ve formátu obálek BLC
+(půdorys, průběh vynesen od osy každého nosníku, řádek = zatěžovací stav, vlevo M, vpravo V,
+posuzovaný nosník zvýrazněn, u proměnných max červeně / min modře), tabulku maxim po nosnících od stavů
 a **šest tabulek kombinací** – po nosnících max/min M (s polohou max M) a max/min V.
 
 Účinek kombinace = Σ γ·ψ·E (proměnná zatížení chodci a doprava působí současně);

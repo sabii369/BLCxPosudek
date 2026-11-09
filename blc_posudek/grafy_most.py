@@ -28,8 +28,8 @@ GRAFY_ZATIZENI = {
     "blc_zat_q": "Zatížení na mostě – vozidlo v poloze pro max M ve středu rozpětí a max V u podpory",
 }
 NAZEV_REZY = "Napětí v řezech"
-GRAF_SILY = ("blc_sily", "Vnitřní síly na nosnících od jednotlivých zatěžovacích stavů – "
-                         "všechny nosníky (šedě), posuzovaný barevně; u proměnných obálka max/min")
+GRAF_SILY = ("blc_sily", "Vnitřní síly na nosnících od jednotlivých zatěžovacích stavů v půdorysu – "
+                         "vlevo M, vpravo V; posuzovaný nosník zvýrazněn, u proměnných obálka max/min")
 
 
 def rezy_posudku(m) -> dict:
@@ -78,50 +78,13 @@ def graf_zatizeni(m, klic: str):
 
 
 def graf_sil(m):
-    """M a V na všech nosnících od stavů g0, g − g0, q_ch, q; posuzovaný zvýrazněn."""
-    from blc.plotting_sily import BARVY
-    from blc.vnitrni_sily import NAZVY_STAVU
+    """Vnitřní síly na nosnících v půdorysu (formát obálek BLC): řádek = zatěžovací stav,
+    vlevo M, vpravo V; posuzovaný nosník zvýrazněn."""
+    from blc.plotting_sily import plot_stavy_pudorys
     b = getattr(m, "blc", None)
     if not b:
         return None
-    vys, o = b["vys"], b["o"]
-    jm, jv = vys.jednotky
-    stavy = list(vys.stavy)
-    fig, axs = plt.subplots(2, len(stavy), figsize=(3.6 * len(stavy) + 1, 6.2), squeeze=False)
-    for j, st in enumerate(stavy):
-        aM, aV = axs[0, j], axs[1, j]
-        pohyb = vys.stavy[st].pohyblivy
-        for k in range(vys.n_vyst):
-            if k == o:
-                continue
-            t = vys.tabulka(k, st)
-            aM.plot(t.x, t.M_max, color="#c8c8c8", lw=0.7)
-            aV.plot(t.x, t.V_max, color="#c8c8c8", lw=0.7)
-            if pohyb:
-                aM.plot(t.x, t.M_min, color="#c8c8c8", lw=0.7)
-                aV.plot(t.x, t.V_min, color="#c8c8c8", lw=0.7)
-        t = vys.tabulka(o, st)
-        c = BARVY.get(st, "k")
-        aM.plot(t.x, t.M_max, color=c, lw=2.0, label=vys.popisky[o])
-        aV.plot(t.x, t.V_max, color=c, lw=2.0)
-        if pohyb:
-            aM.plot(t.x, t.M_min, color=c, lw=1.4, ls="--")
-            aV.plot(t.x, t.V_min, color=c, lw=1.4, ls="--")
-        for a in (aM, aV):
-            a.axhline(0, color=grafy.INK2, lw=0.7)
-            a.grid(alpha=0.3)
-        aM.invert_yaxis()
-        aM.set_title(NAZVY_STAVU.get(st, st), fontsize=9)
-        i = int(np.argmax(t.M_max))
-        aM.annotate(f"{t.M_max[i]:.1f}", (t.x[i], t.M_max[i]), fontsize=8, color=c,
-                    ha="center", va="top", xytext=(0, -3), textcoords="offset points")
-        aV.set_xlabel("x [m]")
-    axs[0, 0].set_ylabel(f"M [{jm}]")
-    axs[1, 0].set_ylabel(f"V [{jv}]")
-    axs[0, 0].legend(fontsize=8)
-    fig.suptitle(f"Vnitřní síly na nosnících – posuzovaný {vys.popisky[o]}", fontsize=10,
-                 fontweight="bold", color=grafy.INK)
-    return fig
+    return plot_stavy_pudorys(b["vys"], b["o"], show=False)
 
 
 def fn_sily(m, adr):

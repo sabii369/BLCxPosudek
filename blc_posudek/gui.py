@@ -229,7 +229,8 @@ class AplikaceMost(Aplikace):
         ttk.Label(r, text="Graf:").pack(side="left")
         self.var_graf_blc = tk.StringVar(value="Průběhy sil – vybraný nosník")
         cb = ttk.Combobox(r, textvariable=self.var_graf_blc, state="readonly", width=34,
-                          values=["Průběhy sil – vybraný nosník", "Příčné rozdělení a vybavení"])
+                          values=["Průběhy sil – vybraný nosník", "Vnitřní síly na nosnících (půdorys)",
+                                  "Příčné rozdělení a vybavení"])
         cb.pack(side="left", padx=4)
         cb.bind("<<ComboboxSelected>>", lambda e: self._graf_blc())
         self.g_blc = Graf(prav, figsize=(8, 5))
@@ -496,8 +497,12 @@ class AplikaceMost(Aplikace):
         from blc.plotting_sily import plot_sily, plot_pricne
         sel = self.t_blc.selection()
         o = int(sel[0]) if sel else vys.rozhodujici()
-        if self.var_graf_blc.get().startswith("Průběhy"):
+        volba = self.var_graf_blc.get()
+        if volba.startswith("Průběhy"):
             fig = plot_sily(vys, o, show=False)
+        elif volba.startswith("Vnitřní síly"):
+            from blc.plotting_sily import plot_stavy_pudorys
+            fig = plot_stavy_pudorys(vys, o, show=False)
         else:
             fig = plot_pricne(vys, show=False)
         plt.close(fig)

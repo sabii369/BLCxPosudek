@@ -119,6 +119,67 @@ def kresli_most(ax, vys: VysledekSil, o: int, stav: str, poloha: Optional[Poloha
     ax.set_ylabel("y [m]")
 
 
+def _geometrie_pudorysu(vys: VysledekSil):
+    """Geometrie pruhů 2D modelu ve tvaru, který očekává plotting._pudorys_sil."""
+    from types import SimpleNamespace
+    m = vys.model
+    return SimpleNamespace(K=vys.K, p_y0=m.p_y0, p_w=m.p_w, p_typ=m.p_typ,
+                           p_xod=m.xs[m.p_i0], p_xdo=m.xs[m.p_i1], p_xsup=m.p_xsup)
+
+
+def plot_stavy_pudorys(vys: VysledekSil, o: Optional[int] = None,
+                       stavy: Optional[Sequence[str]] = None, show: bool = True,
+                       sirka: float = 16.0, pomer: float = 2.0):
+    """Vnitřní síly na nosnících v půdorysu (formát obálek BLC): pro každý zatěžovací
+    stav jeden řádek – vlevo M, vpravo V; průběh vynesen od osy nosníku (kladné dolů),
+    u proměnných stavů max červeně a min modře; posuzovaný výstup o zvýrazněn."""
+    from .plotting import _pudorys_sil, _hladky, _rozsah, _meze
+    geo = _geometrie_pudorysu(vys)
+    V, xs = vys.vyst, vys.xs
+    stavy = list(stavy or vys.stavy)
+    jm, jv = vys.jednotky
+    # výška řádku podle půdorysu (převýšení `pomer`, omezeno)
+    x0, x1 = _meze(geo)
+    w_ax = 0.5 * sirka - 0.8
+    h_ax = float(np.clip(w_ax * pomer * 1.15 * vys.K.B / (x1 - x0), 2.6, 5.5))
+    fig, axs = plt.subplots(len(stavy), 2, figsize=(sirka, len(stavy) * (h_ax + 0.9) + 0.6),
+                            squeeze=False)
+    for r, st in enumerate(stavy):
+        s = vys.stavy[st]
+
+        def rM(k, a=s.M_max):
+            i0, i1 = _rozsah(V, k)
+            return xs[i0:i1 + 1], a[k, i0:i1 + 1]
+
+        def rV(k, vm=s.Vm_max, vp=s.Vp_max, vs=s.Vs_max):
+            i0, i1 = _rozsah(V, k)
+            return _hladky(xs, vm[k], vp[k], V.skoky[k], i0, i1, vs[k])
+
+        rM2 = rV2 = None
+        if s.pohyblivy:
+            def rM2(k, a=s.M_min):
+                i0, i1 = _rozsah(V, k)
+                return xs[i0:i1 + 1], a[k, i0:i1 + 1]
+
+            def rV2(k, vm=s.Vm_min, vp=s.Vp_min, vs=s.Vs_min):
+                i0, i1 = _rozsah(V, k)
+                return _hladky(xs, vm[k], vp[k], V.skoky[k], i0, i1, vs[k])
+        for c, (velic, r1, r2, jed) in enumerate((("M", rM, rM2, jm), ("V", rV, rV2, jv))):
+            ax = axs[r, c]
+            _pudorys_sil(ax, geo, V, xs, r1, velic, velic, jed, zvyrazni=o, radky2=r2)
+            obal = " – obálka (max červeně, min modře)" if s.pohyblivy else ""
+            ax.set_title(f"{NAZVY_STAVU.get(st, st)}: {velic} [{jed}]{obal}", fontsize=9,
+                         fontweight="bold")
+            if r == len(stavy) - 1:
+                ax.set_xlabel("x [m] (globální, ve směru osy prvku)")
+            if c == 1:
+                ax.set_ylabel("")
+    fig.tight_layout()
+    if show:
+        plt.show()
+    return fig
+
+
 def plot_zatizeni_most(vys: VysledekSil, o: int, stav: str,
                        poloha: Optional[PolohaVozidla] = None, rezy=(), show: bool = True):
     """Samostatný graf půdorysu mostu se zatížením (viz kresli_most)."""

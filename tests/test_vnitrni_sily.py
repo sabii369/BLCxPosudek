@@ -184,6 +184,17 @@ def test_chodci_export(vys):
     assert len(ex) == v.n_vyst and ex[0]["M_max"] == approx(v.kombinace(0, "6.10b", True).M_max.max())
 
 
+def test_stavy_pudorys(vys):
+    import matplotlib.pyplot as plt
+    from blc.plotting_sily import plot_stavy_pudorys
+    fig = plot_stavy_pudorys(vys, 2, show=False)
+    assert len(fig.axes) == 2 * len(vys.stavy)
+    plt.close(fig)
+    d = vnitrni_sily(L=10.0, b=6.0, h=0.5, beton="C30/37", typ_konstrukce="deska", alfa=110.0,
+                     vybaveni=VYB, q_chodnik=3.0, tisk=False)
+    plt.close(plot_stavy_pudorys(d, 3, show=False))
+
+
 def test_q_dynamicky_soucinitel():
     a = vnitrni_sily(**NOSNIKY, Ve=60.0, krok=0.5, tisk=False)
     b = vnitrni_sily(**NOSNIKY, Ve=60.0, krok=0.5, dyn=1.2, tisk=False)
