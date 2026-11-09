@@ -249,3 +249,33 @@ def test_davka_zatizitelnost(tmp_path):
     assert main([PRIKLAD, "--zatizitelnost", "-o", str(tmp_path)]) == 0
     html = (tmp_path / "protokol.html").read_text(encoding="utf-8")
     assert "Zatížitelnost – tíha vozidla Ve pro dosažení mezních stavů" in html
+
+
+def test_aktualni_stari_a_koroze(d, vysledek):
+    vys = vysledek[0]
+    d2 = copy.deepcopy(d)
+    d2["casova_osa"]["t_akt"] = 18250.0
+    d2["degradace"] = {"oslabeni_predpinaci": 10.0, "oslabeni_betonarske": 10.0, "oslabeni_smykove": 20.0}
+    _, o, m = spocti(d2, vys)
+    nazvy = [f.nazev for f in m.faze]
+    assert "Aktuální stáří" in nazvy and nazvy[-1] == "Konec životnosti"
+    assert m.faze[nazvy.index("Aktuální stáří")].k_Asw == approx(0.8)
+    eta0 = {(p.nazev, p.faze): p.vyuziti for p in vysledek[2].protokol.posudky}
+    eta1 = {(p.nazev, p.faze): p.vyuziti for p in m.protokol.posudky}
+    k = ("Smyková únosnost", "Konec životnosti")
+    assert eta1[k] > eta0[k]
+    assert ("Ohybová únosnost", "Aktuální stáří") in eta1
+
+
+@pytest.mark.skipif(not _tk(), reason="není k dispozici grafické prostředí")
+def test_gui_koroze():
+    from blc_posudek.gui import AplikaceMost
+    app = AplikaceMost(PRIKLAD)
+    try:
+        app.update()
+        app.f_cas.prom["t_akt"].set("18250")
+        app.f_degradace.prom["oslabeni_smykove"].set("15")
+        d = app.ziskej_data()
+        assert d["casova_osa"]["t_akt"] == 18250.0 and d["degradace"] == {"oslabeni_smykove": 15.0}
+    finally:
+        app.destroy()

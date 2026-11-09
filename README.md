@@ -36,6 +36,9 @@ Prostředí je Posudek PB s novou první kartou:
 - **Výpočet zatížitelnosti** (zaškrtávací políčko na kartě 0, dávka `--zatizitelnost`): místo
   posouzení se pro každý mezní stav hledá tíha vozidla Ve, při které je využití 100 %; výsledkem
   je Ve po mezních stavech a zatížitelnost = nejmenší Ve.
+- **Aktuální stáří** (karta 5) – posudek i pro aktuální stáří konstrukce; **oslabení výztuže korozí**
+  [%] předpínací, betonářské a smykové (karta 4) – projeví se v posudku pro aktuální stáří
+  a na konci životnosti.
 - Soubor = vstup Posudku PB + sekce `[blc]`, vzor [`priklady/most_KA67_12.toml`](priklady/most_KA67_12.toml).
 - Balíček `pb_posudek` je převzat z repa `sabii369/PB_posudek` (git subtree) – viz `CLAUDE.md`.
 

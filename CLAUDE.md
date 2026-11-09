@@ -55,6 +55,9 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
 - Stavy: `g0`, `g-g0`, `qch` (chodci, `q_chodnik` [kN/m²], obálka přes úseky chodníků – `_chodniky`), `q` (doprava).
   `Soucinitele.gama_psi(skupina "G"|"qch"|"q", druh)`; kombinace = Σ γ·ψ·E, chodci a doprava současně
   (v exportu „zatezovaci_stavy“ stejná `skupina = "BLC"`); `extremy_kombinace(druh)` = max/min M, V po nosnících.
+- Posudek (pb_posudek, větev `aktualni-stari-koroze` v repu Posudek PB): fáze „Aktuální stáří“ (`[casova_osa] t_akt`),
+  oslabení korozí `[degradace]` → `Faze.k_Ap/k_As/k_Asw` ve fázích t ≥ t_akt (jinak jen konec životnosti),
+  `_sily_predpeti(sigma, k_Ap)`; GUI karta 4 (oslabení), karta 5 (t_akt).
 - Zatížitelnost: `blc_posudek/zatizitelnost.py` – `zatizitelnost(d, vys)` → `VysledekZatizitelnosti` (Ve pro η = 1
   každého posudku; `vys_pro_Ve` přeškáluje q z referenčního Ve; Illinois se sdílenými výpočty posudku; stavy
   nezávisí / neomezuje / klesá); `model.zatizitelnost`, kapitola na začátek protokolu; GUI `AplikaceMost._zobraz_vysledky`.

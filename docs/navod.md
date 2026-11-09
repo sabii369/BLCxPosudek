@@ -383,7 +383,21 @@ v dávce `--zatizitelnost`): místo posouzení při zadaném zatížení se pro 
   zbytek protokolu a grafy jsou spočteny pro Ve = zatížitelnost (rozhodující posudek 100 %).
 - Jen pro vozidlo Ve; výpočet trvá desítky výpočtů posudku (příklad KA-67/12 ≈ 15 s).
 
-### 8.6 Soubor
+### 8.6 Aktuální stáří a oslabení výztuže korozí
+
+- **Aktuální stáří** [dny] (karta 5, časová osa; `[casova_osa] t_akt`): další posuzovaná fáze
+  „Aktuální stáří“ mezi uvedením do provozu a koncem životnosti – ztráty předpětí, MSP i MSÚ
+  jako v ostatních provozních fázích (zahrnuje ji i výpočet zatížitelnosti).
+- **Oslabení výztuže korozí** [%] (karta 4; `[degradace] oslabeni_predpinaci`,
+  `oslabeni_betonarske`, `oslabeni_smykove`) – zmenšení plochy výztuže ve fázích od
+  aktuálního stáří (bez něj jen na konci životnosti):
+  předpínací výztuž → předpínací síla P = σ_p·A_p·(1 − ρ_p) (napětí ve zbylé výztuži se nemění)
+  a A_p v MSÚ; betonářská výztuž → A_s v ohybu a smyku MSÚ; smyková výztuž → A_sw ve smyku
+  a v minimální smykové výztuži. Ztráty předpětí a průřezové charakteristiky se počítají
+  pro neoslabenou výztuž.
+- Úprava je v balíčku posudku (`pb_posudek`, repo Posudek PB, větev `aktualni-stari-koroze`).
+
+### 8.7 Soubor
 
 Vstup Posudku PB rozšířený o sekci `[blc]` (popis klíčů v `blc_posudek/vypocet.py`).
 Uložený soubor obsahuje i sekci `[zatizeni]` z posledního výpočtu mostu, takže jde otevřít
