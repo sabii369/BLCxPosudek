@@ -1199,6 +1199,10 @@ class Aplikace(tk.Tk):
             d = ttk.Label(k, text="", foreground="#52514e")
             d.pack(anchor="w")
             self.karty[ms] = (v, d)
+        self._fr_karty = karty
+        # upozornění (nejsou posudky) – zobrazí se jen, existují-li
+        self.lbl_upozorneni = ttk.Label(z, text="", foreground="#8a5a00", background="#fff4dc",
+                                        wraplength=1100, justify="left", padding=6)
         pan = ttk.PanedWindow(z, orient="horizontal")
         pan.pack(fill="both", expand=True, pady=(8, 0))
         lev = ttk.Frame(pan)
@@ -1641,6 +1645,8 @@ class Aplikace(tk.Tk):
             v.configure(text="–", foreground="")
             d.configure(text="")
         self.lbl_souhrn.configure(text="")
+        self.lbl_upozorneni.configure(text="")
+        self.lbl_upozorneni.pack_forget()
         self._zavri_grafy()
         self.cb_graf.configure(values=[])
         self.var_graf.set("")
@@ -1674,7 +1680,12 @@ class Aplikace(tk.Tk):
         nok = sum(not v.vyhovuje for v in pos)
         lab, det = self.karty["Celkem"]
         lab.configure(text="VYHOVUJE" if ok else "NEVYHOVUJE", foreground="#0a7d0a" if ok else "#b42323")
-        det.configure(text=f"{len(pos)} posudků" + ("" if ok else f", nevyhovuje {nok}"))
+        upoz = model.protokol.upozorneni
+        det.configure(text=f"{len(pos)} posudků" + ("" if ok else f", nevyhovuje {nok}")
+                      + (f"; upozornění {len(upoz)}" if upoz else ""))
+        if upoz:
+            self.lbl_upozorneni.configure(text="\n".join("⚠ " + t for t in upoz))
+            self.lbl_upozorneni.pack(fill="x", pady=(8, 0), after=self._fr_karty)
         self.lbl_souhrn.configure(text=("✔ VYHOVUJE" if ok else "✘ NEVYHOVUJE"),
                                   foreground="#0a7d0a" if ok else "#b42323")
         self._seznam_grafu = self._sestav_seznam_grafu(model)
@@ -1684,7 +1695,8 @@ class Aplikace(tk.Tk):
         self.nb.select(self.z_vysledky)
         self.after(50, lambda: self.pan_vys.sashpos(0, int(self.pan_vys.winfo_width() * 0.47)))
         self.stav.set(f"Výpočet dokončen – {len(pos)} posudků, "
-                      f"{'vše vyhovuje' if ok else f'{nok} nevyhovuje'}.")
+                      f"{'vše vyhovuje' if ok else f'{nok} nevyhovuje'}"
+                      + (f"; upozornění {len(upoz)} (karta Výsledky)." if upoz else "."))
 
     def _sestav_seznam_grafu(self, m) -> dict:
         g = grafy

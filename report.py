@@ -56,6 +56,9 @@ caption{caption-side:top;text-align:left;font-weight:600;color:var(--ink2);paddi
 background:var(--okbg);padding:6px 12px;margin:6px 0;border-radius:4px}
 .chk.bad{border-left-color:var(--bad);background:var(--badbg)}
 .chk .n{flex:1}.chk .e{font-weight:700;white-space:nowrap}
+.upoz{border:1px solid var(--line);border-left:5px solid var(--warn);background:var(--warnbg);
+padding:6px 12px;margin:6px 0;border-radius:4px}
+.upoz ul{margin:4px 0 0;padding-left:20px}
 .tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:700}
 .tag.ok{color:var(--ok);background:var(--okbg)}.tag.bad{color:var(--bad);background:var(--badbg)}
 .bar{height:8px;background:var(--soft);border-radius:4px;min-width:90px;position:relative}
@@ -127,6 +130,10 @@ def _souhrn(model) -> str:
                    f'<div>{html.escape(mx.nazev)} ({html.escape(mx.faze)})</div>'
                    f'<div style="margin-top:6px">{TAG_OK_ALL if ok else TAG_BAD_ALL}</div></div>')
     cards = '<div class="cards">' + "".join(out) + "</div>"
+    upoz = model.protokol.upozorneni
+    if upoz:
+        cards += ('<div class="upoz"><b>Upozornění</b> (nejsou to posudky – neovlivňují výsledek)<ul>'
+                  + "".join(f"<li>{html.escape(t)}</li>" for t in upoz) + "</ul></div>")
     # agregace po skupinách
     rows = []
     for ms in ("MSÚ", "MSP"):
@@ -210,6 +217,8 @@ def sestav_html(model, obrazky: dict[str, str], adr_obr: Path, embed: bool = Tru
                                  f"<figcaption>{html.escape(o.popisek)}</figcaption></figure>")
             elif typ == "posudek":
                 parts.append(_posudek_html(obj))
+            elif typ == "upozorneni":
+                parts.append(f'<div class="upoz"><b>Upozornění:</b> {html.escape(obj)}</div>')
         flush()
     toc_html = "<ul class='toc'>" + "".join(
         f"<li style='margin-left:{(u - 1) * 18}px'><a href='#{a}'>{n} {html.escape(t)}</a></li>" for u, n, t, a in toc

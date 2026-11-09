@@ -34,6 +34,8 @@ def main(argv=None) -> int:
     for v in model.protokol.posudky:
         print(f"{v.mezni_stav:4} {v.nazev[:42]:42} {v.faze[:28]:28} {fmt(v.x, 3) if v.x is not None else '–':>7} "
               f"{v.vyuziti * 100:6.1f}% {'OK' if v.vyhovuje else 'NEVYHOVUJE'}")
+    for t in model.protokol.upozorneni:
+        print(f"! Upozornění: {t}")
     ok = all(v.vyhovuje for v in model.protokol.posudky)
     print(f"\nProtokol: {out}\nCelkem: {'VYHOVUJE' if ok else 'NEVYHOVUJE'}")
     return 0 if ok else 1

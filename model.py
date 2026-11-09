@@ -1260,11 +1260,19 @@ class NosnikPB:
                         fz, nazk, float(x[i]), poznamka="předpoklad neporušeného průřezu",
                         skupina="Napětí v betonu"))
                 if druh == "kvazistala" or (druh == "stala" and f is not self.faze[0]):
+                    # 7.2(3): mez lineárního dotvarování – není mezní stav, při překročení upozornění
                     i = int(np.argmin(vals_min))
-                    self.protokol.pridej_posudek(Kf, VysledekPosudku(
-                        "Tlakové napětí – lineární dotvarování", "MSP", -float(vals_min[i]), lim_qp, "MPa",
-                        max(-float(vals_min[i]), 0) / lim_qp, fz, nazk, float(x[i]), odkaz="7.2(3)",
-                        skupina="Napětí v betonu"))
+                    sc = max(-float(vals_min[i]), 0.0)
+                    Kf.krok(f"Tlak vůči mezi lineárního dotvarování – {nazk} (x = {fmt(x[i], 3)} m)",
+                            "|σ_{c}|/(k_{2}·f_{ck}(t)) ≤ 1", f"{fmt(sc)}/({fmt(nn.k2)}·{fmt(fck_t)})",
+                            sc / lim_qp, "", "7.2(3)")
+                    if sc > lim_qp:
+                        self.protokol.upozorni(Kf, (
+                            f"{fz}, kombinace {nazk}: tlakové napětí v betonu |σc| = {fmt(sc)} MPa "
+                            f"(x = {fmt(x[i], 3)} m) překračuje mez lineárního dotvarování k2·fck(t) = "
+                            f"{fmt(nn.k2)}·{fmt(fck_t)} = {fmt(lim_qp)} MPa (7.2(3)) – je třeba uvažovat "
+                            "nelineární dotvarování (3.1.4(4)). Ztráty předpětí a průhyb jsou spočteny "
+                            "s lineárním dotvarováním (nelineární jen od předpětí při vnesení, k_σ > 0,45)."))
             # dekomprese
             if f.provoz and nn.dekomprese != "zadna":
                 druh = "casta" if nn.dekomprese == "casta" else "kvazistala"
