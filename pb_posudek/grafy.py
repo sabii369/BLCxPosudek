@@ -188,7 +188,7 @@ def sila_v_case(m, adr):
     ax.axhline(Pmax, color=LIMIT, lw=1, ls="--")
     ax.text(ts[0], Pmax, " P_max (na lisu)", va="bottom", fontsize=8, color=LIMIT)
     for j, f in enumerate(m.faze):
-        Pf = -m._sily_predpeti(f.sigma)[0][im]
+        Pf = -m._sily_predpeti(f.sigma, f.k_Ap)[0][im]
         ax.plot([f.t], [Pf], "o", ms=8, color=C[1], mec=SURF, mew=2)
         dy = 10 if j % 2 == 0 else -26
         ax.annotate(f"{f.nazev}\n{Pf:.0f} kN", (f.t, Pf), textcoords="offset points", xytext=(5, dy), fontsize=7,
@@ -200,7 +200,7 @@ def sila_v_case(m, adr):
 def vnitrni_sily(m, adr):
     f = m.faze[-1]
     d = m.komb[f.nazev]
-    NP, MP, VP = m._sily_predpeti(f.sigma)
+    NP, MP, VP = m._sily_predpeti(f.sigma, f.k_Ap)
     fig, axs = plt.subplots(2, 1, figsize=(11, 6.4), sharex=True)
     ax = axs[0]
     ax.plot(m.x, m.zs_g0.M_max, color=C[0], label="g0")
@@ -259,7 +259,7 @@ def napeti_profil(m, adr):
     z = np.linspace(0, P.h, 50)
     fig, ax = plt.subplots(figsize=(6.5, 4.6))
     for j, f in enumerate(m.faze):
-        NP, MP, _ = m._sily_predpeti(f.sigma)
+        NP, MP, _ = m._sily_predpeti(f.sigma, f.k_Ap)
         d = m.komb[f.nazev]
         Mx = d["char"].M_max[i]
         s = m._napeti(z, NP[i], MP[i], m.zs_g0.M_max[i], Mx, idx=i)

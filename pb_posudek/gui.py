@@ -1084,6 +1084,18 @@ class Aplikace(tk.Tk):
                                    ("od", "od [m]", 70, "optfloat", None), ("do", "do [m]", 70, "optfloat", None)],
                               vychozi={"alpha": 90.0})
         self.t_smyk.pack(fill="both", expand=True)
+        lf = ttk.LabelFrame(z, text="Oslabení výztuže korozí – zmenšení plochy [%] (uplatní se v posudku pro "
+                                    "aktuální stáří a na konci životnosti)", padding=6)
+        lf.pack(fill="x", pady=(0, 6))
+        self.f_degradace = Formular(lf, [
+            ("oslabeni_predpinaci", "Oslabení předpínací výztuže [%]", "optfloat", None),
+            ("oslabeni_betonarske", "Oslabení betonářské výztuže [%]", "optfloat", None),
+            ("oslabeni_smykove", "Oslabení smykové výztuže [%]", "optfloat", None)], sloupcu=3)
+        self.f_degradace.pack(fill="x")
+        ttk.Label(lf, foreground="#52514e", text=(
+            "Předpínací výztuž: zmenší se předpínací síla P = σ_p·A_p (napětí ve zbylé výztuži se nemění) i A_p "
+            "v MSÚ; betonářská a smyková výztuž: plocha v MSÚ. Platí od aktuálního stáří (karta 5), bez něj jen "
+            "pro konec životnosti.")).pack(anchor="w")
 
     def _zalozka_zatizeni(self):
         z = ttk.Frame(self.nb, padding=8)
@@ -1099,6 +1111,7 @@ class Aplikace(tk.Tk):
         lf.pack(side="left", fill="x", expand=True, padx=(8, 0))
         self.f_cas = Formular(lf, [("t0", "Napínání / uvolnění t0 [dny]", "float", None),
                                    ("t_provoz", "Uvedení do provozu [dny]", "float", None),
+                                   ("t_akt", "Aktuální stáří [dny] (prázdné = neposuzovat)", "optfloat", None),
                                    ("t_konec", "Konec životnosti [dny]", "float", None)])
         self.f_cas.pack(fill="x")
         rf = ttk.Frame(z)
@@ -1254,6 +1267,7 @@ class Aplikace(tk.Tk):
         self.t_kabely.nastav(d.get("kabel", []))
         self.t_vyztuz.nastav(d.get("vyztuz", []))
         self.t_smyk.nastav(d.get("smykova_vyztuz", []))
+        self.f_degradace.nastav(d.get("degradace", {}))
         self.f_prostredi.nastav(d.get("prostredi", {}))
         self.f_cas.nastav(d.get("casova_osa", {}))
         zat = d.get("zatizeni", {})
@@ -1289,6 +1303,7 @@ class Aplikace(tk.Tk):
         d["kabel"] = self.t_kabely.ziskej()
         d["vyztuz"] = self.t_vyztuz.ziskej()
         d["smykova_vyztuz"] = self.t_smyk.ziskej()
+        d["degradace"] = {k: v for k, v in self.f_degradace.ziskej().items() if v}
         d["prostredi"] = self.f_prostredi.ziskej()
         d["casova_osa"] = self.f_cas.ziskej()
         prom = []

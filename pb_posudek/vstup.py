@@ -160,6 +160,7 @@ def model_ze_slovniku(d: dict) -> NosnikPB:
         komb = []
     nast = Nastaveni(**_vyber(d.get("posouzeni", {}), Nastaveni))
     pd = d.get("predem", {})
+    deg = d.get("degradace", {})
     return NosnikPB(
         beton=beton, predpinaci=predp, betonarska=bet, prurez=prurez, L=L, L0=n.get("L0"),
         kabely=kabely, typ_predpeti=n.get("predpeti", "dodatecne"), vyztuz=vyz, smykova=smyk,
@@ -171,6 +172,8 @@ def model_ze_slovniku(d: dict) -> NosnikPB:
         predem_eta_p1=pd.get("eta_p1", 3.2), predem_alpha1=pd.get("alpha1", 1.25),
         predem_alpha2=pd.get("alpha2", 0.19), predem_eta_p2=pd.get("eta_p2", 1.2), kombinace_vstup=komb,
         kombinace_vcetne_g0=bool(zat.get("obsahuje_vlastni_tihu", False)), t_vneseni=zat.get("t_vneseni"),
+        t_akt=co.get("t_akt"), oslabeni_Ap=deg.get("oslabeni_predpinaci", 0.0),
+        oslabeni_As=deg.get("oslabeni_betonarske", 0.0), oslabeni_Asw=deg.get("oslabeni_smykove", 0.0),
     )
 
 

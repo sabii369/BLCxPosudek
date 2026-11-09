@@ -250,7 +250,7 @@ def uloz_protokol(model, adresar: str | Path = "vystup", embed: bool = True) -> 
         projekt=model.projekt,
         posudky=[v.as_dict() for v in model.protokol.posudky],
         x=model.x.tolist(),
-        faze=[dict(nazev=f.nazev, t=f.t, P_kN=(-model._sily_predpeti(f.sigma)[0]).tolist(),
+        faze=[dict(nazev=f.nazev, t=f.t, P_kN=(-model._sily_predpeti(f.sigma, f.k_Ap)[0]).tolist(),
                    sigma_p=[s.tolist() for s in f.sigma]) for f in model.faze],
     )
     (adr / "vysledky.json").write_text(json.dumps(vys, ensure_ascii=False, indent=1, default=float),
