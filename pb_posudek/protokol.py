@@ -118,12 +118,17 @@ class Kapitola:
         self.polozky.append(("posudek", v))
         return self
 
+    def upozorneni(self, t: str):
+        self.polozky.append(("upozorneni", t))
+        return self
+
 
 @dataclass
 class Protokol:
     nazev: str = "Posudek nosníku z předpjatého betonu"
     kapitoly: list[Kapitola] = field(default_factory=list)
     posudky: list[VysledekPosudku] = field(default_factory=list)
+    upozorneni: list[str] = field(default_factory=list)   # upozornění pro uživatele (nejsou posudky)
 
     def kapitola(self, nazev: str, uroven: int = 1) -> Kapitola:
         k = Kapitola(nazev, uroven)
@@ -135,3 +140,10 @@ class Protokol:
         if kap is not None:
             kap.posudek(v)
         return v
+
+    def upozorni(self, kap: Kapitola | None, text: str) -> str:
+        """Upozornění pro uživatele – do souhrnu protokolu, GUI a výpisu (neovlivňuje výsledek posudku)."""
+        self.upozorneni.append(text)
+        if kap is not None:
+            kap.upozorneni(text)
+        return text
