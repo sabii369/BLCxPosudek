@@ -7,7 +7,7 @@ Spřažená deska se v této verzi neuvažuje.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -80,6 +80,14 @@ class Faze:
     sigma: list[np.ndarray] = field(default_factory=list)   # σ_pm,t,i(x)
     popis: str = ""
     ztraty: dict = field(default_factory=dict)
+    # oslabení výztuže korozí – součinitele zbývající plochy (1 = bez oslabení)
+    k_Ap: float = 1.0          # předpínací výztuž (síla P i A_p v MSÚ)
+    k_As: float = 1.0          # podélná betonářská výztuž
+    k_Asw: float = 1.0         # smyková výztuž
+
+    @property
+    def oslabena(self) -> bool:
+        return min(self.k_Ap, self.k_As, self.k_Asw) < 1.0
 
     @property
     def nazev_t(self) -> str:
@@ -101,7 +109,9 @@ class NosnikPB:
                  pocet_napinani: int | None = None, relaxace_pred_uvolnenim_h: float | None = None,
                  predem_eta_p1: float = 3.2, predem_alpha1: float = 1.25,
                  predem_alpha2: float = 0.19, predem_eta_p2: float = 1.2, kombinace_vstup: list[KombinaceVstup] | None = None,
-                 kombinace_vcetne_g0: bool = False, t_vneseni: float | None = None):
+                 kombinace_vcetne_g0: bool = False, t_vneseni: float | None = None,
+                 t_akt: float | None = None, oslabeni_Ap: float = 0.0, oslabeni_As: float = 0.0,
+                 oslabeni_Asw: float = 0.0):
         self.beton = beton
         self.predp = predpinaci
         self.betonarska = betonarska
@@ -123,6 +133,16 @@ class NosnikPB:
         self.rezim_kombinace = bool(self.kombinace_vstup)
         self.kombinace_vcetne_g0 = kombinace_vcetne_g0
         self.t_vneseni = t_vneseni if t_vneseni is not None else t_provoz
+        # aktuální stáří konstrukce (posudek existující konstrukce) a oslabení výztuže korozí [%]
+        self.t_akt = float(t_akt) if t_akt not in (None, "") else None
+        if self.t_akt is not None and not (t_provoz < self.t_akt < t_konec):
+            raise ValueError(f"Aktuální stáří {self.t_akt:g} dní musí ležet mezi uvedením do provozu "
+                             f"({t_provoz:g}) a koncem životnosti ({t_konec:g}).")
+        self.oslabeni = {"Ap": float(oslabeni_Ap or 0.0), "As": float(oslabeni_As or 0.0),
+                         "Asw": float(oslabeni_Asw or 0.0)}
+        for k_, v_ in self.oslabeni.items():
+            if not 0.0 <= v_ < 100.0:
+                raise ValueError(f"Oslabení výztuže {k_} korozí musí být 0 až < 100 %.")
         self.n = nastaveni or Nastaveni()
         self.projekt = projekt or {}
         self.n_rezu = n_rezu
@@ -455,14 +475,15 @@ class NosnikPB:
         return (r * (NP * 1e3 / AP + MP * 1e6 * (ztP - z) / IP) + Mg0 * 1e6 * (ztG - z) / IG
                 + ML * 1e6 * (ztL - z) / IL)
 
-    def _sily_predpeti(self, sigma: list[np.ndarray]):
-        """N_P [kN], M_P [kNm], V_P [kN] po délce nosníku od napětí σ_i(x)."""
+    def _sily_predpeti(self, sigma: list[np.ndarray], k_Ap: float = 1.0):
+        """N_P [kN], M_P [kNm], V_P [kN] po délce nosníku od napětí σ_i(x);
+        k_Ap = zbývající plocha předpínací výztuže (oslabení korozí, fáze.k_Ap)."""
         N = np.zeros_like(self.x)
         M = np.zeros_like(self.x)
         V = np.zeros_like(self.x)
         ztP = self.secP[:, 1]
         for k, s, z, a in zip(self.kabely, sigma, self.zk, self.ak):
-            P = s * k.Ap * 1e-3
+            P = s * k.Ap * k_Ap * 1e-3
             N -= P * np.cos(a)
             M += P * np.cos(a) * (z - ztP) * 1e-3
             V += P * np.sin(a)
@@ -701,10 +722,14 @@ class NosnikPB:
         casy = sorted({z.t for z in self.stale_vstup if z.t > self.t0} | {self.t_provoz, self.t_konec})
         if self.rezim_kombinace:
             casy = sorted({self.t_provoz, self.t_konec} | ({self.t_vneseni} if self.t_vneseni > self.t0 else set()))
+        if self.t_akt is not None:
+            casy = sorted(set(casy) | {self.t_akt})
         for t in casy:
             aktivni = [self.zs_g0] + [z for z in self.stale_vstup if z.t <= t]
             if t == self.t_konec:
                 nazev = "Konec životnosti"
+            elif t == self.t_akt:
+                nazev = "Aktuální stáří"
             elif t == self.t_provoz:
                 nazev = "Uvedení do provozu"
             elif self.rezim_kombinace:
@@ -718,10 +743,35 @@ class NosnikPB:
         faze[0].stale = [self.zs_g0] + [z for z in self.stale_vstup if z.t <= self.t0]
         if self.rezim_kombinace:
             faze[0].popis = "g0" + (" + kvazistálá kombinace" if self.t_vneseni <= self.t0 else "")
+        # oslabení výztuže korozí – od aktuálního stáří (bez něj jen konec životnosti)
+        t_osl = self.t_akt if self.t_akt is not None else self.t_konec
+        osl = self.oslabeni
+        for f in faze:
+            if f.provoz and f.t >= t_osl:
+                f.k_Ap = 1.0 - osl["Ap"] / 100.0
+                f.k_As = 1.0 - osl["As"] / 100.0
+                f.k_Asw = 1.0 - osl["Asw"] / 100.0
         self.faze = faze
-        K.tabulka(["Fáze", "Stáří betonu t [dny]", "Působící stálá zatížení", "Proměnná zatížení"],
+
+        def _osl_text(f):
+            if not f.oslabena:
+                return "–"
+            return (f"A_p −{fmt(osl['Ap'], 1)} %, A_s −{fmt(osl['As'], 1)} %, "
+                    f"A_sw −{fmt(osl['Asw'], 1)} %")
+        K.tabulka(["Fáze", "Stáří betonu t [dny]", "Působící stálá zatížení", "Proměnná zatížení",
+                   "Oslabení výztuže korozí"],
                   [[f.nazev, fmt(f.t, 0), f.popis or ", ".join(z.nazev for z in f.stale),
-                    "ano" if f.provoz else "ne"] for f in faze], "Časová osa výstavby a provozu")
+                    "ano" if f.provoz else "ne", _osl_text(f)] for f in faze], "Časová osa výstavby a provozu")
+        if self.t_akt is not None:
+            K.text(f"Konstrukce se posuzuje i pro aktuální stáří t = {fmt(self.t_akt, 0)} dní "
+                   "(ztráty předpětí, mezní stavy použitelnosti a únosnosti jako v ostatních provozních fázích).")
+        if any(v > 0 for v in osl.values()):
+            K.text(f"Oslabení výztuže korozí (zmenšení plochy) se uvažuje ve fázích od "
+                   f"{'aktuálního stáří' if self.t_akt is not None else 'konce životnosti'}: "
+                   f"předpínací výztuž {fmt(osl['Ap'], 1)} % – předpínací síla P = σ_p·A_p·(1 − ρ_p) "
+                   f"(napětí ve zbývající výztuži se nemění) a plocha A_p v MSÚ; podélná betonářská výztuž "
+                   f"{fmt(osl['As'], 1)} %; smyková výztuž {fmt(osl['Asw'], 1)} %. Ztráty předpětí se počítají "
+                   "pro neoslabenou výztuž, průřezové charakteristiky se nemění.")
 
         # zatěžovací kroky pro dotvarování
         Mg0 = self.zs_g0.M_max
@@ -887,12 +937,12 @@ class NosnikPB:
         # tabulka sil v čase
         rows = []
         for f in faze:
-            NP, MP, _ = self._sily_predpeti(f.sigma)
+            NP, MP, _ = self._sily_predpeti(f.sigma, f.k_Ap)
             rows.append([f.nazev, fmt(f.t, 0)] + [fmt(-NP[i]) for i in self.i_tab])
         Kr.tabulka(["Fáze", "t [dny]"] + [f"P [kN] {h}" for h in self._x_tab_hlavicka()], rows,
                    "Předpínací síla P_m,t v čase (střední hodnota)")
         P0 = sum(k.P_max for k in self.kabely)
-        Pk = -self._sily_predpeti(faze[-1].sigma)[0][im]
+        Pk = -self._sily_predpeti(faze[-1].sigma, faze[-1].k_Ap)[0][im]
         Kr.krok("Celková ztráta ve středu rozpětí na konci životnosti", "(P_{max} − P_{m,∞})/P_{max}",
                 f"({fmt(P0)} − {fmt(Pk)})/{fmt(P0)}", 100 * (P0 - Pk) / P0, "%")
         Kr.obrazek("ztraty_rozklad", "Rozklad ztrát předpětí ve středu rozpětí")
@@ -1064,7 +1114,7 @@ class NosnikPB:
             self.komb[f.nazev] = d
         fz = self.faze[-1]
         d = self.komb[fz.nazev]
-        NP, MP, VP = self._sily_predpeti(fz.sigma)
+        NP, MP, VP = self._sily_predpeti(fz.sigma, fz.k_Ap)
         rows = []
         for i in self.i_tab:
             rows.append([fmt(self.x[i], 3), fmt(self.zs_g0.M_max[i]),
@@ -1132,7 +1182,10 @@ class NosnikPB:
         self.msp_napeti = {}
         for f in self.faze:
             Kf = self.protokol.kapitola(f"Napětí v betonu – {f.nazev_t}", 2)
-            NP, MP, _ = self._sily_predpeti(f.sigma)
+            NP, MP, _ = self._sily_predpeti(f.sigma, f.k_Ap)
+            if f.oslabena:
+                Kf.text(f"Předpínací síla je zmenšena oslabením předpínací výztuže korozí "
+                        f"({fmt(self.oslabeni['Ap'], 1)} %).")
             d = self.komb[f.nazev]
             fck_t = b.fck_t(f.t)
             if not f.provoz:
@@ -1299,7 +1352,7 @@ class NosnikPB:
         for f in self.faze:
             if not f.provoz:
                 continue
-            NP, MP, VP = self._sily_predpeti(f.sigma)
+            NP, MP, VP = self._sily_predpeti(f.sigma, f.k_Ap)
             ob = self.komb[f.nazev]["char"]
             g0V = self.zs_g0.V_max
             best = (0.0, 0, 0, 0.0, 0.0, 0.0)
@@ -1380,7 +1433,7 @@ class NosnikPB:
                     continue
                 wk = w_of(MP0, b.Ecm, IP) + w_of(Mg0, b.Ecm, IG) + w_of(Mk, b.Ecm) if t_k == self.t0 else w_of(Mk, b.Ecm)
                 w += wk * (1 + self._phi(f.t, t_k, first=(t_k == self.t0)))
-            _, MPt, _ = self._sily_predpeti(f.sigma)
+            _, MPt, _ = self._sily_predpeti(f.sigma, f.k_Ap)
             w += w_of(MPt - MP0, b.Ecm, IP) * (1 + 0.8 * self._phi(f.t, self.t0))
             self.w[f.nazev] = w
             K.krok(f"Průhyb – kvazistálá kombinace, {f.nazev_t}", "w_{qp}(t)", "", float(w[imid]), "mm")
@@ -1404,13 +1457,13 @@ class NosnikPB:
     def _vrstvy_msu(self, f: Faze, i: int, eps0_navic: bool = True, redukce: float = 1.0):
         b, p = self.beton, self.predp
         fr = self._faktor_prenosu(msu=True)[i] if self.predem else 1.0
-        NP, MP, _ = self._sily_predpeti(f.sigma)
+        NP, MP, _ = self._sily_predpeti(f.sigma, f.k_Ap)
         Mperm = float(self._M_trvale(f.t)[i])
         vrstvy = []
         for k, s, z in zip(self.kabely, f.sigma, self.zk):
             sc = float(self._napeti(z[i], NP[i] * redukce, MP[i] * redukce, self.zs_g0.M_max[i], Mperm, idx=i))
             e0 = s[i] / p.Ep - (sc / b.Ecm if eps0_navic else 0.0)
-            vrstvy.append(VrstvaPredpeti(float(z[i]), k.Ap * fr * redukce, float(e0), k.nazev))
+            vrstvy.append(VrstvaPredpeti(float(z[i]), k.Ap * f.k_Ap * fr * redukce, float(e0), k.nazev))
         return vrstvy
 
     def _msu_ohyb(self):
@@ -1424,10 +1477,10 @@ class NosnikPB:
                 "účinků). Poloha neutrálné osy je určena iteračně z podmínky ΣN = 0, porušení nastane "
                 f"dosažením ε_cu2 = {fmt(b.eps_cu2 * 1e3)} ‰ v betonu nebo ε_ud v oceli.")
         self.msu_M = {}
-        vyz = [VrstvaVyztuze(v.z, v.As, v.nazev) for v in self.vyztuz]
         for f in self.faze:
             if not f.provoz:
                 continue
+            vyz = [VrstvaVyztuze(v.z, v.As * f.k_As, v.nazev) for v in self.vyztuz]
             MEd = self.komb[f.nazev]["msu"].M_max
             MRd = np.full_like(self.x, np.nan)
             vys = {}
@@ -1439,7 +1492,9 @@ class NosnikPB:
             i = int(np.nanargmax(eta))
             r = vys[i]
             self.msu_M[f.nazev] = dict(MEd=MEd, MRd=MRd, eta=eta, vys=vys, i=i)
-            K1.text(f"<b>{f.nazev_t}</b> – rozhodující řez x = {fmt(self.x[i], 3)} m:")
+            K1.text(f"<b>{f.nazev_t}</b> – rozhodující řez x = {fmt(self.x[i], 3)} m"
+                    + (f" (oslabení korozí: A_p −{fmt(self.oslabeni['Ap'], 1)} %, "
+                       f"A_s −{fmt(self.oslabeni['As'], 1)} %)" if f.oslabena else "") + ":")
             K1.krok("Návrhový moment", "M_{Ed}", "", float(MEd[i]), "kNm")
             K1.krok("Výška tlačené oblasti", "x", "iterace ΣN = 0", r.x, "mm")
             K1.krok("Přetvoření horních / dolních vláken", "ε_{c,h}; ε_{c,d}", "",
@@ -1492,7 +1547,7 @@ class NosnikPB:
             if not f.provoz:
                 continue
             ob = self.komb[f.nazev]["msu"]
-            NP, MP, VP = self._sily_predpeti(f.sigma)
+            NP, MP, VP = self._sily_predpeti(f.sigma, f.k_Ap)
             NP, VP = nn.gamma_P * NP, nn.gamma_P * VP
             MP = nn.gamma_P * MP
             Mg0 = self.zs_g0.M_max
@@ -1512,8 +1567,8 @@ class NosnikPB:
                     A_sl = sum(a for _, a in tah)
                     z_s = ro.z_Fc - ro.rameno
                 else:
-                    zs_list = [(z[i], k.Ap) for z, k in zip(self.zk, self.kabely) if z[i] < zt]
-                    zs_list += [(v.z, v.As) for v in self.vyztuz if v.z < zt]
+                    zs_list = [(z[i], k.Ap * f.k_Ap) for z, k in zip(self.zk, self.kabely) if z[i] < zt]
+                    zs_list += [(v.z, v.As * f.k_As) for v in self.vyztuz if v.z < zt]
                     if not zs_list:
                         zs_list = [(min(z[i] for z in self.zk), 0.0)]
                     A_sl = sum(a for _, a in zs_list)
@@ -1549,6 +1604,8 @@ class NosnikPB:
                 urov = dict(V=float(vz[jz]), I=P.I, b=float(bnom_z[jz]), S=float(S_z[jz]), z=float(zr[jz]),
                             sigma_cp=float(s_cp[jz]))
                 sv = self._smykova_vyztuz_v(self.x[i])
+                if f.k_Asw < 1.0:                       # oslabení smykové výztuže korozí
+                    sv = replace(sv, Asw=sv.Asw * f.k_Asw)
                 r = smykova_unosnost(b, self.betonarska, abs(VEd), NP[i], self.secL[i, 0], self.secL[i, 2],
                                      S_t, float(P.sirka(zt)[0]), bw, bw_nom, d, A_sl, sv.Asw_s, sv.alpha, trhliny,
                                      nn.cot_theta_min, nn.cot_theta_max, al, vrdc_uroven=urov)
@@ -1575,7 +1632,9 @@ class NosnikPB:
             self.msu_V[f.nazev] = dict(arr=arr, res=res)
             i = int(np.nanargmax(arr["eta"]))
             r, VEd, sv = res[i]
-            K.text(f"<b>{f.nazev_t}</b> – rozhodující řez x = {fmt(self.x[i], 3)} m:")
+            K.text(f"<b>{f.nazev_t}</b> – rozhodující řez x = {fmt(self.x[i], 3)} m"
+                   + (f" (oslabení korozí: A_p −{fmt(self.oslabeni['Ap'], 1)} %, A_sw "
+                      f"−{fmt(self.oslabeni['Asw'], 1)} %)" if f.oslabena else "") + ":")
             K.krok("Návrhová posouvající síla (vč. V_P)", "V_{Ed} = V_{Ed,ext} + V_{P}", "", abs(VEd), "kN")
             K.krok("Napětí od předpětí v těžišti", "σ_{cp} = N_{Ed}/A_{c}", "", r.sigma_cp, "MPa")
             K.krok("Účinná výška; šířka stojiny; nominální šířka", "d; b_{w}; b_{w,nom}", "",
@@ -1618,7 +1677,8 @@ class NosnikPB:
             # minimální smyková výztuž
             sv_min = min((self._smykova_vyztuz_v(self.x[i]) for i in np.nonzero(self.v_poli)[0]),
                          key=lambda q: q.Asw_s)
-            rho_w = sv_min.Asw_s / (r.bw * math.sin(math.radians(sv_min.alpha))) if r.bw > 0 else 0
+            rho_w = (sv_min.Asw_s * f.k_Asw / (r.bw * math.sin(math.radians(sv_min.alpha)))
+                     if r.bw > 0 else 0)
             self.protokol.pridej_posudek(K, VysledekPosudku(
                 "Minimální smyková výztuž", "MSÚ", rho_w * 100, r.rho_w_min * 100, "%",
                 r.rho_w_min / rho_w if rho_w > 0 else math.inf, f.nazev, "", None,
@@ -1735,7 +1795,7 @@ class NosnikPB:
         K.krok("Navržená výztuž v tažené oblasti", "A_{s,prov}", "", As_prov, "mm²")
         eta_a = As_min / As_prov if As_prov > 0 else math.inf
         # (b) redukovaná plocha předpětí
-        NP, MP, _ = self._sily_predpeti(f.sigma)
+        NP, MP, _ = self._sily_predpeti(f.sigma, f.k_Ap)
         Mfr = self.komb[f.nazev]["casta"].M_max[i]
         Mg0 = self.zs_g0.M_max[i]
         sP = float(self._napeti(0.0, NP[i], MP[i], 0.0, 0.0, idx=i))
