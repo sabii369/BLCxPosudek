@@ -233,6 +233,7 @@ pro parametrické studie.
 |---|---|---|
 | **g0** | vlastní tíha nosné konstrukce | nosníky: každý nosník **samostatně, bez spolupůsobení** (1D spojitý nosník se stejným uložením), g0 = A·γ_b; deska: 2D MKP, g0 = h·γ_b |
 | **g − g0** | skladba vozovky, skladba chodníků, svodidla, zábradlí, další liniová zatížení | 2D MKP (příčný roznos); tíha výplně spáry g_s se nese samostatně – každý ze sousedních nosníků polovinu |
+| **q_ch** | zatížení chodců q [kN/m²] na chodnících | 2D MKP – obálka: chodníky rozdělené na úseky ≈ 0,5 m (levý i pravý zvlášť), max = Σ kladných, min = Σ záporných účinků (nepříznivé části plochy vlivu) |
 | **q** | pojezd vozidla Ve (výjimečná zatížitelnost) v ose vozovky, × dynamický součinitel δ | 2D MKP – obálka max/min přes polohy vozidla (krok 0,25 m + polohy hrany zatížení v řezech d) |
 
 Model konstrukce (síť, spáry, uložení, šikmost, k_v, k_φ) je totožný s porovnáním
@@ -349,7 +350,21 @@ M_max/M_min jako graf po délce, meze tlaku a tahu shodné. Hodnoty v krajních 
 souhlasí s grafem po délce (napětí je po výšce lineární, obálka variant je lomená).
 Grafy jsou i v seznamu grafů na kartě 7 (za grafem napětí příslušné fáze).
 
-### 8.4 Soubor
+### 8.4 Součinitele a kombinace (kapitola zatížení protokolu)
+
+Kapitola „Zatížení z modelu mostu (BLC)“ obsahuje postupně: popis stavů, zatížení na mostě,
+**tabulku dílčích součinitelů γ a součinitelů kombinace ψ** pro skupiny g0 + (g − g0),
+q – chodci a q – doprava (char., častá, kvazistálá, 6.10a, 6.10b, 6.10; u stálých v 6.10b
+ψ = ξ), **graf vnitřních sil M, V na nosnících** od jednotlivých stavů (všechny nosníky šedě,
+posuzovaný barevně, u proměnných obálka max/min), tabulku maxim po nosnících od stavů
+a **šest tabulek kombinací** – po nosnících max/min M (s polohou max M) a max/min V.
+
+Účinek kombinace = Σ γ·ψ·E (proměnná zatížení chodci a doprava působí současně);
+příznivé stálé γ_G,inf. Kombinace v tabulkách obsahují g0 z modelu mostu. γ_G a ξ jsou
+z karty 6, γ a ψ chodců a dopravy z karty 0 (výchozí 1,35 / 0,75 / 0,75 / 0).
+Do posudku se předávají g − g0, q_ch a q (g0 si posudek počítá sám).
+
+### 8.5 Soubor
 
 Vstup Posudku PB rozšířený o sekci `[blc]` (popis klíčů v `blc_posudek/vypocet.py`).
 Uložený soubor obsahuje i sekci `[zatizeni]` z posledního výpočtu mostu, takže jde otevřít

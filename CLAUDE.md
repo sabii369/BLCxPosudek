@@ -52,6 +52,9 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
   `pb_posudek.grafy`), `gui.py` (`AplikaceMost`), `__main__.py`; vzor `priklady/most_KA67_12.toml`.
 - `vnitrni_sily.polohy_q(vys, o)` = rozhodující polohy vozidla (max M ve středu, max V v řezu d) z poloh obálky;
   `VysledekSil.model` a `q_nastaveni` drží 2D model a generátor poloh; `plotting_sily.kresli_most` = půdorys.
+- Stavy: `g0`, `g-g0`, `qch` (chodci, `q_chodnik` [kN/m²], obálka přes úseky chodníků – `_chodniky`), `q` (doprava).
+  `Soucinitele.gama_psi(skupina "G"|"qch"|"q", druh)`; kombinace = Σ γ·ψ·E, chodci a doprava současně
+  (v exportu „zatezovaci_stavy“ stejná `skupina = "BLC"`); `extremy_kombinace(druh)` = max/min M, V po nosnících.
 - Vozidlo q: `vnitrni_sily(Ve=…)` nebo `vnitrni_sily(MLC=…, typ_MLC="k"|"p", dist=None|kolona)`; v `[blc]`
   `vozidlo = "Ve" | "MLC_k" | "MLC_p"`.
 - `tests/`: `test_nosnik_1d.py`, `test_deska_mkp.py`, `test_porovnani.py`, `test_vnitrni_sily.py`, `test_blc_posudek.py`,

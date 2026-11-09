@@ -151,6 +151,15 @@ class AplikaceMost(Aplikace):
                                  pri_zmene=zm, vyska=3, vychozi={"sirka": 0.2})
         self.t_liniova.pack(fill="x")
 
+        lf = ttk.LabelFrame(f, text="Zatížení chodců (q_ch)", padding=6)
+        lf.pack(fill="x", pady=4)
+        self.f_chodci = Formular(lf, [
+            ("q_chodnik", "Zatížení chodníků [kN/m²]", "optfloat", None)], sloupcu=2, pri_zmene=zm)
+        self.f_chodci.pack(fill="x")
+        ttk.Label(lf, foreground=SEDA, text=(
+            "Na obou chodnících, v nepříznivých částech plochy vlivu (obálka); prázdné / 0 = bez "
+            "zatížení chodců.")).pack(anchor="w")
+
         lf = ttk.LabelFrame(f, text="Vozidlo, které přejíždí most (q)", padding=6)
         lf.pack(fill="x", pady=4)
         self.f_voz = Formular(lf, [
@@ -175,9 +184,12 @@ class AplikaceMost(Aplikace):
             ("vystup", "Posuzovaný nosník", "choice", ["auto"]),
             ("kriterium", "Nejzatíženější podle", "choice", ["M", "M-", "V"]),
             ("rezim", "Předání zatížení", "choice", ["kombinace", "zatezovaci_stavy"]),
-            ("gamma_Q", "γ_Q", "float", None),
-            ("psi0", "ψ0", "float", None), ("psi1", "ψ1", "float", None),
-            ("psi2", "ψ2", "float", None)], sloupcu=2, pri_zmene=zm)
+            ("gamma_Q", "γ_Q – doprava", "float", None),
+            ("psi0", "ψ0 – doprava", "float", None), ("psi1", "ψ1 – doprava", "float", None),
+            ("psi2", "ψ2 – doprava", "float", None),
+            ("gamma_Qch", "γ_Q – chodci", "float", None),
+            ("psi0_ch", "ψ0 – chodci", "float", None), ("psi1_ch", "ψ1 – chodci", "float", None),
+            ("psi2_ch", "ψ2 – chodci", "float", None)], sloupcu=2, pri_zmene=zm)
         self.f_pred.pack(fill="x")
         ttk.Label(lf, foreground=SEDA, justify="left", text=(
             "auto = nejzatíženější nosník podle MSÚ (6.10, včetně g0). γ_G, γ_G,inf, ξ a kombinace MSÚ "
@@ -196,14 +208,15 @@ class AplikaceMost(Aplikace):
         self.lbl_blc = ttk.Label(prav, text="Vnitřní síly mostu nejsou spočteny.",
                                  foreground="#b42323", wraplength=700, justify="left")
         self.lbl_blc.pack(anchor="w", pady=4)
-        cols = ("vyst", "y", "M_g0", "M_g", "M_q", "V_g0", "V_g", "V_q", "M_Ed", "V_Ed")
-        heads = ("Nosník", "y [m]", "M g0", "M g−g0", "M q", "|V| g0", "|V| g−g0", "|V| q",
-                 "M_Ed", "V_Ed")
+        cols = ("vyst", "y", "M_g0", "M_g", "M_qch", "M_q", "V_g0", "V_g", "V_qch", "V_q",
+                "M_Ed", "V_Ed")
+        heads = ("Nosník", "y [m]", "M g0", "M g−g0", "M chodci", "M doprava", "|V| g0",
+                 "|V| g−g0", "|V| chodci", "|V| doprava", "M_Ed", "V_Ed")
         self.t_blc = ttk.Treeview(prav, columns=cols, show="headings", height=10,
                                   selectmode="browse")
         for c, h in zip(cols, heads):
             self.t_blc.heading(c, text=h)
-            self.t_blc.column(c, width=72 if c != "vyst" else 80, anchor="e")
+            self.t_blc.column(c, width=66 if c != "vyst" else 70, anchor="e")
         self.t_blc.tag_configure("pos", background="#fff3cd")
         self.t_blc.pack(fill="x")
         self.t_blc.bind("<<TreeviewSelect>>", lambda e: self._graf_blc())
@@ -270,8 +283,8 @@ class AplikaceMost(Aplikace):
     # =====================================================================
     def _blc_data(self) -> dict:
         out = {}
-        for fm in (self.f_kon, self.f_spara, self.f_uloz, self.f_vyb, self.f_voz, self.f_pred,
-                   self.f_cas_blc):
+        for fm in (self.f_kon, self.f_spara, self.f_uloz, self.f_vyb, self.f_chodci, self.f_voz,
+                   self.f_pred, self.f_cas_blc):
             out.update(fm.ziskej())
         out["vozidlo"] = VOZIDLA_KLIC.get(out.get("vozidlo", "Ve"), out.get("vozidlo", "Ve"))
         lin = [{k: v for k, v in r.items() if v is not None} for r in self.t_liniova.ziskej()]
@@ -282,8 +295,8 @@ class AplikaceMost(Aplikace):
     def _nastav_blc_formulare(self, b: dict):
         m = {**VYCHOZI_BLC, **b}
         m["vozidlo"] = VOZIDLA_GUI.get(m.get("vozidlo", "Ve"), m.get("vozidlo"))
-        for fm in (self.f_kon, self.f_spara, self.f_uloz, self.f_vyb, self.f_voz, self.f_pred,
-                   self.f_cas_blc):
+        for fm in (self.f_kon, self.f_spara, self.f_uloz, self.f_vyb, self.f_chodci, self.f_voz,
+                   self.f_pred, self.f_cas_blc):
             fm.nastav(m)
         self.t_liniova.nastav(b.get("liniova", []))
 
@@ -460,8 +473,8 @@ class AplikaceMost(Aplikace):
             for i, s in enumerate(vys.souhrn()):
                 g = lambda k: f"{s.get(k, 0.0):.1f}"  # noqa: E731
                 self.t_blc.insert("", "end", iid=str(i), values=(
-                    s["vystup"], f"{s['y']:.2f}", g("M_g0"), g("M_g-g0"), g("M_q"), g("V_g0"),
-                    g("V_g-g0"), g("V_q"), g("M_Ed"), g("V_Ed")))
+                    s["vystup"], f"{s['y']:.2f}", g("M_g0"), g("M_g-g0"), g("M_qch"), g("M_q"),
+                    g("V_g0"), g("V_g-g0"), g("V_qch"), g("V_q"), g("M_Ed"), g("V_Ed")))
             self._oznac_posuzovany(o)
             self.t_blc.selection_set(str(o))
             self._graf_blc()

@@ -17,6 +17,7 @@ Sekce [blc]:
                Iy_s, beton_s, alfa, sikmost, k_v [MN/m/m], uloz, k_rot [MNm/rad/m], spoj
   stálé        chodnik_L, chodnik_P, g_chodnik, g_vozovka, g_zabradli, g_svodidla, g_spary,
                [[blc.liniova]] nazev, g, y, sirka
+  chodci       q_chodnik [kN/m²] (zatížení chodníků, obálka), gamma_Qch, psi0_ch, psi1_ch, psi2_ch
   vozidlo      vozidlo = "Ve" | "MLC_k" | "MLC_p", Ve [t], MLC (třída), dist (kolona; prázdné =
                jedno vozidlo), dyn, y_vozidla (prázdné = osa vozovky), roznos, t_voz, krok, ex
   předání      vystup ("auto" | "N3"), kriterium ("M" | "M-" | "V"), rezim ("kombinace" |
@@ -45,6 +46,7 @@ VYCHOZI_BLC = {
     "krok": 0.25, "ex": 0.125,
     "vystup": "auto", "kriterium": "M", "rezim": "kombinace",
     "gamma_Q": 1.35, "psi0": 0.75, "psi1": 0.75, "psi2": 0.0,
+    "q_chodnik": 3.0, "gamma_Qch": 1.35, "psi0_ch": 0.75, "psi1_ch": 0.75, "psi2_ch": 0.0,
 }
 
 
@@ -129,12 +131,15 @@ def parametry_blc(d: dict) -> dict:
     else:
         raise ValueError(f"Neznámé vozidlo '{voz}' (Ve, MLC_k, MLC_p).")
     kw.update(dyn=float(b["dyn"]), y_Ve=_f(b.get("y_vozidla")), roznos=bool(b["roznos"]),
-              t_voz=float(b["t_voz"]), krok=float(b["krok"]), ex=float(b["ex"]))
+              t_voz=float(b["t_voz"]), krok=float(b["krok"]), ex=float(b["ex"]),
+              q_chodnik=float(b.get("q_chodnik") or 0.0))
     ns = nastaveni_posudku(d)
     kw["soucinitele"] = Soucinitele(gamma_G=float(ns["gamma_G"]),
                                     gamma_G_inf=float(ns["gamma_G_inf"]), xi=float(ns["xi"]),
                                     gamma_Q=float(b["gamma_Q"]), psi0=float(b["psi0"]),
-                                    psi1=float(b["psi1"]), psi2=float(b["psi2"]))
+                                    psi1=float(b["psi1"]), psi2=float(b["psi2"]),
+                                    gamma_Qch=float(b["gamma_Qch"]), psi0_ch=float(b["psi0_ch"]),
+                                    psi1_ch=float(b["psi1_ch"]), psi2_ch=float(b["psi2_ch"]))
     return kw
 
 
@@ -169,32 +174,77 @@ def data_pro_posudek(vys: VysledekSil, d: dict, o: Optional[int] = None) -> dict
 
 
 def kapitola_blc(model, vys: VysledekSil, o: int) -> None:
-    """Vloží do protokolu posudku kapitolu o původu zatížení (před kapitolu Zatížení)."""
+    """Vloží do protokolu posudku kapitolu zatížení a vnitřních sil z modelu mostu
+    (před kapitolu Zatížení a časová osa): popis stavů, zatížení na mostě, součinitele,
+    vnitřní síly na nosnících od jednotlivých stavů a kombinace po nosnících."""
     from pb_posudek.protokol import Kapitola, fmt
+    from .grafy_most import GRAFY_ZATIZENI, GRAF_SILY, rezy_posudku
     jm, jv = vys.jednotky
+    vyst = "pás" if vys.deska else "nosník"
     K = Kapitola("Zatížení z modelu mostu (BLC)", 2)
-    K.text(f"Vnitřní síly od zatěžovacích stavů vlastní tíhy g0, ostatního stálého zatížení g − g0 "
-           f"a pohyblivého zatížení q byly spočteny na modelu celého mostu: {vys.popis}. "
-           f"Posuzuje se {'pás' if vys.deska else 'nosník'} {vys.popisky[o]} "
-           f"(y = {fmt(float(vys.vyst.y[o]))} m).")
+    K.text(f"Vnitřní síly od zatěžovacích stavů byly spočteny na modelu celého mostu: {vys.popis}. "
+           f"Posuzuje se {vyst} {vys.popisky[o]} (y = {fmt(float(vys.vyst.y[o]))} m).")
     for s in vys.stavy.values():
         K.text(f"{NAZVY_STAVU[s.nazev]}: {s.popis}.")
     if vys.varovani:
         K.text("Upozornění: " + " ".join(vys.varovani))
+    # zatížení na mostě
+    b = getattr(model, "blc", None)
+    if b:
+        rz = rezy_posudku(model)
+        xs, xp = fmt(model.x[rz["stred"][0]]), fmt(model.x[rz["podpora"][0]])
+        K.text(f"Zatížení na mostě; posuzovaný {vyst} je vyznačen oranžově, řezy posudku „střed“ "
+               f"(x = {xs} m) a „podpora“ (x = {xp} m, nejblíže vzdálenosti d od osy ložiska) "
+               "červeně. Vozidlo je zobrazeno v poloze s největším ohybovým momentem ve středu "
+               "rozpětí a s největší posouvající silou u podpory (polohy z výpočtu obálky).")
+        for p in b["polohy"].values():
+            K.text(p.popis + ".")
+        for k, nazev in GRAFY_ZATIZENI.items():
+            if k != "blc_zat_q" or b["polohy"]:
+                K.obrazek(k, nazev)
+    # součinitele
     s = vys.soucinitele
-    K.text(f"Do posudku jsou převzaty obálky g − g0 a q (vlastní tíhu nosníku g0 počítá posudek "
-           f"z průřezu; g0 v modelu mostu = {fmt(vys.g0)} {'kN/m²' if vys.deska else 'kN/m'}). "
-           f"Součinitele: γ_G = {fmt(s.gamma_G)}, ξ = {fmt(s.xi)}, γ_Q = {fmt(s.gamma_Q)}, "
-           f"ψ0 = {fmt(s.psi0)}, ψ1 = {fmt(s.psi1)}, ψ2 = {fmt(s.psi2)}.")
+    druhy = [("char", "charakteristická"), ("casta", "častá"), ("kvazistala", "kvazistálá"),
+             ("6.10a", "MSÚ 6.10a"), ("6.10b", "MSÚ 6.10b"), ("6.10", "MSÚ 6.10")]
+    skup = ["G"] + [k for k in ("qch", "q") if k in vys.stavy]
+    nazvy_skup = {"G": "g0 + (g − g0)", "qch": "q – chodci", "q": "q – doprava"}
+    rows = []
+    for druh, naz in druhy:
+        r = [naz]
+        for sk in skup:
+            g, p = s.gama_psi(sk, druh)
+            r += [fmt(g, 2), fmt(p, 2)]
+        rows.append(r)
+    hl = ["Kombinace"]
+    for sk in skup:
+        hl += [f"γ ({nazvy_skup[sk]})", f"ψ ({nazvy_skup[sk]})"]
+    K.tabulka(hl, rows, "Dílčí součinitele γ a součinitele kombinace ψ (u stálých v 6.10b ψ = ξ; "
+                        f"příznivé stálé γ_G,inf = {fmt(s.gamma_G_inf, 2)}); účinek = Σ γ·ψ·E, "
+                        "proměnná zatížení působí současně")
+    K.text("Pozn.: γ_G a ξ jsou převzaty z nastavení posouzení, γ a ψ proměnných zatížení ze zadání "
+           "mostu; pro zvolené vozidlo je nutné je ověřit.")
+    # vnitřní síly od stavů
+    K.obrazek(GRAF_SILY[0], GRAF_SILY[1])
     stavy = list(vys.stavy)
     rows = []
     for i, dd in enumerate(vys.souhrn()):
         rows.append([dd["vystup"] + (" ◄" if i == o else ""), fmt(dd["y"])] +
-                    [fmt(dd["M_" + k]) for k in stavy] + [fmt(dd["V_" + k]) for k in stavy] +
-                    [fmt(dd["M_Ed"]), fmt(dd["V_Ed"])])
-    K.tabulka(["Výstup", "y [m]"] + [f"max M {k} [{jm}]" for k in stavy] +
-              [f"max |V| {k} [{jv}]" for k in stavy] + [f"M_Ed [{jm}]", f"V_Ed [{jv}]"], rows,
-              "Maxima vnitřních sil po nosnících (M_Ed, V_Ed: MSÚ 6.10 včetně g0); ◄ = posuzovaný")
+                    [fmt(dd["M_" + k]) for k in stavy] + [fmt(dd["V_" + k]) for k in stavy])
+    kr = {"g0": "g0", "g-g0": "g − g0", "qch": "chodci", "q": "doprava"}
+    K.tabulka([vyst.capitalize(), "y [m]"] + [f"max M {kr[k]} [{jm}]" for k in stavy] +
+              [f"max |V| {kr[k]} [{jv}]" for k in stavy], rows,
+              f"Maxima vnitřních sil po nosnících od jednotlivých zatěžovacích stavů; ◄ = posuzovaný")
+    # kombinace po nosnících
+    K.text("Vnitřní síly kombinací po nosnících – extrémy po délce nosníku; kombinace obsahují "
+           "vlastní tíhu g0 z modelu mostu, ostatní stálé g − g0 a proměnná zatížení podle tabulky "
+           "součinitelů.")
+    for druh, naz in druhy:
+        rows = []
+        for i, dd in enumerate(vys.extremy_kombinace(druh, vcetne_g0=True)):
+            rows.append([dd["vystup"] + (" ◄" if i == o else ""), fmt(dd["M_max"]),
+                         fmt(dd["x_M_max"], 2), fmt(dd["M_min"]), fmt(dd["V_max"]), fmt(dd["V_min"])])
+        K.tabulka([vyst.capitalize(), f"max M [{jm}]", "x (max M) [m]", f"min M [{jm}]",
+                   f"max V [{jv}]", f"min V [{jv}]"], rows, f"Kombinace {naz} – vnitřní síly po nosnících")
     kap = model.protokol.kapitoly
     i = next((j for j, k in enumerate(kap) if k.nazev.startswith("Zatížení")), len(kap))
     kap.insert(i, K)

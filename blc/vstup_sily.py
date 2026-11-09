@@ -68,7 +68,8 @@ def parametry(d: dict) -> dict:
         if a in s:
             kw[a] = s[a]
     p = d.get("pohyblive", {})
-    for a in ("Ve", "MLC", "typ_MLC", "dist", "dyn", "y_Ve", "roznos", "t_voz", "krok"):
+    for a in ("Ve", "MLC", "typ_MLC", "dist", "dyn", "y_Ve", "roznos", "t_voz", "krok",
+              "q_chodnik", "krok_chodnik"):
         if a in p:
             kw[a] = p[a]
     if "ex" in d.get("vypocet", {}):

@@ -18,7 +18,7 @@ from matplotlib.patches import Polygon, Rectangle
 
 from .vnitrni_sily import VysledekSil, NAZVY_STAVU, PolohaVozidla
 
-BARVY = {"g0": "#7f7f7f", "g-g0": "#2e75b6", "q": "#e74c3c"}
+BARVY = {"g0": "#7f7f7f", "g-g0": "#2e75b6", "qch": "#1baf7a", "q": "#e74c3c"}
 C_NOSNIK, C_SPARA, C_POS = "#d5e8f5", "#eeeeee", "#f39c12"
 
 

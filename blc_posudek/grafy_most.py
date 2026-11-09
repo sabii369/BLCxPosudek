@@ -28,6 +28,8 @@ GRAFY_ZATIZENI = {
     "blc_zat_q": "Zatížení na mostě – vozidlo v poloze pro max M ve středu rozpětí a max V u podpory",
 }
 NAZEV_REZY = "Napětí v řezech"
+GRAF_SILY = ("blc_sily", "Vnitřní síly na nosnících od jednotlivých zatěžovacích stavů – "
+                         "všechny nosníky (šedě), posuzovaný barevně; u proměnných obálka max/min")
 
 
 def rezy_posudku(m) -> dict:
@@ -73,6 +75,58 @@ def graf_zatizeni(m, klic: str):
         if nadpis:
             ax.set_title(nadpis, fontsize=9)
     return fig
+
+
+def graf_sil(m):
+    """M a V na všech nosnících od stavů g0, g − g0, q_ch, q; posuzovaný zvýrazněn."""
+    from blc.plotting_sily import BARVY
+    from blc.vnitrni_sily import NAZVY_STAVU
+    b = getattr(m, "blc", None)
+    if not b:
+        return None
+    vys, o = b["vys"], b["o"]
+    jm, jv = vys.jednotky
+    stavy = list(vys.stavy)
+    fig, axs = plt.subplots(2, len(stavy), figsize=(3.6 * len(stavy) + 1, 6.2), squeeze=False)
+    for j, st in enumerate(stavy):
+        aM, aV = axs[0, j], axs[1, j]
+        pohyb = vys.stavy[st].pohyblivy
+        for k in range(vys.n_vyst):
+            if k == o:
+                continue
+            t = vys.tabulka(k, st)
+            aM.plot(t.x, t.M_max, color="#c8c8c8", lw=0.7)
+            aV.plot(t.x, t.V_max, color="#c8c8c8", lw=0.7)
+            if pohyb:
+                aM.plot(t.x, t.M_min, color="#c8c8c8", lw=0.7)
+                aV.plot(t.x, t.V_min, color="#c8c8c8", lw=0.7)
+        t = vys.tabulka(o, st)
+        c = BARVY.get(st, "k")
+        aM.plot(t.x, t.M_max, color=c, lw=2.0, label=vys.popisky[o])
+        aV.plot(t.x, t.V_max, color=c, lw=2.0)
+        if pohyb:
+            aM.plot(t.x, t.M_min, color=c, lw=1.4, ls="--")
+            aV.plot(t.x, t.V_min, color=c, lw=1.4, ls="--")
+        for a in (aM, aV):
+            a.axhline(0, color=grafy.INK2, lw=0.7)
+            a.grid(alpha=0.3)
+        aM.invert_yaxis()
+        aM.set_title(NAZVY_STAVU.get(st, st), fontsize=9)
+        i = int(np.argmax(t.M_max))
+        aM.annotate(f"{t.M_max[i]:.1f}", (t.x[i], t.M_max[i]), fontsize=8, color=c,
+                    ha="center", va="top", xytext=(0, -3), textcoords="offset points")
+        aV.set_xlabel("x [m]")
+    axs[0, 0].set_ylabel(f"M [{jm}]")
+    axs[1, 0].set_ylabel(f"V [{jv}]")
+    axs[0, 0].legend(fontsize=8)
+    fig.suptitle(f"Vnitřní síly na nosnících – posuzovaný {vys.popisky[o]}", fontsize=10,
+                 fontweight="bold", color=grafy.INK)
+    return fig
+
+
+def fn_sily(m, adr):
+    fig = graf_sil(m)
+    return None if fig is None else grafy._uloz(fig, adr, GRAF_SILY[0])
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +222,7 @@ def seznam_grafu(m) -> dict:
         for k, nazev in GRAFY_ZATIZENI.items():
             if k != "blc_zat_q" or m.blc["polohy"]:
                 out[nazev.replace("Zatížení na mostě – ", "Zatížení mostu – ")] = FUNKCE_ZATIZENI[k]
+        out["Zatížení mostu – vnitřní síly na nosnících"] = fn_sily
     for idx, f in enumerate(getattr(m, "faze", [])):
         out[f"{NAZEV_REZY} – {f.nazev}"] = fn_rez(idx)
     return out
@@ -176,7 +231,7 @@ def seznam_grafu(m) -> dict:
 def vykresli_most(m, adr) -> dict:
     """Uloží všechny grafy spojeného programu (PNG) – {klíč: soubor}."""
     out = {}
-    for k, fn in FUNKCE_ZATIZENI.items():
+    for k, fn in list(FUNKCE_ZATIZENI.items()) + [(GRAF_SILY[0], fn_sily)]:
         r = fn(m, adr)
         if r:
             out[k] = r
@@ -188,22 +243,12 @@ def vykresli_most(m, adr) -> dict:
 
 
 def vloz_do_protokolu(m) -> None:
-    """Obrázky do kapitol: zatížení na mostě do kapitoly BLC, napětí v řezech pod graf
-    napětí v krajních vláknech každé fáze."""
+    """Napětí v řezech pod graf napětí v krajních vláknech každé fáze (obrázky kapitoly
+    zatížení vkládá vypocet.kapitola_blc)."""
     from pb_posudek.protokol import Obrazek, fmt
     rz = rezy_posudku(m)
     xs, xp = fmt(m.x[rz["stred"][0]]), fmt(m.x[rz["podpora"][0]])
     for kap in m.protokol.kapitoly:
-        if kap.nazev == "Zatížení z modelu mostu (BLC)" and getattr(m, "blc", None):
-            kap.text(f"Zatížení na mostě; posuzovaný nosník je vyznačen oranžově, řezy posudku „střed“ "
-                     f"(x = {xs} m) a „podpora“ (x = {xp} m, nejblíže vzdálenosti d od osy ložiska) "
-                     "červeně. Vozidlo je zobrazeno v poloze s největším ohybovým momentem ve středu "
-                     "rozpětí a s největší posouvající silou u podpory (polohy z výpočtu obálky).")
-            for p in m.blc["polohy"].values():
-                kap.text(p.popis + ".")
-            for k, nazev in GRAFY_ZATIZENI.items():
-                if k != "blc_zat_q" or m.blc["polohy"]:
-                    kap.obrazek(k, nazev)
         for idx, f in enumerate(m.faze):
             klic = f"napeti_{idx}"
             for j, (typ, obj) in enumerate(kap.polozky):

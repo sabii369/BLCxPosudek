@@ -40,6 +40,7 @@ def test_parametry_z_posudku(d):
     assert kw["Ve"] == 80.0 and "MLC" not in kw
     assert kw["soucinitele"].gamma_G == 1.35          # z [posouzeni] (výchozí)
     assert kw["k_pod"] == 2.0e6
+    assert kw["q_chodnik"] == 3.0 and kw["soucinitele"].psi1_ch == 0.75
 
 
 def test_vyber_vozidla(d):
@@ -82,7 +83,7 @@ def test_zadany_nosnik_a_rezim(d, vysledek):
     zat = zatizeni_z_blc(vys, d2)
     assert zat["zpusob"] == "zatezovaci_stavy"
     assert zat["stale"][0]["t"] == 60                  # g − g0 od t_vneseni
-    assert "Ve 80 t" in zat["promenne"][0]["nazev"]
+    assert "chodců" in zat["promenne"][0]["nazev"] and "Ve 80 t" in zat["promenne"][1]["nazev"]
 
 
 def test_napeti_v_rezech(vysledek):
@@ -111,18 +112,29 @@ def test_grafy_most(vysledek):
     from blc_posudek.grafy_most import seznam_grafu
     model = vysledek[2]
     s = seznam_grafu(model)
-    assert len(s) == 2 + len(model.faze)
+    assert len(s) == 3 + len(model.faze)
     with grafy.vracet_obrazky():
         for nazev, fn in s.items():
             fig = fn(model, None)
-            assert fig is not None and len(fig.axes) == 2, nazev
+            n_os = 2 * len(vysledek[0].stavy) if nazev.endswith("na nosnících") else 2
+            assert fig is not None and len(fig.axes) == n_os, nazev
             plt.close(fig)
 
 
 def test_obrazky_v_kapitolach(vysledek):
     model = vysledek[2]
     kap = {k.nazev: [o.soubor for t, o in k.polozky if t == "obrazek"] for k in model.protokol.kapitoly}
-    assert kap["Zatížení z modelu mostu (BLC)"] == ["blc_zat_stale", "blc_zat_q"]
+    assert kap["Zatížení z modelu mostu (BLC)"] == ["blc_zat_stale", "blc_zat_q", "blc_sily"]
+    tab = [o for t, o in next(k for k in model.protokol.kapitoly
+                              if k.nazev == "Zatížení z modelu mostu (BLC)").polozky if t == "tabulka"]
+    assert len(tab) == 2 + 6                               # součinitele, stavy, 6 kombinací
+    # součinitele podle zadání: char, častá, kvazi, 6.10a, 6.10b, 6.10 × (G, chodci, doprava)
+    assert [r[1:] for r in tab[0].radky] == [
+        ["1,00"] * 6, ["1,00", "1,00", "1,00", "0,75", "1,00", "0,75"],
+        ["1,00", "1,00", "1,00", "0,00", "1,00", "0,00"],
+        ["1,35", "1,00", "1,35", "0,75", "1,35", "0,75"],
+        ["1,35", "0,85", "1,35", "1,00", "1,35", "1,00"], ["1,35", "1,00", "1,35", "1,00", "1,35", "1,00"]]
+    assert "chodci" in " ".join(tab[1].hlavicka)
     for idx, f in enumerate(model.faze):
         obr = kap[f"Napětí v betonu – {f.nazev_t}"]
         assert obr[obr.index(f"napeti_{idx}") + 1] == f"blc_rez_{idx}"   # hned pod grafem fáze
@@ -136,6 +148,9 @@ def test_davka(tmp_path):
     assert (tmp_path / "most" / "vnitrni_sily.json").exists()
     html = (tmp_path / "protokol.html").read_text(encoding="utf-8")
     assert "Zatížení z modelu mostu (BLC)" in html
+    for naz in ("charakteristická", "častá", "kvazistálá", "MSÚ 6.10a", "MSÚ 6.10b", "MSÚ 6.10"):
+        assert f"Kombinace {naz} – vnitřní síly po nosnících" in html
+    assert (tmp_path / "obrazky" / "blc_sily.png").exists()
     assert "<figcaption>Zatížení na mostě – vlastní tíha g0" in html
     assert "<figcaption>Zatížení na mostě – vozidlo v poloze pro max M" in html
     assert html.count("<figcaption>Napětí po výšce průřezu v řezu ve středu rozpětí") == 4

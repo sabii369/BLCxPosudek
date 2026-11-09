@@ -30,7 +30,9 @@ Prostředí je Posudek PB s novou první kartou:
 - **F5** spočítá most (jen změnily-li se jeho vstupy) i posudek; HTML protokol obsahuje
   kapitolu „Zatížení z modelu mostu (BLC)“ s tabulkou nosníků a půdorysy mostu se zatížením
   g0, g − g0 a vozidlem v poloze pro max M ve středu rozpětí a max V u podpory; v kapitole
-  napětí je pod grafem každé fáze napětí po výšce průřezu ve středu rozpětí a u podpory.
+  napětí je pod grafem každé fáze napětí po výšce průřezu ve středu rozpětí a u podpory;
+  dále tabulku součinitelů γ/ψ (stálé, chodci, doprava), graf M a V na nosnících od stavů
+  g0, g − g0, chodci, doprava a tabulky kombinací (max/min M, max/min V po nosnících).
 - Soubor = vstup Posudku PB + sekce `[blc]`, vzor [`priklady/most_KA67_12.toml`](priklady/most_KA67_12.toml).
 - Balíček `pb_posudek` je převzat z repa `sabii369/PB_posudek` (git subtree) – viz `CLAUDE.md`.
 
@@ -62,6 +64,7 @@ Ovládání, metoda výpočtu, výstupy a omezení: [`docs/navod.md`](docs/navod
 |---|---|
 | g0 | nosníky: každý nosník samostatně bez spolupůsobení (1D), g0 = A·γ_b; deska: 2D MKP |
 | g − g0 | 2D MKP: skladba vozovky [kN/m²], skladba chodníků [kN/m²] (šířka chodníku vlevo a vpravo), svodidla, zábradlí [kN/m], výplň spáry |
+| q_ch | 2D MKP: zatížení chodců na chodnících [kN/m²], obálka přes plochu vlivu |
 | q | 2D MKP: obálka pojezdu vozidla Ve v ose vozovky, dynamický součinitel |
 
 ```bash

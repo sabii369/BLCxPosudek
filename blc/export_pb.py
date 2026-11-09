@@ -128,9 +128,10 @@ def toml_zatizeni_pb(vys: VysledekSil, o: int, L_nosniku: Optional[float] = None
     ]
     for st in vys.stavy.values():
         hl.append(f"# {st.nazev}: {st.popis}")
-    hl.append(f"# Součinitele: γ_G = {s.gamma_G:g}, γ_G,inf = {s.gamma_G_inf:g}, ξ = {s.xi:g}, "
-              f"γ_Q = {s.gamma_Q:g}, ψ0 = {s.psi0:g}, ψ1 = {s.psi1:g}, ψ2 = {s.psi2:g} "
-              "(pro vozidlo ověřit)")
+    hl.append(f"# Součinitele: γ_G = {s.gamma_G:g}, γ_G,inf = {s.gamma_G_inf:g}, ξ = {s.xi:g}; "
+              f"doprava γ_Q = {s.gamma_Q:g}, ψ0 = {s.psi0:g}, ψ1 = {s.psi1:g}, ψ2 = {s.psi2:g}; "
+              f"chodci γ_Q = {s.gamma_Qch:g}, ψ0 = {s.psi0_ch:g}, ψ1 = {s.psi1_ch:g}, "
+              f"ψ2 = {s.psi2_ch:g} (ověřit)")
     for w in vys.varovani:
         hl.append(f"# ! {w}")
     out = hl + ["", "[zatizeni]", f'zpusob = "{rezim}"', "obsahuje_vlastni_tihu = false"]
@@ -158,14 +159,18 @@ def toml_zatizeni_pb(vys: VysledekSil, o: int, L_nosniku: Optional[float] = None
             out.append(f"t = {float(t_stale):g}")
         out += ["[zatizeni.stale.tabulka]", f"x = {_pole(tg.x, 3)}",
                 f"M = {_pole(tg.M_max)}", f"V = {_pole(tg.V_max)}"]
-        if "q" in vys.stavy:
-            tq, _, _ = _do_pb(vys, vys.tabulka(o, "q"), L_nosniku)
+        for sq, naz, g, p0, p1, p2 in (
+                ("qch", "Zatížení chodců q_ch", s.gamma_Qch, s.psi0_ch, s.psi1_ch, s.psi2_ch),
+                ("q", "Doprava q – " + vys.vozidlo, s.gamma_Q, s.psi0, s.psi1, s.psi2)):
+            if sq not in vys.stavy:
+                continue
+            tq, _, _ = _do_pb(vys, vys.tabulka(o, sq), L_nosniku)
             tq = _odstran_dvojice_x(tq)
             Vq = np.where(np.abs(tq.V_max) >= np.abs(tq.V_min), tq.V_max, tq.V_min)
             out += ["", "[[zatizeni.promenne]]",
-                    f"nazev = {_retezec('Pohyblivé q – ' + vys.vozidlo + ' (BLC ' + pop + ')')}",
-                    f"psi0 = {s.psi0:g}", f"psi1 = {s.psi1:g}", f"psi2 = {s.psi2:g}",
-                    f"gamma = {s.gamma_Q:g}",
+                    f"nazev = {_retezec(naz + ' (BLC ' + pop + ')')}",
+                    f"psi0 = {p0:g}", f"psi1 = {p1:g}", f"psi2 = {p2:g}",
+                    f"gamma = {g:g}", 'skupina = "BLC"      # chodci a doprava působí současně',
                     "[zatizeni.promenne.tabulka]", f"x = {_pole(tq.x, 3)}",
                     f"M = {_pole(tq.M_max)}", f"V = {_pole(Vq)}"]
     text = "\n".join(out) + "\n"

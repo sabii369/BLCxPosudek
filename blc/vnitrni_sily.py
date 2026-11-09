@@ -41,12 +41,15 @@ from .plate_fem import (DeskaMKP, Vystupy, obalky_2D, sit_modelu, SitMKP, platky
 from .stale_zatizeni import Vybaveni, platky_plosne
 
 GAMMA_BETON = 25.0               # objemová tíha železobetonu [kN/m³]
-STAVY = ("g0", "g-g0", "q")
+STAVY = ("g0", "g-g0", "qch", "q")
 NAZVY_STAVU = {
     "g0": "vlastní tíha g0",
     "g-g0": "ostatní stálé g − g0",
-    "q": "pohyblivé q",
+    "qch": "zatížení chodců q_ch",
+    "q": "zatížení dopravou q",
 }
+#: skupiny zatížení pro součinitele kombinací (stálé, chodci, doprava)
+SKUPINY = {"G": "g0 + (g − g0)", "qch": "q – chodníky", "q": "q – doprava"}
 DRUHY_KOMBINACI = ("6.10a", "6.10b", "6.10", "char", "casta", "kvazistala")
 
 
@@ -58,7 +61,9 @@ DRUHY_KOMBINACI = ("6.10a", "6.10b", "6.10", "char", "casta", "kvazistala")
 class Soucinitele:
     """Dílčí součinitele a součinitele kombinace.  Výchozí ψ odpovídají
     tandemové soustavě TS (ČSN EN 1990, tab. A2.1) – pro vozidlo Ve
-    je nutné je ověřit / upravit podle zadání hodnocení."""
+    je nutné je ověřit / upravit podle zadání hodnocení.
+    Doprava (q): gamma_Q, psi0..2; chodci (qch): gamma_Qch, psi0_ch..psi2_ch.
+    Obě proměnná zatížení působí v kombinaci současně (jako skupina)."""
     gamma_G: float = 1.35
     gamma_G_inf: float = 1.0
     xi: float = 0.85
@@ -66,18 +71,34 @@ class Soucinitele:
     psi0: float = 0.75
     psi1: float = 0.75
     psi2: float = 0.0
+    gamma_Qch: float = 1.35
+    psi0_ch: float = 0.75
+    psi1_ch: float = 0.75
+    psi2_ch: float = 0.0
+
+    def gama_psi(self, skupina: str, druh: str) -> tuple:
+        """(γ, ψ) skupiny "G" | "qch" | "q" v kombinaci; u stálých v 6.10b je ψ = ξ."""
+        if skupina == "G":
+            g = self.gamma_G
+            return {"char": (1.0, 1.0), "casta": (1.0, 1.0), "kvazistala": (1.0, 1.0),
+                    "6.10a": (g, 1.0), "6.10b": (g, self.xi), "6.10": (g, 1.0)}[druh]
+        if skupina == "qch":
+            g, p0, p1, p2 = self.gamma_Qch, self.psi0_ch, self.psi1_ch, self.psi2_ch
+        else:
+            g, p0, p1, p2 = self.gamma_Q, self.psi0, self.psi1, self.psi2
+        return {"char": (1.0, 1.0), "casta": (1.0, p1), "kvazistala": (1.0, p2),
+                "6.10a": (g, p0), "6.10b": (g, 1.0), "6.10": (g, 1.0)}[druh]
 
     def faktory(self, druh: str):
-        """(γ_sup stálého, γ_inf stálého, součinitel q) pro kombinaci."""
-        g, gi, gq = self.gamma_G, self.gamma_G_inf, self.gamma_Q
-        return {
-            "6.10a": (g, gi, gq * self.psi0),
-            "6.10b": (self.xi * g, gi, gq),
-            "6.10": (g, gi, gq),
-            "char": (1.0, 1.0, 1.0),
-            "casta": (1.0, 1.0, self.psi1),
-            "kvazistala": (1.0, 1.0, self.psi2),
-        }[druh]
+        """(γ_sup stálého, γ_inf stálého, součinitel q – doprava) pro kombinaci."""
+        g, p = self.gama_psi("G", druh)
+        gq, pq = self.gama_psi("q", druh)
+        return g * p, (1.0 if druh in ("char", "casta", "kvazistala") else self.gamma_G_inf), gq * pq
+
+    def faktor_q(self, stav: str, druh: str) -> float:
+        """Součinitel proměnného stavu ("q" | "qch") v kombinaci = γ·ψ."""
+        g, p = self.gama_psi("qch" if stav == "qch" else "q", druh)
+        return g * p
 
 
 # ---------------------------------------------------------------------------
@@ -242,10 +263,23 @@ class VysledekSil:
             for a, b in (("M_min", "M_max"), ("V_min", "V_max")):
                 v = getattr(t, b)
                 getattr(out, a)[:] += np.minimum(gs * v, gi * v)
-        if "q" in self.stavy:
-            t = self.tabulka(o, "q")
-            for a in ("M_max", "M_min", "V_max", "V_min"):
-                getattr(out, a)[:] += fq * getattr(t, a)
+        for sq in ("qch", "q"):
+            if sq in self.stavy:
+                f = self.soucinitele.faktor_q(sq, druh)
+                t = self.tabulka(o, sq)
+                for a in ("M_max", "M_min", "V_max", "V_min"):
+                    getattr(out, a)[:] += f * getattr(t, a)
+        return out
+
+    def extremy_kombinace(self, druh: str, vcetne_g0: bool = True) -> List[dict]:
+        """Po výstupech: max/min M a max/min V kombinace (s polohou x maxima M)."""
+        out = []
+        for o in range(self.n_vyst):
+            k = self.kombinace(o, druh, vcetne_g0)
+            i = int(np.argmax(k.M_max))
+            out.append({"vystup": self.popisky[o], "M_max": float(k.M_max.max()),
+                        "x_M_max": float(k.x[i]), "M_min": float(k.M_min.min()),
+                        "V_max": float(k.V_max.max()), "V_min": float(k.V_min.min())})
         return out
 
     # ---- souhrn a výběr nejzatíženějšího výstupu -------------------------
@@ -329,6 +363,42 @@ def _staly_MKP(model, vyst: Vystupy, platky) -> tuple:
     return S @ PM, S @ PVm, S @ PVp, F, R
 
 
+def _chodniky(model, vyst: Vystupy, K: Konstrukce, vyb: Vybaveni, q: float,
+              krok: float, davka: int = 48) -> StavSil:
+    """Obálka od zatížení chodníků q [kN/m²]: chodníky rozdělené na úseky délky ≈ krok
+    (levý a pravý zvlášť), max = Σ kladných, min = Σ záporných účinků úseků (zatížení
+    v nepříznivých částech plochy vlivu)."""
+    pasy = []
+    if vyb.chodnik_L > 0:
+        pasy.append((0.0, vyb.chodnik_L))
+    if vyb.chodnik_P > 0:
+        pasy.append((K.B - vyb.chodnik_P, K.B))
+    n = max(1, int(math.ceil(K.Ltot / krok - 1e-9)))
+    dx = K.Ltot / n
+    sl = []
+    for y0, y1 in pasy:
+        x0 = K.x0(0.5 * (y0 + y1))
+        for k in range(n):
+            sl.append(model.zatizeni(platky_plosne(q, x0 + k * dx, x0 + (k + 1) * dx, y0, y1,
+                                                   dx=dx, dy=0.5)))
+    nv, nx = vyst.n, model.nx
+    acc = {k: np.zeros((nv, nx)) for k in ("M+", "M-", "Vm+", "Vm-", "Vp+", "Vp-", "Vs+", "Vs-")}
+    for i in range(0, len(sl), davka):
+        U = model.res_batch(np.stack(sl[i:i + davka], axis=1))
+        PM, PVm, PVp = model.vyslednice(U)
+        A = {"M": np.einsum("os,sxb->oxb", vyst.S, PM),
+             "Vm": np.einsum("os,sxb->oxb", vyst.S, PVm),
+             "Vp": np.einsum("os,sxb->oxb", vyst.S, PVp)}
+        A["Vs"] = 0.5 * (A["Vm"] + A["Vp"])
+        for k, v in A.items():
+            acc[k + "+"] += np.clip(v, 0, None).sum(axis=2)
+            acc[k + "-"] += np.clip(v, None, 0).sum(axis=2)
+    popis = (f"chodníky {vyb.chodnik_L:g} + {vyb.chodnik_P:g} m, q = {q:g} kN/m² v nepříznivých "
+             f"částech plochy vlivu (úseky {dx:.2f} m)")
+    return StavSil("qch", popis, acc["M+"], acc["M-"], acc["Vm+"], acc["Vm-"], acc["Vp+"],
+                   acc["Vp-"], acc["Vs+"], acc["Vs-"], pohyblivy=True, n_stavu=len(sl))
+
+
 # ---------------------------------------------------------------------------
 # Hlavní funkce
 # ---------------------------------------------------------------------------
@@ -372,6 +442,8 @@ def vnitrni_sily(
     roznos: bool = True,
     t_voz: float = 0.0,
     krok: float = 0.25,
+    q_chodnik: float = 0.0,
+    krok_chodnik: float = 0.5,
     # ---- výpočet ----
     ex: float = 0.125,
     soucinitele: Optional[Soucinitele] = None,
@@ -396,6 +468,9 @@ def vnitrni_sily(
                      Zadává se Ve NEBO MLC; bez vozidla se stav q nepočítá.
         dist:        MLC: vzdálenost vozidel v koloně [m]; None = jedno vozidlo.
         dyn:         dynamický součinitel pohyblivého zatížení [-].
+        q_chodnik:   zatížení chodníků chodci [kN/m²] (0 = bez stavu qch); obálka –
+                     zatížení se klade do nepříznivých částí plochy vlivu (úseky
+                     chodníků délky krok_chodnik [m], levý i pravý chodník zvlášť).
         y_Ve:        příčná poloha osy vozidla [m] (None = osa vozovky).
         roznos, t_voz: roznos plošky kola do střednice desky (+ tloušťka vozovky [m]).
         krok:        krok poloh vozidla pro obálku q [m].
@@ -478,6 +553,14 @@ def vnitrni_sily(
         varovani.append("Tíha spáry je zadána, ale konstrukce spáru nemá – ignorováno.")
 
     stavy = {"g0": s_g0, "g-g0": s_g}
+
+    # ---- qch: zatížení chodníků (obálka přes plochu vlivu) ------------------
+    if q_chodnik < 0:
+        raise ValueError("Zatížení chodníků musí být nezáporné.")
+    if q_chodnik and (vyb.chodnik_L > 0 or vyb.chodnik_P > 0):
+        stavy["qch"] = _chodniky(model, vyst, K, vyb, q_chodnik, krok_chodnik)
+    elif q_chodnik:
+        varovani.append("Zatížení chodníků je zadáno, ale most nemá chodníky – ignorováno.")
 
     # ---- q: pojezd vybraného vozidla ----------------------------------------
     roz = (K.h_ekv if roznos else 0.0) + 2.0 * t_voz

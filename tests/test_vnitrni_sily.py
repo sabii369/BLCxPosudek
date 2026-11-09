@@ -158,6 +158,32 @@ def test_kresli_most():
         plt.close(fig)
 
 
+def test_chodci_obalka():
+    v = vnitrni_sily(**NOSNIKY, vybaveni=Vybaveni(chodnik_L=1.0, chodnik_P=0.5), q_chodnik=3.0,
+                     tisk=False)
+    w = vnitrni_sily(**NOSNIKY, vybaveni=Vybaveni(chodnik_L=1.0, chodnik_P=0.5, g_chodnik=3.0),
+                     tisk=False)
+    assert v.stavy["qch"].pohyblivy
+    for o in range(v.n_vyst):
+        a, b = v.tabulka(o, "qch"), w.tabulka(o, "g-g0")
+        # prostý nosník: max M = plné zatížení chodníků; V obálka ≥ plné zatížení
+        assert a.M_max.max() == approx(b.M_max.max(), rel=1e-6)
+        assert a.V_max[0] >= b.V_max[0] * (1 - 1e-5) and np.all(a.M_min <= 1e-9)
+    s = v.soucinitele
+    k = v.kombinace(1, "casta")
+    assert k.M_max == approx(v.tabulka(1, "g-g0").M_max + s.psi1_ch * v.tabulka(1, "qch").M_max)
+
+
+def test_chodci_export(vys):
+    v = vnitrni_sily(**NOSNIKY, vybaveni=VYB, A_nosniku=0.3, Ve=60.0, q_chodnik=2.5, krok=0.5,
+                     tisk=False)
+    d = zatizeni_pb_dict(v, 0, rezim="zatezovaci_stavy")
+    assert [p["skupina"] for p in d["promenne"]] == ["BLC", "BLC"]
+    assert "chodců" in d["promenne"][0]["nazev"]
+    ex = v.extremy_kombinace("6.10b")
+    assert len(ex) == v.n_vyst and ex[0]["M_max"] == approx(v.kombinace(0, "6.10b", True).M_max.max())
+
+
 def test_q_dynamicky_soucinitel():
     a = vnitrni_sily(**NOSNIKY, Ve=60.0, krok=0.5, tisk=False)
     b = vnitrni_sily(**NOSNIKY, Ve=60.0, krok=0.5, dyn=1.2, tisk=False)
@@ -261,3 +287,5 @@ def test_soucinitele_faktory():
     s = Soucinitele(gamma_G=1.35, xi=0.85, gamma_Q=1.5, psi0=0.4)
     assert s.faktory("6.10a") == (1.35, 1.0, 1.5 * 0.4)
     assert s.faktory("6.10b") == (approx(0.85 * 1.35), 1.0, 1.5)
+    assert s.gama_psi("G", "6.10b") == (1.35, 0.85) and s.gama_psi("qch", "kvazistala") == (1.0, 0.0)
+    assert s.faktor_q("qch", "casta") == 0.75 and s.faktor_q("q", "6.10a") == approx(0.6)
