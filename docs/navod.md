@@ -365,7 +365,25 @@ příznivé stálé γ_G,inf. Kombinace v tabulkách obsahují g0 z modelu mostu
 z karty 6, γ a ψ chodců a dopravy z karty 0 (výchozí 1,35 / 0,75 / 0,75 / 0).
 Do posudku se předávají g − g0, q_ch a q (g0 si posudek počítá sám).
 
-### 8.5 Soubor
+### 8.5 Výpočet zatížitelnosti
+
+Zaškrtávací políčko **Výpočet zatížitelnosti** na kartě 0 (v souboru `[blc] zatizitelnost = true`,
+v dávce `--zatizitelnost`): místo posouzení při zadaném zatížení se pro každý posudek
+(mezní stav × fáze × kombinace) hledá **tíha vozidla Ve [t], při které je využití 100 %**.
+
+- Most se spočte jednou s referenčním Ve (zadaná hodnota); účinky vozidla jsou v Ve lineární,
+  pro jiné Ve se přeškálují. Posudek se pro zkoušené Ve počítá celý (nelineární MSÚ, ztráty
+  předpětí …), Ve se hledá metodou regula falsi (Illinois) s přesností |η − 1| ≤ 0,1 %.
+- Ostatní zatížení (g0, g − g0, chodci) a δ zůstávají; posuzovaný nosník je pevný.
+- Výsledkem posudku je Ve; dále „nezávisí na Ve – vyhovuje / NEVYHOVUJE“ (napínání,
+  minimální výztuž …), „neomezuje“ (η do zkoušeného Ve nedosáhne 100 %), „η klesá s Ve“
+  (např. křehký lom – nevyhovuje jen bez vozidla).
+- **Zatížitelnost = nejmenší Ve** (karta 7: MSÚ, MSP, celkem; sloupec Ve [t] místo η).
+- Protokol začíná kapitolou „Zatížitelnost“ (tabulka Ve po mezních stavech, seřazeno);
+  zbytek protokolu a grafy jsou spočteny pro Ve = zatížitelnost (rozhodující posudek 100 %).
+- Jen pro vozidlo Ve; výpočet trvá desítky výpočtů posudku (příklad KA-67/12 ≈ 15 s).
+
+### 8.6 Soubor
 
 Vstup Posudku PB rozšířený o sekci `[blc]` (popis klíčů v `blc_posudek/vypocet.py`).
 Uložený soubor obsahuje i sekci `[zatizeni]` z posledního výpočtu mostu, takže jde otevřít

@@ -20,6 +20,7 @@ Sekce [blc]:
   chodci       q_chodnik [kN/m²] (zatížení chodníků, obálka), gamma_Qch, psi0_ch, psi1_ch, psi2_ch
   vozidlo      vozidlo = "Ve" | "MLC_k" | "MLC_p", Ve [t], MLC (třída), dist (kolona; prázdné =
                jedno vozidlo), dyn, y_vozidla (prázdné = osa vozovky), roznos, t_voz, krok, ex
+  zatížitelnost zatizitelnost = true → místo posouzení hledá Ve pro η = 100 % každého posudku
   předání      vystup ("auto" | "N3"), kriterium ("M" | "M-" | "V"), rezim ("kombinace" |
                "zatezovaci_stavy"), gamma_Q, psi0, psi1, psi2, t_vneseni, t_stale
 """
@@ -47,6 +48,7 @@ VYCHOZI_BLC = {
     "vystup": "auto", "kriterium": "M", "rezim": "kombinace",
     "gamma_Q": 1.35, "psi0": 0.75, "psi1": 0.75, "psi2": 0.0,
     "q_chodnik": 3.0, "gamma_Qch": 1.35, "psi0_ch": 0.75, "psi1_ch": 0.75, "psi2_ch": 0.0,
+    "zatizitelnost": False,
 }
 
 

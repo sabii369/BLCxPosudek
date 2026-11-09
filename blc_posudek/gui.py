@@ -205,6 +205,9 @@ class AplikaceMost(Aplikace):
         self.btn_blc.pack(side="left")
         ttk.Button(bt, text="▶▶  Most + posudek (F5)", style="Akce.TButton",
                    command=self.spocitej).pack(side="left", padx=6)
+        self.var_zat = tk.BooleanVar(value=False)
+        ttk.Checkbutton(bt, text="Výpočet zatížitelnosti – hledat Ve pro η = 100 % (místo posouzení)",
+                        variable=self.var_zat, command=self._naplanuj_nahled).pack(side="left", padx=8)
         self.lbl_blc = ttk.Label(prav, text="Vnitřní síly mostu nejsou spočteny.",
                                  foreground="#b42323", wraplength=700, justify="left")
         self.lbl_blc.pack(anchor="w", pady=4)
@@ -288,6 +291,7 @@ class AplikaceMost(Aplikace):
                    self.f_pred, self.f_cas_blc):
             out.update(fm.ziskej())
         out["vozidlo"] = VOZIDLA_KLIC.get(out.get("vozidlo", "Ve"), out.get("vozidlo", "Ve"))
+        out["zatizitelnost"] = bool(self.var_zat.get())
         lin = [{k: v for k, v in r.items() if v is not None} for r in self.t_liniova.ziskej()]
         if lin:
             out["liniova"] = lin
@@ -300,6 +304,7 @@ class AplikaceMost(Aplikace):
                    self.f_pred, self.f_cas_blc):
             fm.nastav(m)
         self.t_liniova.nastav(b.get("liniova", []))
+        self.var_zat.set(bool(m.get("zatizitelnost", False)))
 
     def _nastav_data(self, d: dict):
         super()._nastav_data(d)
@@ -362,9 +367,18 @@ class AplikaceMost(Aplikace):
             messagebox.showerror("Neplatná vstupní data", str(e))
             return
         vys0 = self._blc_vys if klic == self._blc_klic else None
+        zat = bool(d["blc"].get("zatizitelnost"))
+        if zat and d["blc"].get("vozidlo", "Ve") != "Ve":
+            messagebox.showerror("Zatížitelnost", "Výpočet zatížitelnosti je pro vozidlo Ve – "
+                                                  "zvolte na kartě 0 vozidlo Ve.")
+            return
 
         def prace():
             vys = vys0 or vnitrni_sily(**kw)
+            if zat:
+                from .zatizitelnost import zatizitelnost
+                res = zatizitelnost(d, vys)
+                return vys, res.o, res.model
             _, o, model = spocti(d, vys)
             return vys, o, model
 
@@ -376,7 +390,64 @@ class AplikaceMost(Aplikace):
             if self._protokol_po_vypoctu:
                 self._protokol_po_vypoctu = False
                 self.after(10, self.protokol)
-        self._na_pozadi(prace, hotovo, "Výpočet mostu (BLC) a posudku nosníku…")
+        self._na_pozadi(prace, hotovo, "Výpočet zatížitelnosti – hledání Ve pro každý mezní stav "
+                                       "(desítky výpočtů posudku)…" if zat else
+                        "Výpočet mostu (BLC) a posudku nosníku…")
+
+    def _zobraz_vysledky(self, model):
+        """Výsledky posudku; při výpočtu zatížitelnosti místo využití Ve [t]."""
+        super()._zobraz_vysledky(model)
+        res = getattr(model, "zatizitelnost", None)
+        nadpisy = {"MSÚ": "MSÚ – nejvyšší využití", "MSP": "MSP – nejvyšší využití",
+                   "Celkem": "Výsledek"}
+        if res is None:
+            self.t_vys.heading("eta", text="η")
+            self.t_vys.column("eta", width=56)
+            for ms, (v, _) in self.karty.items():
+                v.master.configure(text=nadpisy[ms])
+            return
+        from .zatizitelnost import klic_posudku
+        zat = {p.klic: p for p in res.posudky}
+        self.t_vys.heading("eta", text="Ve [t]")
+        self.t_vys.column("eta", width=205)
+        m_all = res.minimum()
+        for iid, v in self._radky:
+            p = zat.get(klic_posudku(v))
+            if p is None:
+                continue
+            self.t_vys.set(iid, "eta", p.text)
+            if p.stav in ("nezavisi_nok", "bez_vozidla"):
+                tag = "bad"
+            elif p.stav == "Ve" and m_all is not None and abs(p.Ve - m_all.Ve) < 1e-6:
+                tag = "warn"
+            else:
+                tag = "ok"
+            self.t_vys.item(iid, tags=(tag,))
+        for ms in ("MSÚ", "MSP"):
+            v, det = self.karty[ms]
+            v.master.configure(text=f"{ms} – zatížitelnost")
+            mm = res.minimum(ms)
+            if mm is None:
+                v.configure(text="neomezuje", foreground="#0a7d0a")
+                det.configure(text=f"do Ve = {res.Ve_max:.0f} t")
+            else:
+                v.configure(text=f"Ve = {mm.Ve:.1f} t", foreground="#1a1a1a")
+                det.configure(text=f"{mm.klic[1]} – {mm.klic[2]}")
+        v, det = self.karty["Celkem"]
+        v.master.configure(text="Zatížitelnost")
+        nok = len(res.nevyhovuji_nezavisle)
+        if m_all is None:
+            v.configure(text=f"Ve > {res.Ve_max:.0f} t", foreground="#0a7d0a")
+        else:
+            v.configure(text=f"Ve = {m_all.Ve:.1f} t", foreground="#0a7d0a" if not nok else "#8a5a00")
+        det.configure(text=(f"{res.n_vypoctu} výpočtů posudku" +
+                            (f"; {nok} posudků nevyhovuje nezávisle na Ve" if nok else "")))
+        self.lbl_souhrn.configure(
+            text=("Zatížitelnost " + (f"Ve = {m_all.Ve:.1f} t" if m_all else f"Ve > {res.Ve_max:.0f} t")),
+            foreground="#0a7d0a" if not nok else "#8a5a00")
+        self.stav.set(f"Zatížitelnost: " + (f"Ve = {m_all.Ve:.1f} t ({m_all.klic[0]} {m_all.klic[1]} – "
+                                             f"{m_all.klic[2]})" if m_all else "neomezena")
+                      + f"; protokol a grafy pro toto Ve.")
 
     def protokol(self):
         """HTML protokol posudku včetně kapitoly a grafů zatížení mostu."""

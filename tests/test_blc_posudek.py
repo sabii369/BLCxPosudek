@@ -200,3 +200,52 @@ def test_gui(tmp_path):
         assert ulozeno["blc"]["vozidlo"] == "MLC_k"
     finally:
         app.destroy()
+
+
+# ---- zatížitelnost ------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def zat(d, vysledek):
+    from blc_posudek.zatizitelnost import zatizitelnost
+    return zatizitelnost(copy.deepcopy(d), vysledek[0])
+
+
+def test_vys_pro_Ve(vysledek):
+    from blc_posudek.zatizitelnost import vys_pro_Ve
+    vys = vysledek[0]
+    v2 = vys_pro_Ve(vys, 2.5 * vys.Ve)
+    assert v2.stavy["q"].M_max == approx(2.5 * vys.stavy["q"].M_max)
+    assert v2.stavy["g-g0"] is vys.stavy["g-g0"] and vys.Ve == 80.0     # originál beze změny
+    assert v2.vozidlo == "Ve 200.0 t"
+
+
+def test_zatizitelnost(zat):
+    from blc_posudek.zatizitelnost import klic_posudku
+    m = zat.minimum()
+    assert m is not None and m.Ve > zat.Ve_ref                     # příklad vyhovuje při 80 t
+    eta = {klic_posudku(p): p.vyuziti for p in zat.model.protokol.posudky}
+    assert eta[m.klic] == approx(1.0, abs=2e-3)                    # rozhodující posudek na 100 %
+    assert zat.vys.Ve == approx(m.Ve)
+    for p in zat.posudky:
+        if p.stav == "Ve":                                          # žádný jiný nepřekročen
+            assert eta[p.klic] <= 1.0 + 2e-3
+    stavy = {p.klic[1]: p.stav for p in zat.posudky}
+    assert stavy["Napínací napětí – K7"] == "nezavisi_nok"
+    assert stavy["Křehký lom – redukované předpětí"] == "klesa"
+    assert zat.minimum("MSÚ").Ve <= zat.minimum("MSP").Ve
+    assert zat.model.protokol.kapitoly[0].nazev.startswith("Zatížitelnost")
+
+
+def test_zatizitelnost_jen_Ve(d):
+    from blc_posudek.zatizitelnost import zatizitelnost
+    d2 = copy.deepcopy(d)
+    d2["blc"]["vozidlo"] = "MLC_k"
+    with pytest.raises(ValueError):
+        zatizitelnost(d2)
+
+
+def test_davka_zatizitelnost(tmp_path):
+    from blc_posudek.__main__ import main
+    assert main([PRIKLAD, "--zatizitelnost", "-o", str(tmp_path)]) == 0
+    html = (tmp_path / "protokol.html").read_text(encoding="utf-8")
+    assert "Zatížitelnost – tíha vozidla Ve pro dosažení mezních stavů" in html

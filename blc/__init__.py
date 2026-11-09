@@ -17,7 +17,7 @@ Spuštění:  python -m blc  (GUI),  python -m blc --demo  (ukázkový výpočet
            python -m blc --sily vstup.toml  (vnitřní síly pro posudek)
 """
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 from .geometry   import Konstrukce, Rez, E_betonu, ECM_GPA
 from .prefabrikaty import nacti_prefabrikaty, prefabrikat, Prefabrikat

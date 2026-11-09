@@ -33,6 +33,9 @@ Prostředí je Posudek PB s novou první kartou:
   napětí je pod grafem každé fáze napětí po výšce průřezu ve středu rozpětí a u podpory;
   dále tabulku součinitelů γ/ψ (stálé, chodci, doprava), graf M a V na nosnících od stavů
   g0, g − g0, chodci, doprava a tabulky kombinací (max/min M, max/min V po nosnících).
+- **Výpočet zatížitelnosti** (zaškrtávací políčko na kartě 0, dávka `--zatizitelnost`): místo
+  posouzení se pro každý mezní stav hledá tíha vozidla Ve, při které je využití 100 %; výsledkem
+  je Ve po mezních stavech a zatížitelnost = nejmenší Ve.
 - Soubor = vstup Posudku PB + sekce `[blc]`, vzor [`priklady/most_KA67_12.toml`](priklady/most_KA67_12.toml).
 - Balíček `pb_posudek` je převzat z repa `sabii369/PB_posudek` (git subtree) – viz `CLAUDE.md`.
 
