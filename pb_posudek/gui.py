@@ -785,7 +785,8 @@ class Aplikace(tk.Tk):
             ("Ap_lano", "A_p lana / drátu [mm²]", "optfloat", None), ("d_lana", "Průměr [mm]", "optfloat", None),
             ("trida_relaxace", "Třída relaxace", "choice", ["1", "2", "3"]),
             ("rho1000", "ρ1000 [%]", "optfloat", None), ("gamma_s", "γ_s", "optfloat", None),
-            ("taznost", "Tažnost ε_uk [‰]", "optfloat", None),
+            ("taznost", "Tažnost neoslabená ε_uk [‰]", "optfloat", None),
+            ("taznost_oslabena", "Tažnost oslabená korozí ε_uk,red [‰] (prázdné = bez oslabení)", "optfloat", None),
             ("zpevneni", "Zpevnění (stoupající větev diagramu)", "bool", True)],
             sloupcu=2, pri_zmene=self._info_materialy)
         self.f_predp.pack(fill="x")
@@ -939,7 +940,11 @@ class Aplikace(tk.Tk):
                 f"Předpínací výztuž {pv.typ}:  f_pk = {pv.fpk:g}   f_p0,1k = {pv.fp01k:g}   E_p = {pv.Ep:g} MPa   "
                 f"A_p = {pv.Ap_lano:g} mm²   třída relaxace {pv.trida_relaxace}, ρ1000 = {pv.rho1000:g} %\n"
                 f"{'Dráty' if pv.druh == 'drat' else 'Lana'}, diagram MSÚ {'se zpevněním' if pv.zpevneni else 'bez zpevnění'}:"
-                f"   f_pd = {pv.fpd:.0f} MPa   ε_uk = {pv.taznost:g} ‰   ε_ud = 0,9·ε_uk = {pv.eps_ud * 1e3:.1f} ‰\n"
+                f"   f_pd = {pv.fpd:.0f} MPa   ε_uk = {pv.taznost:g} ‰   ε_ud = 0,9·ε_uk = {pv.eps_ud * 1e3:.1f} ‰"
+                f"   σ_p(ε_ud) = {float(pv.sigma_msu(pv.eps_ud)):.0f} MPa\n"
+                + (f"Oslabená korozí (sklon zpevnění se nemění):   ε_uk,red = {pv.taznost_oslabena:g} ‰   "
+                   f"ε_ud,red = {pv.eps_ud_red * 1e3:.1f} ‰   σ_p(ε_ud,red) = {float(pv.sigma_msu(pv.eps_ud_red)):.0f} MPa\n"
+                   if pv.oslabena_taznost else "") +
                 f"σ_p,max = min(0,8·f_pk; 0,9·f_p0,1k) = {min(0.8 * pv.fpk, 0.9 * pv.fp01k):.0f} MPa,   "
                 f"σ_pm0 ≤ min(0,75·f_pk; 0,85·f_p0,1k) = {min(0.75 * pv.fpk, 0.85 * pv.fp01k):.0f} MPa"))
         except Exception as e:  # noqa: BLE001
@@ -1095,7 +1100,8 @@ class Aplikace(tk.Tk):
         ttk.Label(lf, foreground="#52514e", text=(
             "Předpínací výztuž: zmenší se předpínací síla P = σ_p·A_p (napětí ve zbylé výztuži se nemění) i A_p "
             "v MSÚ; betonářská a smyková výztuž: plocha v MSÚ. Platí od aktuálního stáří (karta 5), bez něj jen "
-            "pro konec životnosti.")).pack(anchor="w")
+            "pro konec životnosti. Tažnost předpínací výztuže oslabená korozí se zadává na kartě 1 a platí "
+            "ve stejných fázích.")).pack(anchor="w")
 
     def _zalozka_zatizeni(self):
         z = ttk.Frame(self.nb, padding=8)

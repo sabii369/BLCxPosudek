@@ -68,7 +68,15 @@ def diagramy_materialu(m, adr):
     ax[0].plot(e * 1e3, -b.sigma_msu(-e), color=C[0])
     ax[0].set(title=f"Beton {b.trida} – parabola-obdélník", xlabel="ε_c [‰]", ylabel="σ_c [MPa]")
     ep = np.linspace(0, p.eps_ud, 200)
-    ax[1].plot(ep * 1e3, p.sigma_msu(ep), color=C[1])
+    ax[1].plot(ep * 1e3, p.sigma_msu(ep), color=C[1],
+               label=f"neoslabená, ε_ud = {p.eps_ud * 1e3:.1f} ‰" if p.oslabena_taznost else None)
+    if p.oslabena_taznost:  # tažnost oslabená korozí: stejný diagram zkrácený na ε_ud,red
+        er = np.linspace(0, p.eps_ud_red, 200)
+        ax[1].plot(er * 1e3, p.sigma_msu(er), color=C[6], lw=2.2, ls="--",
+                   label=f"oslabená korozí, ε_ud,red = {p.eps_ud_red * 1e3:.1f} ‰")
+        for e_, c_ in ((p.eps_ud, C[1]), (p.eps_ud_red, C[6])):
+            ax[1].plot([e_ * 1e3], [float(p.sigma_msu(e_))], "o", color=c_, ms=4)
+        ax[1].legend(fontsize=7, loc="lower right")
     ax[1].set(title=f"Předpínací výztuž {p.typ}", xlabel="ε_p [‰]", ylabel="σ_p [MPa]")
     es = np.linspace(0, s.eps_ud, 200)
     ax[2].plot(es * 1e3, s.sigma_msu(es), color=C[2])

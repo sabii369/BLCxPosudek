@@ -203,9 +203,10 @@ class PredpinaciVyztuz:
     trida_relaxace: int | None = None
     rho1000: float | None = None
     gamma_s: float = 1.15
-    taznost: float = 35.0          # ε_uk [‰] – tažnost (poměrné přetvoření při maximální síle)
+    taznost: float = 35.0          # ε_uk [‰] – tažnost neoslabené výztuže (určuje i sklon zpevnění)
     zpevneni: bool = True          # True = stoupající větev do k·f_pd při ε_uk, False = vodorovná větev f_pd
     eps_ud_ku_eps_uk: float = 0.9  # ε_ud = 0,9·ε_uk (3.3.6(7) pozn.)
+    taznost_oslabena: float | None = None  # ε_uk,red [‰] – tažnost oslabená korozí (None = bez oslabení)
 
     def __post_init__(self):
         preset = PREDPINACI_VYZTUZ.get(self.typ, {})
@@ -224,6 +225,9 @@ class PredpinaciVyztuz:
             self.Ep = DRUHY_PREDPINACI_VYZTUZE[druh]
         if not self.taznost or self.taznost <= 0:
             raise ValueError("Předpínací výztuž: tažnost ε_uk musí být kladná [‰]")
+        if self.taznost_oslabena is not None and not 0 < self.taznost_oslabena <= self.taznost:
+            raise ValueError(f"Předpínací výztuž: tažnost oslabená korozí ε_uk,red = {self.taznost_oslabena:g} ‰ "
+                             f"musí být kladná a nejvýše rovna tažnosti ε_uk = {self.taznost:g} ‰")
         missing = [k for k in ("fpk", "fp01k", "Ap_lano") if getattr(self, k) is None]
         if missing:
             raise ValueError(f"Předpínací výztuž '{self.typ}': chybí {missing}")
@@ -241,12 +245,30 @@ class PredpinaciVyztuz:
         return self.eps_ud_ku_eps_uk * self.eps_uk
 
     @property
+    def oslabena_taznost(self) -> bool:
+        """Je zadána tažnost oslabená korozí menší než neoslabená?"""
+        return self.taznost_oslabena is not None and self.taznost_oslabena < self.taznost
+
+    @property
+    def eps_uk_red(self) -> float:
+        """ε_uk,red – tažnost oslabená korozí [-] (bez oslabení = ε_uk)."""
+        return (self.taznost_oslabena if self.oslabena_taznost else self.taznost) * 1e-3
+
+    @property
+    def eps_ud_red(self) -> float:
+        """Mezní přetvoření výztuže s tažností oslabenou korozí ε_ud,red = 0,9·ε_uk,red."""
+        return self.eps_ud_ku_eps_uk * self.eps_uk_red
+
+    @property
     def k(self) -> float:
         return self.fpk / self.fp01k
 
     def sigma_msu(self, eps: np.ndarray) -> np.ndarray:
         """Návrhový bilineární diagram (obr. 3.10): se zpevněním stoupající větev do k·f_pd při ε_uk,
-        bez zpevnění vodorovná větev na úrovni f_pd. Mezní přetvoření ε_ud se kontroluje v obou případech."""
+        bez zpevnění vodorovná větev na úrovni f_pd. Mezní přetvoření ε_ud se kontroluje v obou případech.
+
+        Sklon stoupající větve je dán vždy neoslabenou tažností ε_uk. Tažnost oslabená korozí diagram jen
+        zkracuje (mezní přetvoření ε_ud,red se kontroluje v MSÚ), výztuž pak nedosáhne k·f_pd."""
         eps = np.asarray(eps, dtype=float)
         e_y = self.fpd / self.Ep
         a = np.abs(eps)
