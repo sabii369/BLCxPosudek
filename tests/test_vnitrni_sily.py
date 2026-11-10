@@ -12,6 +12,7 @@ import pytest
 from pytest import approx
 
 from blc.beam_1d import Nosnik1D, vypocet_Ve
+from blc.dynamicky_soucinitel import dynamicky_soucinitel
 from blc.export_pb import (toml_zatizeni_pb, uloz_vysledky, vloz_do_vstupu_pb,
                            zatizeni_pb_dict)
 from blc.geometry import Konstrukce, E_betonu
@@ -142,7 +143,7 @@ def test_polohy_q_odpovidaji_obalce(vys):
     assert p["V"].hodnota == approx(t.V_max[k], rel=1e-9)
     assert p["M"].x == approx(L0 / 2, abs=0.13) and p["V"].x == approx(0.55, abs=0.13)
     F = sum(pl[0] for pl in p["M"].platky)
-    assert F == approx(60.0 * 10.0)                                # Ve 60 t, vše na mostě
+    assert F == approx(60.0 * 10.0 * 1.05)                         # Ve 60 t × δ, vše na mostě
 
 
 def test_kresli_most():
@@ -198,7 +199,27 @@ def test_stavy_pudorys(vys):
 def test_q_dynamicky_soucinitel():
     a = vnitrni_sily(**NOSNIKY, Ve=60.0, krok=0.5, tisk=False)
     b = vnitrni_sily(**NOSNIKY, Ve=60.0, krok=0.5, dyn=1.2, tisk=False)
-    assert b.tabulka(2, "q").M_max.max() == approx(1.2 * a.tabulka(2, "q").M_max.max())
+    c = vnitrni_sily(**NOSNIKY, Ve=60.0, krok=0.5, dyn=1.0, tisk=False)
+    assert a.dyn == 1.05 and "čl. 8.4" in a.dyn_zdroj and "δ = 1.05" in a.stavy["q"].popis
+    assert b.dyn == 1.2 and b.dyn_zdroj == "zadáno"
+    M = {k: v.tabulka(2, "q").M_max.max() for k, v in (("a", a), ("b", b), ("c", c))}
+    assert M["a"] == approx(1.05 * M["c"]) and M["b"] == approx(1.2 * M["c"])
+    with pytest.raises(ValueError):
+        vnitrni_sily(**NOSNIKY, Ve=60.0, dyn=0.0, tisk=False)
+
+
+def test_dynamicky_soucinitel_csn_736222():
+    """ČSN 73 6222, kap. 8: výjimečná zatížitelnost δ = 1,05 (čl. 8.4); MLC norma neuvádí."""
+    assert dynamicky_soucinitel("Ve") == (1.05, "ČSN 73 6222, čl. 8.4, výjimečná zatížitelnost")
+    assert dynamicky_soucinitel("Ve", 1.3) == (1.3, "zadáno")
+    assert dynamicky_soucinitel("MLC")[0] == 1.0
+    for spatne in (("Ve", -1.0), ("Vn", None)):
+        with pytest.raises(ValueError):
+            dynamicky_soucinitel(*spatne)
+    v = vnitrni_sily(**NOSNIKY, MLC="MLC40", krok=0.5, tisk=False)
+    assert v.dyn == 1.0 and any("MLC" in s and "neuvádí" in s for s in v.varovani)
+    w = vnitrni_sily(**NOSNIKY, MLC="MLC40", krok=0.5, dyn=1.1, tisk=False)
+    assert w.dyn == 1.1 and not any("neuvádí" in s for s in w.varovani)
 
 
 def test_q_poloha_vozidla_osa_vozovky(vys):

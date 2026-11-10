@@ -38,7 +38,7 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
 ## Struktura
 - `blc/` balíček: `comparison.py` (`porovnani_zatizeni` – MLC vs Ve), `beam_1d.py` (`Nosnik1D`, konstanty vozidla `VE_*`),
   `plate_fem.py` (`DeskaMKP`, `KAPPA`, `obalky_2D`), `slab_fem.py` (`DeskaSikmaMKP`), `geometry.py` (`Konstrukce`),
-  `vehicles.py`, `prefabrikaty.py` + `data/Prefabrikáty.xlsx`, `plotting.py`, `gui.py` (`App`, `OknoSil`), `__main__.py`.
+  `vehicles.py`, `dynamicky_soucinitel.py` (δ podle ČSN 73 6222, kap. 8), `prefabrikaty.py` + `data/Prefabrikáty.xlsx`, `plotting.py`, `gui.py` (`App`, `OknoSil`), `__main__.py`.
 - Vnitřní síly pro posudek:
   - `stale_zatizeni.py` – `Vybaveni` (chodník L/P, g chodníku a vozovky [kN/m²], zábradlí, svodidla, `LiniovaZatizeni`) → plošky MKP,
   - `vnitrni_sily.py` – `vnitrni_sily(...)` → `VysledekSil` (`stavy` g0 / g-g0 / q jako `StavSil` na síti 2D,
@@ -81,7 +81,8 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
 - V šikmých konstrukcí vyhodnocovat z 2D obálky (prvek 0,0625 m), ne z kontrolních řezů.
 - **g0 u nosníků: každý nosník samostatně bez spolupůsobení** (1D, stejné uložení, k_v·b); u desky 2D MKP (h·γ).
 - **g − g0: 2D MKP**; výplň spáry nesou samostatně sousední nosníky (½ + ½).
-- **q: obálka pojezdu Ve** (2D, krok 0,25 m) v ose vozovky (mezi chodníky), × δ.
+- **q: obálka pojezdu Ve** (2D, krok 0,25 m) v ose vozovky (mezi chodníky), × δ; δ nezadané = ČSN 73 6222,
+  kap. 8 (`blc/dynamicky_soucinitel.py`: Ve 1,05 čl. 8.4; MLC norma neuvádí → 1,0 + varování; chodci 1,00).
 - Export do posudku: bez g0 (posudek si g0 počítá z průřezu, `obsahuje_vlastni_tihu = false`),
   x posudku = x od podpory + (L − L0)/2; výchozí režim „kombinace“ (6.10a, 6.10b, char, častá, kvazistálá).
 - Výchozí ψ0 = ψ1 = 0,75, ψ2 = 0, γ_Q = 1,35 (TS) – pro Ve neověřeno, je to vstup.

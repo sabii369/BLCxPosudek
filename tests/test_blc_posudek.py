@@ -41,6 +41,10 @@ def test_parametry_z_posudku(d):
     assert kw["soucinitele"].gamma_G == 1.35          # z [posouzeni] (výchozí)
     assert kw["k_pod"] == 2.0e6
     assert kw["q_chodnik"] == 3.0 and kw["soucinitele"].psi1_ch == 0.75
+    assert kw["dyn"] is None                          # δ podle ČSN 73 6222, kap. 8
+    d2 = copy.deepcopy(d)
+    d2["blc"]["dyn"] = 1.2
+    assert parametry_blc(d2)["dyn"] == 1.2
 
 
 def test_vyber_vozidla(d):
@@ -65,6 +69,7 @@ def test_jedno_vozidlo_MLC():
 def test_spocti_posudek(d, vysledek):
     vys, o, model = vysledek
     assert vys.popisky[o] == "N6"
+    assert vys.dyn == 1.05 and "čl. 8.4" in vys.dyn_zdroj      # δ podle ČSN 73 6222 (Ve)
     assert model.protokol.posudky
     assert [k.nazev for k in model.protokol.kapitoly].index("Zatížení z modelu mostu (BLC)") < \
         [k.nazev for k in model.protokol.kapitoly].index("Zatížení a časová osa")
@@ -153,6 +158,7 @@ def test_davka(tmp_path):
     assert (tmp_path / "most" / "vnitrni_sily.json").exists()
     html = (tmp_path / "protokol.html").read_text(encoding="utf-8")
     assert "Zatížení z modelu mostu (BLC)" in html
+    assert "δ = 1.05 (ČSN 73 6222, čl. 8.4, výjimečná zatížitelnost)" in html
     for naz in ("charakteristická", "častá", "kvazistálá", "MSÚ 6.10a", "MSÚ 6.10b", "MSÚ 6.10"):
         assert f"Kombinace {naz} – vnitřní síly po nosnících" in html
     assert (tmp_path / "obrazky" / "blc_sily.png").exists()
@@ -200,6 +206,9 @@ def test_gui(tmp_path):
         assert app.var_graf.get() == "Napětí v řezech – Konec životnosti"
         d = app.ziskej_data()
         assert d["zatizeni"]["zpusob"] == "kombinace" and len(d["zatizeni"]["kombinace"]) == 5
+        assert "dyn" not in d["blc"] and "δ = 1.05 (ČSN 73 6222" in app.lbl_zat.cget("text")
+        app.f_voz.prom["dyn"].set("1.2")
+        assert app.ziskej_data()["blc"]["dyn"] == 1.2
         app.f_voz.prom["vozidlo"].set("MLC kolové")
         assert app._aktualni_blc(app.ziskej_data()) is None      # vstupy se změnily
         app.soubor = tmp_path / "most.toml"

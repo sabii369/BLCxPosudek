@@ -234,7 +234,7 @@ pro parametrické studie.
 | **g0** | vlastní tíha nosné konstrukce | nosníky: každý nosník **samostatně, bez spolupůsobení** (1D spojitý nosník se stejným uložením), g0 = A·γ_b; deska: 2D MKP, g0 = h·γ_b |
 | **g − g0** | skladba vozovky, skladba chodníků, svodidla, zábradlí, další liniová zatížení | 2D MKP (příčný roznos); tíha výplně spáry g_s se nese samostatně – každý ze sousedních nosníků polovinu |
 | **q_ch** | zatížení chodců q [kN/m²] na chodnících | 2D MKP – obálka: chodníky rozdělené na úseky ≈ 0,5 m (levý i pravý zvlášť), max = Σ kladných, min = Σ záporných účinků (nepříznivé části plochy vlivu) |
-| **q** | pojezd vozidla Ve (výjimečná zatížitelnost) v ose vozovky, × dynamický součinitel δ | 2D MKP – obálka max/min přes polohy vozidla (krok 0,25 m + polohy hrany zatížení v řezech d) |
+| **q** | pojezd vozidla Ve (výjimečná zatížitelnost) v ose vozovky, × dynamický součinitel δ (zadaný, nebo podle ČSN 73 6222, kap. 8: δ = 1,05) | 2D MKP – obálka max/min přes polohy vozidla (krok 0,25 m + polohy hrany zatížení v řezech d) |
 
 Model konstrukce (síť, spáry, uložení, šikmost, k_v, k_φ) je totožný s porovnáním
 MLC / Ve.
@@ -250,10 +250,20 @@ MLC / Ve.
 | svodidlo | kN/m | na každé straně, pás 0,2 m na chodníku u okraje vozovky |
 | plocha nosníku A, γ_b | m², kN/m³ | g0 = A·γ_b (deska: h·γ_b); lze zadat i přímo g0 |
 | tíha výplně spáry | kN/m | jen nosníky se spárou |
-| dynamický součinitel δ | – | násobí zatížení Ve |
+| dynamický součinitel δ | – | násobí zatížení vozidla; prázdné = podle ČSN 73 6222, kap. 8 (viz níže) |
 | osa vozidla y_Ve | m | prázdné = osa vozovky |
 
 Další liniová zatížení (římsa apod.) lze zadat ve vstupním souboru (`[[stale.liniova]]`).
+
+**Dynamický součinitel podle ČSN 73 6222, kap. 8** (pole prázdné, ve vstupním souboru `dyn`
+vynechané): δ násobí statické účinky zatížení dopravou (čl. 8.1.1) a závisí na druhu
+zatížitelnosti. Pro výjimečnou zatížitelnost Ve je **δ = 1,05** pro zatížení jedním kolem
+či nápravou i celou soupravou (čl. 8.4 a, b) – nezávisí na rozpětí ani na vlastní frekvenci.
+Zatížení chodníků se nenásobí (δ = 1,00, čl. 8.5 b). Součinitele δ1–δ3 podle vlastní
+frekvence (obr. 8.1) patří k normální a výhradní zatížitelnosti (Vn, Vr), které program
+nepočítá. Pro vozidla MLC norma δ neuvádí – uvažuje se 1,0 s upozorněním; známou hodnotu
+zadejte. Zadané číslo má vždy přednost. Použitá hodnota a její zdroj jsou v popisu stavu q
+(protokol, `vnitrni_sily.json`: `dyn`, `dyn_zdroj`).
 
 ### 7.3 Ovládání
 
@@ -312,7 +322,8 @@ mostu a grafy).
 1. **Karta 0 – Most a zatížení (BLC):** rozpětí L0, délka L, beton (stejná pole jako na
    kartách 1 a 3), počet a šířka nosníků, účinná výška, spára, uložení a šikmost, vybavení
    (chodníky vlevo/vpravo, tíha skladby chodníku a vozovky, zábradlí, svodidla, další liniová),
-   **vozidlo** (Ve [t] / MLC kolové / MLC pásové, kolona jen u MLC), dynamický součinitel,
+   **vozidlo** (Ve [t] / MLC kolové / MLC pásové, kolona jen u MLC), dynamický součinitel
+   (prázdné = podle ČSN 73 6222, kap. 8: Ve δ = 1,05),
    posuzovaný nosník (auto = nejzatíženější podle M, M− nebo V), způsob předání, γ_Q a ψ.
 2. Karty 1–4: materiály, průřez (z něj A a Iy nosníku pro model mostu – lze vypnout
    a zadat ručně), kabely, výztuž.

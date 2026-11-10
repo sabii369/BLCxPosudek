@@ -69,6 +69,7 @@ model.protokol.posudky  → [VysledekPosudku(mezni_stav, nazev, faze, kombinace,
 | `blc_posudek/__main__.py` | dávka / CLI (`python -m blc_posudek soubor.toml -o slozka [--zatizitelnost]`) |
 | `blc_posudek/gui.py`, `grafy_most.py` | GUI (`AplikaceMost`, karta 0 „Most a zatížení“), grafy mostu do protokolu |
 | `blc/vnitrni_sily.py` | `vnitrni_sily(...)` → `VysledekSil`; `Soucinitele`; `StavSil`; `polohy_q` |
+| `blc/dynamicky_soucinitel.py` | `dynamicky_soucinitel(vozidlo, dyn)` → (δ, zdroj) podle ČSN 73 6222, kap. 8 |
 | `blc/export_pb.py` | `toml_zatizeni_pb`, `zatizeni_pb_dict`, `uloz_vysledky` (JSON/CSV/TOML) |
 | `blc/stale_zatizeni.py` | `Vybaveni` (chodníky, skladby, zábradlí, svodidla), `LiniovaZatizeni` |
 | `blc/geometry.py` | `Konstrukce` (geometrie, uložení, šikmost, validace), `E_betonu` (Ecm z třídy) |
@@ -137,7 +138,7 @@ Výchozí hodnoty jsou v `blc_posudek/vypocet.py: VYCHOZI_BLC` (chybějící kl�
 | `vozidlo` | "Ve" | – | "Ve" \| "MLC_k" \| "MLC_p" |
 | `Ve` | 80 | t | tíha vozidla Ve |
 | `MLC`, `dist` | "MLC80", – | –, m | třída MLC; `dist` = rozestup v koloně (prázdné = jedno vozidlo) |
-| `dyn` | 1.0 | – | dynamický součinitel δ (násobí q) |
+| `dyn` | vynechat | – | dynamický součinitel δ (násobí q); vynechaný = ČSN 73 6222, kap. 8: Ve **1,05** (čl. 8.4), MLC 1,0 + varování (`blc/dynamicky_soucinitel.py`); použitý `vys.dyn`, zdroj `vys.dyn_zdroj` |
 | `y_vozidla` | osa vozovky | m | příčná poloha osy vozidla od levého okraje |
 | `roznos`, `t_voz` | true, 0.0 | –, m | roznos plošky kola do střednice (h_ekv + 2·t_voz) |
 | `krok` | 0.25 | m | krok poloh vozidla pro obálku |
@@ -179,7 +180,7 @@ betonu, A a Iy z průřezu posudku, γ_G/γ_G,inf/ξ z `[posouzeni]`, zbytek z `
 | `g0` | vlastní tíha nosníku g0 = A·γ_b [kN/m] | **každý nosník samostatně, bez spolupůsobení** (1D, stejné uložení, k_v·b); deska: 2D MKP h·γ_b |
 | `g-g0` | skladby vozovky a chodníků, zábradlí, svodidla, další liniová; výplň spáry | 2D MKP (příčný roznos); výplň spáry nesou sousední nosníky ½ + ½ samostatně |
 | `qch` | chodci q_chodnik [kN/m²] | 2D MKP – obálka: chodníky rozdělené na úseky 0,5 m, max = Σ kladných, min = Σ záporných účinků |
-| `q` | jedno vozidlo (Ve nebo MLC) × δ | 2D MKP – **obálka pojezdu** (max/min přes polohy) |
+| `q` | jedno vozidlo (Ve nebo MLC) × δ (Ve: 1,05 podle ČSN 73 6222, čl. 8.4) | 2D MKP – **obálka pojezdu** (max/min přes polohy) |
 
 **Vozidlo Ve** (`blc/beam_1d.py`): 9 náprav po 1,5 m, celková tíha 10·Ve kN (náprava
 10·Ve/9 kN), ploška kola 0,15 m × 1,2 m, osová vzdálenost stop 1,5 m (šířka vozidla 2,7 m).
@@ -477,6 +478,9 @@ se faktorizuje jednou (`splu`), polohy vozidla se řeší dávkově. Pro mnoho b
 11. **Neměnit `ZAKLAD` na místě** – vždy `copy.deepcopy`; `vys_pro_Ve` vrací mělkou
     kopii se sdíleným modelem MKP (jen pro čtení).
 12. Exportované kombinace se zaokrouhlují na 0,01 kNm / kN a x na 1 mm (zanedbatelné).
+13. **Dynamický součinitel**: vstup s explicitním `dyn = 1.0` (starší vstupy) počítá bez
+    dynamiky; δ podle ČSN 73 6222 (Ve 1,05) platí jen při vynechaném `dyn`. Výsledky se
+    liší o 5 % účinků q – ve studii uvádět, s jakým δ se počítalo (`vys.dyn`).
 
 ---
 

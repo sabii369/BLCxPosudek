@@ -174,7 +174,7 @@ q_chodnik = 3.0              # zatížení chodců [kN/m²]
 vozidlo = "Ve"               # "Ve" | "MLC_k" | "MLC_p"
 Ve = 80.0                    # [t]
 MLC = "MLC80"
-dyn = 1.0
+# dyn = 1.05                 # δ; vynechat = podle ČSN 73 6222, kap. 8 (Ve: čl. 8.4, δ = 1,05)
 roznos = true
 t_voz = 0.0
 krok = 0.25

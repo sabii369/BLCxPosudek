@@ -19,7 +19,8 @@ Sekce [blc]:
                [[blc.liniova]] nazev, g, y, sirka
   chodci       q_chodnik [kN/m²] (zatížení chodníků, obálka), gamma_Qch, psi0_ch, psi1_ch, psi2_ch
   vozidlo      vozidlo = "Ve" | "MLC_k" | "MLC_p", Ve [t], MLC (třída), dist (kolona; prázdné =
-               jedno vozidlo), dyn, y_vozidla (prázdné = osa vozovky), roznos, t_voz, krok, ex
+               jedno vozidlo), dyn (prázdné = podle ČSN 73 6222, kap. 8: Ve δ = 1,05),
+               y_vozidla (prázdné = osa vozovky), roznos, t_voz, krok, ex
   zatížitelnost zatizitelnost = true → místo posouzení hledá Ve pro η = 100 % každého posudku
   předání      vystup ("auto" | "N3"), kriterium ("M" | "M-" | "V"), rezim ("kombinace" |
                "zatezovaci_stavy"), gamma_Q, psi0, psi1, psi2, t_vneseni, t_stale
@@ -43,7 +44,7 @@ VYCHOZI_BLC = {
     "uloz": "tvrde", "spoj": "kloub",
     "chodnik_L": 1.5, "chodnik_P": 1.5, "g_chodnik": 5.0, "g_vozovka": 2.6,
     "g_zabradli": 0.5, "g_svodidla": 0.6, "g_spary": 0.0,
-    "vozidlo": "Ve", "Ve": 80.0, "MLC": "MLC80", "dyn": 1.0, "roznos": True, "t_voz": 0.0,
+    "vozidlo": "Ve", "Ve": 80.0, "MLC": "MLC80", "dyn": None, "roznos": True, "t_voz": 0.0,
     "krok": 0.25, "ex": 0.125,
     "vystup": "auto", "kriterium": "M", "rezim": "kombinace",
     "gamma_Q": 1.35, "psi0": 0.75, "psi1": 0.75, "psi2": 0.0,
@@ -132,7 +133,7 @@ def parametry_blc(d: dict) -> dict:
         kw.update(MLC=b["MLC"], typ_MLC="k" if voz == "MLC_k" else "p", dist=_f(b.get("dist")))
     else:
         raise ValueError(f"Neznámé vozidlo '{voz}' (Ve, MLC_k, MLC_p).")
-    kw.update(dyn=float(b["dyn"]), y_Ve=_f(b.get("y_vozidla")), roznos=bool(b["roznos"]),
+    kw.update(dyn=_f(b.get("dyn")), y_Ve=_f(b.get("y_vozidla")), roznos=bool(b["roznos"]),
               t_voz=float(b["t_voz"]), krok=float(b["krok"]), ex=float(b["ex"]),
               q_chodnik=float(b.get("q_chodnik") or 0.0))
     ns = nastaveni_posudku(d)

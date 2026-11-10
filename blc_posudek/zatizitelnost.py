@@ -249,7 +249,8 @@ def kapitola_zatizitelnost(model, res: VysledekZatizitelnosti) -> None:
     vys = res.vys
     K.text(f"Pro každý posudek (mezní stav, fáze, kombinace) byla hledána tíha vozidla Ve, při které "
            f"je využití η = 100 % (iterací celého posudku; účinky vozidla z modelu mostu přeškálované "
-           f"z referenční hodnoty Ve = {fmt(res.Ve_ref)} t, dynamický součinitel δ = {fmt(vys.dyn)}). "
+           f"z referenční hodnoty Ve = {fmt(res.Ve_ref)} t, dynamický součinitel "
+           f"δ = {fmt(vys.dyn)} – {vys.dyn_zdroj}). "
            f"Ostatní zatížení – g0, g − g0, chodci – zůstávají. Posuzovaný "
            f"{'pás' if vys.deska else 'nosník'} {vys.popisky[res.o]}; počet výpočtů posudku "
            f"{res.n_vypoctu}, zkoušeno Ve ≤ {fmt(res.Ve_max)} t.")

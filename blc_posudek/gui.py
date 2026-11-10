@@ -167,7 +167,7 @@ class AplikaceMost(Aplikace):
             ("Ve", "Ve – tíha vozidla [t]", "optfloat", None),
             ("MLC", "Třída MLC", "choice", seznam_mlc()),
             ("dist", "Kolona – vzdálenost vozidel [m]", "optfloat", None),
-            ("dyn", "Dynamický součinitel δ", "float", None),
+            ("dyn", "Dynamický součinitel δ (prázdné = ČSN 73 6222)", "optfloat", None),
             ("y_vozidla", "Osa vozidla y [m]", "optfloat", None),
             ("roznos", "Roznos kola do střednice desky", "bool", True),
             ("t_voz", "Tloušťka vozovky (roznos) [m]", "float", None),
@@ -176,7 +176,9 @@ class AplikaceMost(Aplikace):
         self.f_voz.pack(fill="x")
         ttk.Label(lf, foreground=SEDA, text=(
             "Jedno vozidlo projíždí po mostě v obou směrech; kolona jen pro MLC (prázdné = jedno "
-            "vozidlo). Osa vozidla prázdná = osa vozovky mezi chodníky.")).pack(anchor="w")
+            "vozidlo). Osa vozidla prázdná = osa vozovky mezi chodníky. Dynamický součinitel "
+            "prázdný = podle ČSN 73 6222, kap. 8: Ve δ = 1,05 (čl. 8.4); pro MLC norma δ neuvádí "
+            "(uvažuje se 1,0).")).pack(anchor="w")
 
         lf = ttk.LabelFrame(f, text="Předání do posudku", padding=6)
         lf.pack(fill="x", pady=4)
@@ -538,7 +540,8 @@ class AplikaceMost(Aplikace):
         zat = d["zatizeni"]
         self.lbl_zat.configure(
             text=(f"Posuzovaný {'pás' if vys.deska else 'nosník'} {pop} (y = {float(vys.vyst.y[o]):.2f} m), "
-                  f"vozidlo {vys.vozidlo}, δ = {vys.dyn:g}; předání: {zat.get('zpusob')}. "
+                  f"vozidlo {vys.vozidlo}, δ = {vys.dyn:g} ({vys.dyn_zdroj}); "
+                  f"předání: {zat.get('zpusob')}. "
                   f"Vlastní tíhu nosníku g0 počítá posudek z průřezu (model mostu: g0 = {vys.g0:.2f} "
                   f"{'kN/m²' if vys.deska else 'kN/m'})."), foreground="#0a7d0a")
         if jen_stav and self.t_blc.get_children():

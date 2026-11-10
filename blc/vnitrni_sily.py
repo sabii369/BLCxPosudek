@@ -15,7 +15,8 @@ stavů pro posudek nosníku (modul Posudek PB):
   q      pohyblivé zatížení – pojezd JEDNOHO vybraného vozidla po 2D desce
            (obálka max/min, oba směry jízdy): Ve (výjimečná zatížitelnost) nebo
            vozidlo MLC (kolové / pásové; volitelně kolona), osa vozidla v ose
-           vozovky nebo zadaná, volitelně dynamický součinitel.
+           vozovky nebo zadaná; dynamický součinitel δ zadaný, nebo podle
+           ČSN 73 6222, kap. 8 (Ve: δ = 1,05, čl. 8.4) – dynamicky_soucinitel.py.
 
 Model konstrukce (MKP, okrajové podmínky, šikmost, spáry) je totožný
 s porovnáním MLC / Ve (comparison.py).  Výsledky jsou na síti 2D modelu;
@@ -35,6 +36,7 @@ import numpy as np
 
 from .geometry import Konstrukce, E_betonu
 from .beam_1d import Nosnik1D, VE_ROZVOR, VE_B_K
+from .dynamicky_soucinitel import dynamicky_soucinitel, DELTA_CHODNIKY, NORMA
 from .vehicles import kolove_vozidlo, pasove_vozidlo
 from .plate_fem import (DeskaMKP, Vystupy, obalky_2D, sit_modelu, SitMKP, platky_z_naprav,
                         posun)
@@ -167,6 +169,7 @@ class VysledekSil:
     g_spary: float = 0.0                # tíha výplně spáry [kN/m]
     Ve: float = 0.0                     # [t] (jen vozidlo Ve)
     dyn: float = 1.0
+    dyn_zdroj: str = ""                 # zdůvodnění δ („ČSN 73 6222, čl. 8.4 …“, „zadáno“)
     y_Ve: float = 0.0                   # osa vozidla [m]
     vozidlo: str = ""                   # popis vozidla („Ve 80 t“, „MLC80 kolové“)
     rozvor: float = VE_ROZVOR           # osová vzdálenost stop vozidla [m]
@@ -394,7 +397,7 @@ def _chodniky(model, vyst: Vystupy, K: Konstrukce, vyb: Vybaveni, q: float,
             acc[k + "+"] += np.clip(v, 0, None).sum(axis=2)
             acc[k + "-"] += np.clip(v, None, 0).sum(axis=2)
     popis = (f"chodníky {vyb.chodnik_L:g} + {vyb.chodnik_P:g} m, q = {q:g} kN/m² v nepříznivých "
-             f"částech plochy vlivu (úseky {dx:.2f} m)")
+             f"částech plochy vlivu (úseky {dx:.2f} m), δ = {DELTA_CHODNIKY:g} ({NORMA}, čl. 8.5 b)")
     return StavSil("qch", popis, acc["M+"], acc["M-"], acc["Vm+"], acc["Vm-"], acc["Vp+"],
                    acc["Vp-"], acc["Vs+"], acc["Vs-"], pohyblivy=True, n_stavu=len(sl))
 
@@ -437,7 +440,7 @@ def vnitrni_sily(
     MLC: Optional[str] = None,
     typ_MLC: str = "k",
     dist: Optional[float] = None,
-    dyn: float = 1.0,
+    dyn: Optional[float] = None,
     y_Ve: Optional[float] = None,
     roznos: bool = True,
     t_voz: float = 0.0,
@@ -467,7 +470,8 @@ def vnitrni_sily(
         MLC, typ_MLC: vozidlo MLC (např. "MLC80"), "k" kolové | "p" pásové.
                      Zadává se Ve NEBO MLC; bez vozidla se stav q nepočítá.
         dist:        MLC: vzdálenost vozidel v koloně [m]; None = jedno vozidlo.
-        dyn:         dynamický součinitel pohyblivého zatížení [-].
+        dyn:         dynamický součinitel pohyblivého zatížení [-]; None = podle
+                     ČSN 73 6222, kap. 8 (Ve: 1,05; MLC: norma neuvádí → 1,0).
         q_chodnik:   zatížení chodníků chodci [kN/m²] (0 = bez stavu qch); obálka –
                      zatížení se klade do nepříznivých částí plochy vlivu (úseky
                      chodníků délky krok_chodnik [m], levý i pravý chodník zvlášť).
@@ -490,7 +494,7 @@ def vnitrni_sily(
     vyb = vybaveni or Vybaveni()
     B = K.B
     vyb.kontrola(B)
-    if dyn <= 0:
+    if dyn is not None and dyn <= 0:
         raise ValueError("Dynamický součinitel musí být kladný.")
     if g_spary < 0:
         raise ValueError("Tíha spáry musí být nezáporná.")
@@ -568,7 +572,12 @@ def vnitrni_sily(
     if Ve and MLC:
         raise ValueError("Zadejte jedno vozidlo: Ve, nebo MLC.")
     voz_popis, rozvor, b_k, q_nast = "", VE_ROZVOR, VE_B_K, None
+    dyn_zadany, dyn, dyn_zdroj = dyn, 1.0, ""
     if Ve or MLC:
+        dyn, dyn_zdroj = dynamicky_soucinitel("Ve" if Ve else "MLC", dyn_zadany)
+        if MLC and dyn_zadany is None:
+            varovani.append(f"Dynamický součinitel pro vozidla MLC {NORMA} neuvádí – uvažováno "
+                            f"δ = {dyn:g}; zadejte ho, je-li známý.")
         nos = Nosnik1D(K)
         n_ob = max(1, int(math.ceil(K.Ltot / (krok * K.n_poli))))
         if Ve:
@@ -604,7 +613,7 @@ def vnitrni_sily(
                       roz=roz, dx=dx)
         ob = obalky_2D(model, stavy_q(), y_c - 0.5 * rozvor, y_c + 0.5 * rozvor, b_k, roz, dx)
         stavy["q"] = StavSil("q", f"vozidlo {voz_popis}, osa y = {y_c:.2f} m, "
-                             f"δ = {dyn:g}, roznos {roz:.2f} m, krok {krok:g} m",
+                             f"δ = {dyn:g} ({dyn_zdroj}), roznos {roz:.2f} m, krok {krok:g} m",
                              ob.M_max, ob.M_min, ob.Vm_max, ob.Vm_min, ob.Vp_max, ob.Vp_min,
                              ob.Vs_max, ob.Vs_min, pohyblivy=True, n_stavu=ob.n_stavu)
 
@@ -618,7 +627,8 @@ def vnitrni_sily(
 
     vys = VysledekSil(K=K, vybaveni=vyb, xs=model.xs.copy(), vyst=vyst, stavy=stavy,
                       g0=g0_, g_spary=g_spary if K.spara else 0.0, Ve=float(Ve or 0.0),
-                      dyn=dyn, y_Ve=y_c, roz=roz, vozidlo=voz_popis, rozvor=rozvor, b_k=b_k,
+                      dyn=dyn, dyn_zdroj=dyn_zdroj, y_Ve=y_c, roz=roz, vozidlo=voz_popis,
+                      rozvor=rozvor, b_k=b_k,
                       soucinitele=soucinitele or Soucinitele(), popis=popis,
                       varovani=varovani, kontrola=kontrola, sit=sit_modelu(model),
                       y_vyst=np.asarray(vyst.y, float), model=model, q_nastaveni=q_nast)

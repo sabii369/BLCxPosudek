@@ -20,7 +20,7 @@ Prostředí je Posudek PB s novou první kartou:
 
 | karta | obsah |
 |---|---|
-| **0 Most a zatížení (BLC)** | konstrukce mostu (N, b, d, spára, uložení, šikmost, k_v), vybavení (šířka chodníku vlevo/vpravo, tíha skladby chodníku a vozovky, zábradlí, svodidla, další liniová), **vozidlo** (Ve [t], MLC kolové / pásové, volitelně kolona), dynamický součinitel, ψ; tabulka nosníků, grafy průběhů a příčného rozdělení |
+| **0 Most a zatížení (BLC)** | konstrukce mostu (N, b, d, spára, uložení, šikmost, k_v), vybavení (šířka chodníku vlevo/vpravo, tíha skladby chodníku a vozovky, zábradlí, svodidla, další liniová), **vozidlo** (Ve [t], MLC kolové / pásové, volitelně kolona), dynamický součinitel (prázdné = ČSN 73 6222, kap. 8), ψ; tabulka nosníků, grafy průběhů a příčného rozdělení |
 | 1–4 | materiály, průřez, nosník a předpětí, výztuž (Posudek PB) |
 | **5 Zatížení a čas** | prostředí a časová osa; **vnější zatížení se nezadává** – je převzato z obálek posuzovaného nosníku (náhled kombinací) |
 | 6, 7 | nastavení posouzení, výsledky (Posudek PB) |
@@ -71,7 +71,7 @@ Ovládání, metoda výpočtu, výstupy a omezení: [`docs/navod.md`](docs/navod
 | g0 | nosníky: každý nosník samostatně bez spolupůsobení (1D), g0 = A·γ_b; deska: 2D MKP |
 | g − g0 | 2D MKP: skladba vozovky [kN/m²], skladba chodníků [kN/m²] (šířka chodníku vlevo a vpravo), svodidla, zábradlí [kN/m], výplň spáry |
 | q_ch | 2D MKP: zatížení chodců na chodnících [kN/m²], obálka přes plochu vlivu |
-| q | 2D MKP: obálka pojezdu vozidla Ve v ose vozovky, dynamický součinitel |
+| q | 2D MKP: obálka pojezdu vozidla Ve v ose vozovky, dynamický součinitel (Ve: δ = 1,05 podle ČSN 73 6222, čl. 8.4) |
 
 ```bash
 python -m blc --sily priklady/sily_KA67_12.toml --pb "../Posudek PB/examples/nosnik_KA67_12.toml"

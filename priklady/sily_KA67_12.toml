@@ -33,7 +33,7 @@ g_svodidla = 0.6               # svodidlo na každé straně (okraj vozovky) [kN
 
 [pohyblive]
 Ve = 80.0                      # výjimečná zatížitelnost [t]
-dyn = 1.0                      # dynamický součinitel
+# dyn = 1.05                   # δ; vynechat = podle ČSN 73 6222, kap. 8 (Ve: δ = 1,05)
 # y_Ve = 5.0                   # osa vozidla [m] (výchozí osa vozovky)
 roznos = true                  # roznos kola do střednice desky
 t_voz = 0.0                    # tloušťka vozovky pro roznos [m]
