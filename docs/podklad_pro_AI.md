@@ -95,7 +95,7 @@ Jeden slovník `d` (TOML/JSON) = vstup Posudku PB + sekce `[blc]`. Sekce `[zatiz
 |---|---|---|
 | `[projekt]` | `nazev`, `popis` | protokol |
 | `[beton]` | `trida` (např. "C35/45"), `cement` ("N"/"R"/"S"), `objemova_tiha` (25), `Ecm` (volitelně) | **oba** (BLC: E = Ecm třídy nebo `Ecm`, γ_b pro g0) |
-| `[predpinaci_vyztuz]` | `typ`, `fpk`, `Ep`, `trida_relaxace` … | posudek |
+| `[predpinaci_vyztuz]` | `typ`, `fpk`, `Ep`, `trida_relaxace` …, `taznost` (neoslabená ε_uk [‰], 35; sklon zpevnění), **`taznost_oslabena`** (ε_uk,red [‰] od koroze, volitelně; 0 < ε_uk,red ≤ ε_uk) | posudek |
 | `[betonarska_vyztuz]` | `typ` ("B500B"), `fyk` … | posudek |
 | `[prurez]` | `obrys` [[y, z] mm], `otvory`, nebo `vrstvy`, nebo `b`+`h` | **oba** (BLC: A a Iy brutto, je-li `prurez_z_posudku = true`) |
 | `[nosnik]` | `L` (délka nosníku), **`L0` (rozpětí = osa ložisek)**, `predpeti` ("dodatecne"/"predem…"), `charakteristiky` ("brutto"/"idealni"), `pocet_rezu` (41), `pocet_napinani`, `postup_napinani` | **oba** (BLC: rozpětí = L0) |
@@ -255,7 +255,12 @@ kabely a okamžité ztráty (tření, pokluz, postupné napínání), fáze a dl
 Proměnná zatížení (doprava, chodci) jen v provozních fázích (t ≥ t_provoz). Oslabení
 korozí `[degradace]` se uplatní v provozních fázích od t_akt (bez t_akt jen na konci
 životnosti): předpínací výztuž → P = σ_p·A_p·(1 − ρ_p) a A_p v MSÚ; A_s v MSÚ; A_sw ve
-smyku. Ztráty a průřezové charakteristiky se počítají pro neoslabenou výztuž.
+smyku. Ztráty a průřezové charakteristiky se počítají pro neoslabenou výztuž. Ve stejných
+fázích platí `taznost_oslabena`: mezní přetvoření předpínací výztuže v MSÚ (ohyb) ε_ud,red =
+0,9·ε_uk,red, pracovní diagram (sklon zpevnění z neoslabené `taznost`) se nemění, takže výztuž
+nedosáhne k·f_pd a M_Rd klesne, jakmile rozhoduje výztuž. Pozor: samotné snížení `taznost`
+dává strmější zpevnění a vyšší M_Rd – pro vliv koroze použít `taznost_oslabena`.
+Je-li ε_ud,red ≤ počátečnímu přetvoření výztuže ε_p0, výpočet skončí chybou (ValueError).
 
 ### 6.2 Výsledky – `model.protokol.posudky`
 
@@ -463,7 +468,8 @@ se faktorizuje jednou (`splu`), polohy vozidla se řeší dávkově. Pro mnoho b
 8. **Součinitele pro Ve** (γ_Q = 1,35, ψ0 = ψ1 = 0,75, ψ2 = 0) jsou převzaty z TS a pro Ve
    **nejsou ověřené** – ve studii je uvádět jako předpoklad, případně variovat.
 9. **Validace** vyhazuje `ValueError`: 2d ≥ L0, α mimo 90–165°, chodníky ≥ B, spára bez
-   b_s/Iy_s, N < 2 se spárou, t_akt mimo (t_provoz, t_konec), oslabení mimo 0–100 %.
+   b_s/Iy_s, N < 2 se spárou, t_akt mimo (t_provoz, t_konec), oslabení mimo 0–100 %,
+   `taznost_oslabena` mimo (0, `taznost`] nebo ε_ud,red ≤ ε_p0.
    Přesah vozidla mimo vozovku a ignorované vstupy jsou jen **varování** (`vys.varovani`) –
    ve studii je ukládat.
 10. **Nehladké η**: tahové napětí (0 až do vzniku tahu), křehký lom (klesá s q), fáze

@@ -57,7 +57,9 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
   (v exportu „zatezovaci_stavy“ stejná `skupina = "BLC"`); `extremy_kombinace(druh)` = max/min M, V po nosnících.
 - Posudek (pb_posudek, větev `aktualni-stari-koroze` v repu Posudek PB): fáze „Aktuální stáří“ (`[casova_osa] t_akt`),
   oslabení korozí `[degradace]` → `Faze.k_Ap/k_As/k_Asw` ve fázích t ≥ t_akt (jinak jen konec životnosti),
-  `_sily_predpeti(sigma, k_Ap)`; GUI karta 4 (oslabení), karta 5 (t_akt). Mez lineárního dotvarování (7.2(3))
+  `_sily_predpeti(sigma, k_Ap)`; GUI karta 4 (oslabení), karta 5 (t_akt). Tažnost předpínací výztuže:
+  `taznost` (neoslabená, sklon zpevnění) a `taznost_oslabena` (koroze) → `Faze.eps_ud_p` ve stejných fázích,
+  `ohybova_unosnost(eps_ud_p=…)` – diagram se jen zkrátí na 0,9·ε_uk,red; GUI karta 1. Mez lineárního dotvarování (7.2(3))
   není posudek: krok výpočtu + při překročení `Protokol.upozorneni` (souhrn HTML, GUI `lbl_upozorneni`, výpis dávky).
 - Zatížitelnost: `blc_posudek/zatizitelnost.py` – `zatizitelnost(d, vys)` → `VysledekZatizitelnosti` (Ve pro η = 1
   každého posudku; `vys_pro_Ve` přeškáluje q z referenčního Ve; Illinois se sdílenými výpočty posudku; stavy

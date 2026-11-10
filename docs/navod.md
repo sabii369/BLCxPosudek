@@ -395,6 +395,13 @@ v dávce `--zatizitelnost`): místo posouzení při zadaném zatížení se pro 
   a A_p v MSÚ; betonářská výztuž → A_s v ohybu a smyku MSÚ; smyková výztuž → A_sw ve smyku
   a v minimální smykové výztuži. Ztráty předpětí a průřezové charakteristiky se počítají
   pro neoslabenou výztuž.
+- **Tažnost předpínací výztuže** (karta 1; `[predpinaci_vyztuz]`) má dvě pole:
+  `taznost` = neoslabená ε_uk [‰] (určuje sklon stoupající větve diagramu do k·f_pd při ε_uk)
+  a `taznost_oslabena` = ε_uk,red [‰] oslabená korozí (prázdné = bez oslabení). Oslabená
+  tažnost diagram jen zkrátí na ε_ud,red = 0,9·ε_uk,red při stejném sklonu zpevnění – výztuž
+  nedosáhne pevnosti a klesne M_Rd, pokud rozhoduje přetvoření výztuže. Uplatní se v MSÚ
+  ve stejných fázích jako oslabení plochy. Pouhé snížení `taznost` naopak modeluje jinou
+  (méně tažnou) výztuž se strmějším zpevněním – M_Rd tím roste, pro korozi se nehodí.
 - Úprava je v balíčku posudku (`pb_posudek`, repo Posudek PB, větev `aktualni-stari-koroze`).
 
 ### 8.7 Upozornění (mez lineárního dotvarování)

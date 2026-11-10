@@ -264,10 +264,13 @@ def test_aktualni_stari_a_koroze(d, vysledek):
     d2 = copy.deepcopy(d)
     d2["casova_osa"]["t_akt"] = 18250.0
     d2["degradace"] = {"oslabeni_predpinaci": 10.0, "oslabeni_betonarske": 10.0, "oslabeni_smykove": 20.0}
+    d2.setdefault("predpinaci_vyztuz", {})["taznost_oslabena"] = 10.0
     _, o, m = spocti(d2, vys)
     nazvy = [f.nazev for f in m.faze]
     assert "Aktuální stáří" in nazvy and nazvy[-1] == "Konec životnosti"
     assert m.faze[nazvy.index("Aktuální stáří")].k_Asw == approx(0.8)
+    assert [f.eps_ud_p for f in m.faze if f.t < 18250.0] == [None] * (len(nazvy) - 2)
+    assert m.faze[nazvy.index("Aktuální stáří")].eps_ud_p == approx(0.009)   # ε_ud,red = 0,9·10 ‰
     eta0 = {(p.nazev, p.faze): p.vyuziti for p in vysledek[2].protokol.posudky}
     eta1 = {(p.nazev, p.faze): p.vyuziti for p in m.protokol.posudky}
     k = ("Smyková únosnost", "Konec životnosti")
@@ -283,7 +286,9 @@ def test_gui_koroze():
         app.update()
         app.f_cas.prom["t_akt"].set("18250")
         app.f_degradace.prom["oslabeni_smykove"].set("15")
+        app.f_predp.prom["taznost_oslabena"].set("12")
         d = app.ziskej_data()
         assert d["casova_osa"]["t_akt"] == 18250.0 and d["degradace"] == {"oslabeni_smykove": 15.0}
+        assert d["predpinaci_vyztuz"]["taznost_oslabena"] == 12.0
     finally:
         app.destroy()
