@@ -46,13 +46,17 @@ class VysledekOhybu:
 
 def ohybova_unosnost(prurez: Prurez, beton: Beton, predp: PredpinaciVyztuz,
                      betonarska: BetonarskaVyztuz, kabely: list[VrstvaPredpeti],
-                     vyztuz: list[VrstvaVyztuze], N_Ed: float = 0.0) -> VysledekOhybu:
+                     vyztuz: list[VrstvaVyztuze], N_Ed: float = 0.0,
+                     eps_ud_p: float | None = None) -> VysledekOhybu:
     """Moment únosnosti pro kladný (dolní vlákna tažená) ohyb.
 
     Přetvoření roviny: ε(z) = κ·(z_n − z), z_n = h − x. Předpínací výztuž má počáteční
     přetvoření eps0, její celkové přetvoření je eps0 + ε(z). N_Ed [kN] – vnější osová síla
-    (tah +), která musí být v rovnováze s vnitřními silami.
+    (tah +), která musí být v rovnováze s vnitřními silami. eps_ud_p – mezní přetvoření
+    předpínací výztuže (None = predp.eps_ud; menší při tažnosti oslabené korozí, pracovní
+    diagram se nemění).
     """
+    eud_p = predp.eps_ud if eps_ud_p is None else eps_ud_p
     h = prurez.h
     zp, dz, bp = prurez.pasy()
     zk = np.array([k.z for k in kabely]) if kabely else np.zeros(0)
@@ -69,7 +73,7 @@ def ohybova_unosnost(prurez: Prurez, beton: Beton, predp: PredpinaciVyztuz,
         rozh = "beton"
         for zi, ei in zip(zk, e0):
             if zi < zn:
-                k_p = (predp.eps_ud - ei) / (zn - zi)
+                k_p = (eud_p - ei) / (zn - zi)
                 if k_p < kap:
                     kap, rozh = k_p, "výztuž"
         for zi in zs:

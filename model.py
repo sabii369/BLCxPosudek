@@ -84,10 +84,12 @@ class Faze:
     k_Ap: float = 1.0          # předpínací výztuž (síla P i A_p v MSÚ)
     k_As: float = 1.0          # podélná betonářská výztuž
     k_Asw: float = 1.0         # smyková výztuž
+    # mezní přetvoření předpínací výztuže při tažnosti oslabené korozí (None = neoslabená, ε_ud)
+    eps_ud_p: float | None = None
 
     @property
     def oslabena(self) -> bool:
-        return min(self.k_Ap, self.k_As, self.k_Asw) < 1.0
+        return min(self.k_Ap, self.k_As, self.k_Asw) < 1.0 or self.eps_ud_p is not None
 
     @property
     def nazev_t(self) -> str:
@@ -247,7 +249,9 @@ class NosnikPB:
         K2.text(f"Předpínací výztuž {p.typ} ({'dráty' if p.druh == 'drat' else 'lana'}): "
                 f"A_p,1 = {fmt(p.Ap_lano)} mm², f_pk = {fmt(p.fpk)} MPa, "
                 f"f_p0,1k = {fmt(p.fp01k)} MPa, E_p = {fmt(p.Ep)} MPa, třída relaxace {p.trida_relaxace} "
-                f"(ρ1000 = {fmt(p.rho1000)} %), γ_s = {fmt(p.gamma_s)}, tažnost ε_uk = {fmt(p.taznost)} ‰.")
+                f"(ρ1000 = {fmt(p.rho1000)} %), γ_s = {fmt(p.gamma_s)}, tažnost ε_uk = {fmt(p.taznost)} ‰"
+                + (f", tažnost oslabená korozí ε_uk,red = {fmt(p.taznost_oslabena, 1)} ‰." if p.oslabena_taznost
+                   else "."))
         K2.text("Modul pružnosti E_p: dráty 205 GPa, lana 195 GPa (3.3.6(2), (3)). "
                 + ("Pracovní diagram se zpevněním – stoupající větev do k·f_pd při ε_uk, k = f_pk/f_p0,1k."
                    if p.zpevneni else
@@ -257,6 +261,15 @@ class NosnikPB:
                 f"{fmt(p.fp01k)}/{fmt(p.gamma_s)}", p.fpd, "MPa", "3.3.6")
         K2.krok("Mezní přetvoření předpínací výztuže", "ε_{ud} = 0,9·ε_{uk}",
                 f"0,9·{fmt(p.eps_uk * 1e3)} ‰", p.eps_ud * 1e3, "‰", "3.3.6(7)")
+        if p.oslabena_taznost:
+            od = "aktuálního stáří" if self.t_akt is not None else "konce životnosti"
+            K2.text("Tažnost oslabená korozí zkracuje pracovní diagram předpínací výztuže při nezměněném sklonu "
+                    "zpevnění (daném neoslabenou tažností ε_uk), výztuž proto nedosáhne pevnosti k·f_pd. Uvažuje se "
+                    f"v MSÚ (ohyb) ve fázích od {od}, stejně jako oslabení plochy výztuže.")
+            K2.krok("Mezní přetvoření výztuže oslabené korozí", "ε_{ud,red} = 0,9·ε_{uk,red}",
+                    f"0,9·{fmt(p.eps_uk_red * 1e3, 1)} ‰", p.eps_ud_red * 1e3, "‰")
+            K2.krok("Napětí na mezi přetvoření oslabené / neoslabené výztuže", "σ_{p}(ε_{ud,red}); σ_{p}(ε_{ud})",
+                    "", f"{fmt(float(p.sigma_msu(p.eps_ud_red)))}; {fmt(float(p.sigma_msu(p.eps_ud)))}", "MPa")
         K2.text(f"Betonářská výztuž {s.typ}: f_yk = {fmt(s.fyk)} MPa, f_yd = {fmt(s.fyd)} MPa, "
                 f"E_s = {fmt(s.Es)} MPa, ε_ud = {fmt(s.eps_ud * 1e3)} ‰.")
         K2.obrazek("diagramy_materialu", "Návrhové pracovní diagramy materiálů pro MSÚ")
@@ -712,6 +725,15 @@ class NosnikPB:
         return s0, s1, info, rho
 
     # ------------------------------------------------------------------
+    def _popis_oslabeni(self, f: Faze, co: tuple[str, ...] = ("Ap", "As", "Asw", "taznost")) -> str:
+        """Oslabení výztuže korozí ve fázi f jako text (jen uplatněné složky z co); prázdný bez oslabení."""
+        k = {"Ap": f.k_Ap, "As": f.k_As, "Asw": f.k_Asw}
+        znacky = {"Ap": "A_p", "As": "A_s", "Asw": "A_sw"}
+        casti = [f"{znacky[c]} −{fmt(self.oslabeni[c], 1)} %" for c in co if c in k and k[c] < 1.0]
+        if "taznost" in co and f.eps_ud_p is not None:
+            casti.append(f"ε_uk,red = {fmt(self.predp.taznost_oslabena, 1)} ‰")
+        return ", ".join(casti)
+
     def _faze_a_dlouhodobe_ztraty(self):
         x = self.x
         b, p, P = self.beton, self.predp, self.prurez
@@ -751,17 +773,15 @@ class NosnikPB:
                 f.k_Ap = 1.0 - osl["Ap"] / 100.0
                 f.k_As = 1.0 - osl["As"] / 100.0
                 f.k_Asw = 1.0 - osl["Asw"] / 100.0
+                if p.oslabena_taznost:
+                    f.eps_ud_p = p.eps_ud_red
         self.faze = faze
 
-        def _osl_text(f):
-            if not f.oslabena:
-                return "–"
-            return (f"A_p −{fmt(osl['Ap'], 1)} %, A_s −{fmt(osl['As'], 1)} %, "
-                    f"A_sw −{fmt(osl['Asw'], 1)} %")
         K.tabulka(["Fáze", "Stáří betonu t [dny]", "Působící stálá zatížení", "Proměnná zatížení",
                    "Oslabení výztuže korozí"],
                   [[f.nazev, fmt(f.t, 0), f.popis or ", ".join(z.nazev for z in f.stale),
-                    "ano" if f.provoz else "ne", _osl_text(f)] for f in faze], "Časová osa výstavby a provozu")
+                    "ano" if f.provoz else "ne", self._popis_oslabeni(f) or "–"] for f in faze],
+                  "Časová osa výstavby a provozu")
         if self.t_akt is not None:
             K.text(f"Konstrukce se posuzuje i pro aktuální stáří t = {fmt(self.t_akt, 0)} dní "
                    "(ztráty předpětí, mezní stavy použitelnosti a únosnosti jako v ostatních provozních fázích).")
@@ -772,6 +792,11 @@ class NosnikPB:
                    f"(napětí ve zbývající výztuži se nemění) a plocha A_p v MSÚ; podélná betonářská výztuž "
                    f"{fmt(osl['As'], 1)} %; smyková výztuž {fmt(osl['Asw'], 1)} %. Ztráty předpětí se počítají "
                    "pro neoslabenou výztuž, průřezové charakteristiky se nemění.")
+        if p.oslabena_taznost:
+            K.text(f"Tažnost předpínací výztuže oslabená korozí ε_uk,red = {fmt(p.taznost_oslabena, 1)} ‰ "
+                   f"(neoslabená ε_uk = {fmt(p.taznost)} ‰) se uvažuje ve fázích od "
+                   f"{'aktuálního stáří' if self.t_akt is not None else 'konce životnosti'}: mezní přetvoření "
+                   f"v MSÚ ε_ud,red = {fmt(p.eps_ud_red * 1e3)} ‰, pracovní diagram se nemění (kap. Materiály).")
 
         # zatěžovací kroky pro dotvarování
         Mg0 = self.zs_g0.M_max
@@ -1183,7 +1208,7 @@ class NosnikPB:
         for f in self.faze:
             Kf = self.protokol.kapitola(f"Napětí v betonu – {f.nazev_t}", 2)
             NP, MP, _ = self._sily_predpeti(f.sigma, f.k_Ap)
-            if f.oslabena:
+            if f.k_Ap < 1.0:
                 Kf.text(f"Předpínací síla je zmenšena oslabením předpínací výztuže korozí "
                         f"({fmt(self.oslabeni['Ap'], 1)} %).")
             d = self.komb[f.nazev]
@@ -1474,6 +1499,17 @@ class NosnikPB:
             vrstvy.append(VrstvaPredpeti(float(z[i]), k.Ap * f.k_Ap * fr * redukce, float(e0), k.nazev))
         return vrstvy
 
+    def _kontrola_eps_ud(self, f: Faze, vrstvy: list[VrstvaPredpeti]):
+        """Mezní přetvoření předpínací výztuže (oslabené korozí) musí být větší než počáteční přetvoření."""
+        if f.eps_ud_p is None or not vrstvy:
+            return
+        e0 = max(v.eps0 for v in vrstvy)
+        if e0 >= f.eps_ud_p:
+            raise ValueError(
+                f"Tažnost oslabená korozí ε_uk,red = {fmt(self.predp.taznost_oslabena, 1)} ‰: mezní přetvoření "
+                f"ε_ud,red = {fmt(f.eps_ud_p * 1e3)} ‰ nepřesahuje počáteční přetvoření předpínací výztuže "
+                f"ε_p0 = {fmt(e0 * 1e3)} ‰ ({f.nazev}) – výztuž by se přetrhla již předpětím.")
+
     def _msu_ohyb(self):
         b, p, s = self.beton, self.predp, self.betonarska
         K = self.protokol.kapitola("Mezní stav únosnosti")
@@ -1483,7 +1519,9 @@ class NosnikPB:
                 "stoupající větví (obr. 3.10), betonářská výztuž obdobně. Předpínací výztuž má počáteční "
                 "přetvoření ε_p0 = σ_pm,t/E_p − σ_c,perm(z_p)/E_cm (předpětí + dekomprese betonu od stálých "
                 "účinků). Poloha neutrálné osy je určena iteračně z podmínky ΣN = 0, porušení nastane "
-                f"dosažením ε_cu2 = {fmt(b.eps_cu2 * 1e3)} ‰ v betonu nebo ε_ud v oceli.")
+                f"dosažením ε_cu2 = {fmt(b.eps_cu2 * 1e3)} ‰ v betonu nebo ε_ud v oceli"
+                + (f" (ve fázích s tažností oslabenou korozí ε_ud,red = {fmt(p.eps_ud_red * 1e3)} ‰ "
+                   "u předpínací výztuže)." if p.oslabena_taznost else "."))
         self.msu_M = {}
         for f in self.faze:
             if not f.provoz:
@@ -1493,16 +1531,18 @@ class NosnikPB:
             MRd = np.full_like(self.x, np.nan)
             vys = {}
             for i in np.nonzero(self.v_poli)[0]:
-                r = ohybova_unosnost(self.prurez, b, p, s, self._vrstvy_msu(f, i), vyz)
+                vr = self._vrstvy_msu(f, i)
+                self._kontrola_eps_ud(f, vr)
+                r = ohybova_unosnost(self.prurez, b, p, s, vr, vyz, eps_ud_p=f.eps_ud_p)
                 MRd[i] = r.MRd
                 vys[i] = r
             eta = np.where(self.v_poli, np.maximum(MEd, 0) / MRd, 0)
             i = int(np.nanargmax(eta))
             r = vys[i]
             self.msu_M[f.nazev] = dict(MEd=MEd, MRd=MRd, eta=eta, vys=vys, i=i)
+            osl = self._popis_oslabeni(f, ("Ap", "As", "taznost"))
             K1.text(f"<b>{f.nazev_t}</b> – rozhodující řez x = {fmt(self.x[i], 3)} m"
-                    + (f" (oslabení korozí: A_p −{fmt(self.oslabeni['Ap'], 1)} %, "
-                       f"A_s −{fmt(self.oslabeni['As'], 1)} %)" if f.oslabena else "") + ":")
+                    + (f" (oslabení korozí: {osl})" if osl else "") + ":")
             K1.krok("Návrhový moment", "M_{Ed}", "", float(MEd[i]), "kNm")
             K1.krok("Výška tlačené oblasti", "x", "iterace ΣN = 0", r.x, "mm")
             K1.krok("Přetvoření horních / dolních vláken", "ε_{c,h}; ε_{c,d}", "",
@@ -1640,9 +1680,9 @@ class NosnikPB:
             self.msu_V[f.nazev] = dict(arr=arr, res=res)
             i = int(np.nanargmax(arr["eta"]))
             r, VEd, sv = res[i]
+            osl = self._popis_oslabeni(f, ("Ap", "Asw"))
             K.text(f"<b>{f.nazev_t}</b> – rozhodující řez x = {fmt(self.x[i], 3)} m"
-                   + (f" (oslabení korozí: A_p −{fmt(self.oslabeni['Ap'], 1)} %, A_sw "
-                      f"−{fmt(self.oslabeni['Asw'], 1)} %)" if f.oslabena else "") + ":")
+                   + (f" (oslabení korozí: {osl})" if osl else "") + ":")
             K.krok("Návrhová posouvající síla (vč. V_P)", "V_{Ed} = V_{Ed,ext} + V_{P}", "", abs(VEd), "kN")
             K.krok("Napětí od předpětí v těžišti", "σ_{cp} = N_{Ed}/A_{c}", "", r.sigma_cp, "MPa")
             K.krok("Účinná výška; šířka stojiny; nominální šířka", "d; b_{w}; b_{w,nom}", "",
@@ -1814,7 +1854,7 @@ class NosnikPB:
                f"({fmt(b.fctm)} − {fmt(sE)})/{fmt(sP)}", rho, "")
         vyz = [VrstvaVyztuze(v.z, v.As, v.nazev) for v in self.vyztuz]
         vr = self._vrstvy_msu(f, i, redukce=rho)
-        r = ohybova_unosnost(P, b, self.predp, s, vr, vyz)
+        r = ohybova_unosnost(P, b, self.predp, s, vr, vyz, eps_ud_p=f.eps_ud_p)
         M_ed_fr = Mfr + Mg0
         K.krok("Únosnost s redukovanou plochou předpětí", "M_{Rd,red}", "", r.MRd, "kNm")
         K.krok("Moment od časté kombinace", "M_{fr}", "", M_ed_fr, "kNm")
