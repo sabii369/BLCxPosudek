@@ -379,6 +379,12 @@ mostu a grafy).
    a zadat ručně), kabely, výztuž.
 3. Karta 5: prostředí, časová osa a stáří, od kterého působí g − g0 / kvazistálá kombinace.
    Vnější zatížení se nezadává – zobrazí se kombinace převzaté z obálek.
+   Karta 6 (nastavení posouzení): **Zbytková životnost** 50 / 15-30 / 10 let určí kategorii
+   mostu podle ČSN 73 6222, tab. 12.3 (předem předpjatý B/C/D, dodatečně soudržně C/D/E)
+   a z tab. 12.4 kombinaci pro dekompresi, pro šířku trhlin a w_max (přepíše ruční volby
+   dekomprese, trhliny, w_max; tahové napětí v provozu je pak jen informativní). Šířka trhlin
+   (7.3.4): bez trhlin při σ_ct ≤ f_ctm, jinak průřez s trhlinou; s_r,max podle (7.11) jen se
+   zadaným Ø betonářské výztuže (karta 4, sloupec Ø), jinak 1,3·(h − x). Prázdné = bez kategorie.
 4. **F5** – spočítá model mostu (jen pokud se změnily jeho vstupy) a posudek; tlačítko
    *Vnitřní síly mostu* na kartě 0 spočítá jen most (tabulka nosníků, grafy).
 5. *HTML protokol* – protokol posudku s kapitolou „Zatížení z modelu mostu (BLC)“.

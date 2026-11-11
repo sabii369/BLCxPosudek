@@ -104,11 +104,11 @@ Jeden slovník `d` (TOML/JSON) = vstup Posudku PB + sekce `[blc]`. Sekce `[zatiz
 | `[nosnik]` | `L` (délka nosníku), **`L0` (rozpětí = osa ložisek)**, `predpeti` ("dodatecne"/"predem…"), `charakteristiky` ("brutto"/"idealni"), `pocet_rezu` (41), `pocet_napinani`, `postup_napinani` | **oba** (BLC: rozpětí = L0) |
 | `[[kabel]]` | `nazev`, `pocet_lan`, `geometrie` ("parabola"/"polygon"/"primka"), `body` [[x m, z mm]], `polomery`, `z_L`/`z_S`/`z_P`, `sigma_max`, `napinani`, `mu`, `k`, `pokluz`, `d_kanalku` | posudek |
 | `[[smykova_vyztuz]]` | `Asw` [mm²], `s` [mm], `alpha`, `od`, `do` | posudek |
-| `[[vyztuz]]` | `z` [mm], `As` [mm²], `nazev` | posudek |
+| `[[vyztuz]]` | `z` [mm], `As` [mm²], `nazev`, `phi` [mm] (Ø – šířka trhlin, nepovinné) | posudek |
 | `[prostredi]` | `RH` [%], `t_s` [dny] | posudek |
 | `[casova_osa]` | `t0` (vnesení předpětí), `t_provoz`, `t_konec`, **`t_akt`** (aktuální stáří, volitelně) [dny] | posudek |
 | `[predem]` | `eta_p1`, `alpha1`, `alpha2` … (jen předem předpjaté) | posudek |
-| `[posouzeni]` | pole `Nastaveni` (`pb_posudek/model.py`): `gamma_G` 1,35, `gamma_G_inf` 1,0, `xi` 0,85, `kombinace_msu` "6.10ab"/"6.10", `k1_nap`, `k2_nap`, `k7`, `k8`, `k1`, `k2`, `k5`, `tah_predpeti`, `tah_provoz`, `dekomprese`, `pruhyb_limit`, `hlavni_napeti` … | posudek; **γ_G, γ_G,inf, ξ i BLC** (kombinace) |
+| `[posouzeni]` | pole `Nastaveni` (`pb_posudek/model.py`): `gamma_G` 1,35, `gamma_G_inf` 1,0, `xi` 0,85, `kombinace_msu` "6.10ab"/"6.10", `k1_nap`, `k2_nap`, `k7`, `k8`, `k1`, `k2`, `k5`, `tah_predpeti`, `tah_provoz`, `dekomprese`, **`zbytkova_zivotnost`** ("" / "50" / "15-30" / "10" → kategorie B–E podle ČSN 73 6222, tab. 12.3, přepíše `dekomprese`, `trhliny`, `w_max` podle tab. 12.4), `trhliny` (char/casta/kvazistala/zadna), `w_max`, `xi_p`, `pruhyb_limit`, `hlavni_napeti` … | posudek; **γ_G, γ_G,inf, ξ i BLC** (kombinace) |
 | `[degradace]` | `oslabeni_predpinaci`, `oslabeni_betonarske`, `oslabeni_smykove` [%] (0 až < 100) | posudek |
 
 Souřadnice posudku: x [m] od **levého konce nosníku** (ložiska v (L − L0)/2 od konců),
@@ -294,8 +294,9 @@ Posudky pro vzorový příklad (38 položek; počet závisí na kabelech a fáz�
 | MSP | Napínací napětí – každý kabel | napínání | ne |
 | MSP | Napětí po zakotvení σ_pm0 – každý kabel | po vnesení předpětí | ne |
 | MSP | Tlakové / Tahové napětí v betonu | Vnesení předpětí, Vnesení ost. stálých (stálá) | ne |
-| MSP | Tlakové / Tahové napětí v betonu | provoz, charakteristická | ano |
-| MSP | Dekomprese | provoz, častá | ano |
+| MSP | Tlakové / Tahové napětí v betonu | provoz, charakteristická (tahové jen bez kategorie mostu) | ano |
+| MSP | Dekomprese | provoz, častá (podle kategorie mostu i kvazistálá / žádná) | ano |
+| MSP | Šířka trhlin | provoz, kombinace podle `trhliny` / kategorie (jen je-li zadána) | ano, η = 0 do vzniku trhlin |
 | MSP | Napětí v předpínací výztuži | provoz, charakteristická | jen kabely v tažené oblasti (ve vzoru rozhoduje horní kabel K1 → ne) |
 | MSP | Hlavní tahové napětí | provoz, charakteristická | ano |
 | MSP | Průhyb (kvazistálá kombinace) | konec životnosti | jen přes ψ2 |
