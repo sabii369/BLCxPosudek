@@ -15,7 +15,9 @@ Převzato z posudku (jedno zadání pro oba výpočty):
 Sekce [blc]:
   konstrukce   typ_konstrukce, N, b, h, A_nosniku, Iy, prurez_z_posudku, nu, d, spara, b_s,
                Iy_s, beton_s, alfa, sikmost, k_v [MN/m/m], uloz, k_rot [MNm/rad/m], spoj
-  stálé        chodnik_L, chodnik_P, g_chodnik, g_vozovka, g_zabradli, g_svodidla, g_spary,
+  stálé        A_dobetonavky [m²] (dobetonávka mezi nosníky → g0, ½ na sousední nosníky, do
+               posudku s g − g0), chodnik_L, chodnik_P, g_chodnik, g_vozovka, g_zabradli,
+               g_svodidla, g_spary,
                [[blc.liniova]] nazev, g, y, sirka
   chodci       q_chodnik [kN/m²] (zatížení chodníků, obálka; prázdné = podle ČSN 73 6222:
                Vn, Vr 2,5 kN/m², Ve 0), gamma_Qch, psi0_ch, psi1_ch, psi2_ch
@@ -24,7 +26,9 @@ Sekce [blc]:
                Ve δ = 1,05, Vr δ1, Vn δ1–δ3), y_vozidla (Ve, MLC; prázdné = osa vozovky; Vn a Vr
                vždy u kraje vozovky u užšího chodníku), roznos, t_voz, krok, ex
   zatížitelnost zatizitelnost = true → místo posouzení hledá Vn, Vr, Ve pro η = 100 % každého
-               posudku; zatizitelnost_druhy = "vse" | "vozidlo" | ["Vn", "Ve", …]
+               posudku; zatizitelnost_druhy = "vse" | "vozidlo" | ["Vn", "Ve", …];
+               protokol_zatizitelnosti = "souhrn" | "Vn" | "Vr" | "Ve" (jen druh, posudky při jeho
+               zatížitelnosti) | "vse" (dávka: souhrn + každý druh zvlášť)
   předání      vystup ("auto" | "N3"), kriterium ("M" | "M-" | "V"), rezim ("kombinace" |
                "zatezovaci_stavy"), gamma_Q, psi0, psi1, psi2, t_vneseni, t_stale
 """
@@ -48,12 +52,14 @@ VYCHOZI_BLC = {
     "uloz": "tvrde", "spoj": "kloub",
     "chodnik_L": 1.5, "chodnik_P": 1.5, "g_chodnik": 5.0, "g_vozovka": 2.6,
     "g_zabradli": 0.5, "g_svodidla": 0.6, "g_spary": 0.0,
+    "A_dobetonavky": 0.0,
     "vozidlo": "Ve", "Vn": 32.0, "Vr": 60.0, "Ve": 80.0, "MLC": "MLC80", "dyn": None,
     "roznos": True, "t_voz": 0.0, "krok": 0.25, "ex": 0.125,
     "vystup": "auto", "kriterium": "M", "rezim": "kombinace",
     "gamma_Q": 1.35, "psi0": 0.75, "psi1": 0.75, "psi2": 0.0,
     "q_chodnik": None, "gamma_Qch": 1.35, "psi0_ch": 0.75, "psi1_ch": 0.75, "psi2_ch": 0.0,
     "zatizitelnost": False, "zatizitelnost_druhy": "vse",
+    "protokol_zatizitelnosti": "souhrn",
 }
 
 
@@ -117,7 +123,7 @@ def parametry_blc(d: dict) -> dict:
             A, Iy = _f(b.get("A_nosniku")), _f(b.get("Iy"))
             if not Iy:
                 raise ValueError("Zadejte Iy nosníku (nebo převzetí z průřezu posudku).")
-        kw.update(A_nosniku=A, Iy=Iy)
+        kw.update(A_nosniku=A, Iy=Iy, A_dobetonavky=_f(b.get("A_dobetonavky")) or 0.0)
         if b.get("spara"):
             kw.update(spara=True, b_s=float(b["b_s"]), Iy_s=float(b["Iy_s"]),
                       g_spary=float(b.get("g_spary") or 0.0))
@@ -187,7 +193,7 @@ def kapitola_blc(model, vys: VysledekSil, o: int) -> None:
     (před kapitolu Zatížení a časová osa): popis stavů, zatížení na mostě, součinitele,
     vnitřní síly na nosnících od jednotlivých stavů a kombinace po nosnících."""
     from pb_posudek.protokol import Kapitola, fmt
-    from .grafy_most import GRAFY_ZATIZENI, GRAF_SILY, rezy_posudku
+    from .grafy_most import GRAFY_ZATIZENI, GRAFY_Q, GRAF_SILY, rezy_posudku
     jm, jv = vys.jednotky
     vyst = "pás" if vys.deska else "nosník"
     K = Kapitola("Zatížení z modelu mostu (BLC)", 2)
@@ -195,6 +201,11 @@ def kapitola_blc(model, vys: VysledekSil, o: int) -> None:
            f"Posuzuje se {vyst} {vys.popisky[o]} (y = {fmt(float(vys.vyst.y[o]))} m).")
     for s in vys.stavy.values():
         K.text(f"{NAZVY_STAVU[s.nazev]}: {s.popis}.")
+    if vys.g0_dobetonavka is not None:
+        K.text(f"Vlastní tíhu nosníku počítá posudek z průřezu; tíha dobetonávky mezi nosníky "
+               f"({fmt(vys.g_dobetonavky)} kN/m, každý nosník nese polovinu sousední dobetonávky, "
+               "krajní nosník jen jednu polovinu) průřez nezahrnuje, a proto se do posudku předává "
+               "spolu s ostatním stálým zatížením g − g0.")
     if vys.varovani:
         K.text("Upozornění: " + " ".join(vys.varovani))
     # zatížení na mostě
@@ -211,7 +222,7 @@ def kapitola_blc(model, vys: VysledekSil, o: int) -> None:
         for p in b["polohy"].values():
             K.text(p.popis + ".")
         for k, nazev in GRAFY_ZATIZENI.items():
-            if k != "blc_zat_q" or b["polohy"]:
+            if k not in GRAFY_Q or b["polohy"]:
                 K.obrazek(k, nazev)
     # součinitele
     s = vys.soucinitele

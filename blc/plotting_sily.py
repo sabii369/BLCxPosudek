@@ -6,7 +6,10 @@ Grafy vnitřních sil pro posudek (vnitrni_sily.VysledekSil):
   plot_pricne   příčné rozdělení: max M a max |V| stavů po výstupech + příčný řez
                 (chodníky, vozovka, liniová zatížení, poloha vozidla),
   kresli_most   půdorys mostu se zatížením stavu g0, g − g0 nebo q v dané poloze
-                (do zadané osy), plot_zatizeni_most – samostatný graf.
+                (do zadané osy), plot_zatizeni_most – samostatný graf,
+  kresli_pricny_rez  příčný řez s příčnou polohou zatížení dopravou (pruhy Vn, vozidlo
+                Vr / Ve / MLC, stopy kol, kóty od kraje vozovky, posuzovaný nosník),
+                plot_pricny_rez – samostatný graf.
 """
 
 from __future__ import annotations
@@ -64,8 +67,18 @@ def kresli_most(ax, vys: VysledekSil, o: int, stav: str, poloha: Optional[Poloha
             for y in K.y_nos:
                 ax.add_patch(Rectangle((K.x0(y), y - 0.5 * K.b), L, K.b, fc=BARVY["g0"], alpha=0.35,
                                        hatch="//", ec="#555555", lw=0))
+        if not vys.deska and vys.g_dobetonavky:
+            for k in range(K.N - 1):
+                y0 = K.y_nos[k] + 0.5 * K.b
+                y1 = K.y_nos[k + 1] - 0.5 * K.b
+                if y1 - y0 < 0.02:                       # nosníky na dotyk – vyznačit pruhem
+                    y0, y1 = y0 - 0.04, y0 + 0.04
+                ax.add_patch(Rectangle((min(K.x0(y0), K.x0(y1)), y0), L, y1 - y0,
+                                       fc=BARVY["g0"], alpha=0.8, ec="none", lw=0))
         txt = (f"g0 = {vys.g0:.2f} {jm}" +
-               ("" if vys.deska else " – každý nosník samostatně (bez spolupůsobení)"))
+               ("" if vys.deska else " – každý nosník samostatně (bez spolupůsobení)") +
+               (f"\n+ dobetonávka {vys.g_dobetonavky:.2f} kN/m (½ na sousední nosníky)"
+                if vys.g_dobetonavky else ""))
         ax.text(K.x0(0.5 * B) + 0.5 * L, 0.5 * B, txt, ha="center", va="center", fontsize=9,
                 bbox=dict(fc="white", ec="#888888", alpha=0.9))
     elif stav == "g-g0":
@@ -138,10 +151,12 @@ def _geometrie_pudorysu(vys: VysledekSil):
 
 def plot_stavy_pudorys(vys: VysledekSil, o: Optional[int] = None,
                        stavy: Optional[Sequence[str]] = None, show: bool = True,
-                       sirka: float = 16.0, pomer: float = 2.0):
+                       sirka: float = 16.0, pomer: float = 2.0,
+                       o_stavu: Optional[dict] = None):
     """Vnitřní síly na nosnících v půdorysu (formát obálek BLC): pro každý zatěžovací
     stav jeden řádek – vlevo M, vpravo V; průběh vynesen od osy nosníku (kladné dolů),
-    u proměnných stavů max červeně a min modře; posuzovaný výstup o zvýrazněn."""
+    u proměnných stavů max červeně a min modře; posuzovaný výstup o zvýrazněn
+    (o_stavu = {stav: výstup} – jiný zvýrazněný výstup pro daný řádek)."""
     from .plotting import _pudorys_sil, _hladky, _rozsah, _meze
     geo = _geometrie_pudorysu(vys)
     V, xs = vys.vyst, vys.xs
@@ -175,7 +190,8 @@ def plot_stavy_pudorys(vys: VysledekSil, o: Optional[int] = None,
                 return _hladky(xs, vm[k], vp[k], V.skoky[k], i0, i1, vs[k])
         for c, (velic, r1, r2, jed) in enumerate((("M", rM, rM2, jm), ("V", rV, rV2, jv))):
             ax = axs[r, c]
-            _pudorys_sil(ax, geo, V, xs, r1, velic, velic, jed, zvyrazni=o, radky2=r2)
+            _pudorys_sil(ax, geo, V, xs, r1, velic, velic, jed,
+                         zvyrazni=(o_stavu or {}).get(st, o), radky2=r2)
             obal = " – obálka (max červeně, min modře)" if s.pohyblivy else ""
             ax.set_title(f"{NAZVY_STAVU.get(st, st)}: {velic} [{jed}]{obal}", fontsize=9,
                          fontweight="bold")
@@ -244,39 +260,12 @@ def plot_pricne(vys: VysledekSil, show: bool = True):
     sh = vys.souhrn()
     y = np.array([d["y"] for d in sh])
     B = vys.K.B
-    fig, (aR, aM, aV) = plt.subplots(3, 1, figsize=(10, 9), sharex=True,
-                                     gridspec_kw={"height_ratios": [1, 2.2, 2.2]})
-    # příčný řez
-    vyb = vys.vybaveni
-    for nazev, g, y0, y1 in vyb.zony(B):
-        aR.add_patch(plt.Rectangle((y0, 0.0), y1 - y0, 0.4,
-                                   color="#bbbbbb" if "chodník" in nazev else "#555555",
-                                   alpha=0.6))
-        aR.text(0.5 * (y0 + y1), 0.2, f"{nazev}\n{g:g} kN/m²", ha="center", va="center",
-                fontsize=7, color="w" if "vozovka" in nazev else "k")
-    for l in vyb.liniova_vse(B):
-        aR.add_patch(plt.Rectangle((l.y - 0.5 * l.sirka, 0.4), l.sirka, 0.35, color="#2e75b6"))
-        aR.text(l.y, 0.85, f"{l.nazev}\n{l.g:g}", ha="center", va="bottom", fontsize=6)
-    if "q" in vys.stavy:
-        for y0, y1, pop in getattr(vys, "pruhy_q", []):          # zatěžovací pruhy (Vn)
-            aR.add_patch(plt.Rectangle((y0, -0.5), y1 - y0, 0.4, fill=False, ec="#e74c3c", lw=0.8,
-                                       ls="--"))
-            aR.text(0.5 * (y0 + y1), -0.3, pop, ha="center", va="center", fontsize=6,
-                    color="#e74c3c")
-        stopy = getattr(vys, "stopy_q", None) or [
-            (vys.y_Ve - 0.5 * vys.rozvor, vys.b_k), (vys.y_Ve + 0.5 * vys.rozvor, vys.b_k)]
-        for yc, bk in stopy:
-            aR.add_patch(plt.Rectangle((yc - 0.5 * bk, -0.45), bk, 0.3,
-                                       color="#e74c3c", alpha=0.7))
-        aR.text(vys.y_Ve, -0.75, vys.vozidlo, ha="center", fontsize=7, color="#e74c3c")
-    if not vys.deska:
-        for k in range(vys.K.N):
-            y0 = k * vys.K.rozted
-            aR.add_patch(plt.Rectangle((y0, -0.1), vys.K.b, 0.1, color="#2e75b6", alpha=0.3))
-    aR.set_ylim(-0.9, 1.4)
-    aR.set_yticks([])
-    aR.set_title("Příčný řez – vybavení a poloha vozidla")
+    fig, (aR, aM, aV) = plt.subplots(3, 1, figsize=(10, 10), sharex=True,
+                                     gridspec_kw={"height_ratios": [1.7, 2.2, 2.2]})
     gov = vys.rozhodujici("M")
+    kresli_pricny_rez(aR, vys, gov, rovne=False)
+    aR.set_xlabel("")
+    aR.set_title("Příčný řez – vybavení a poloha zatížení dopravou")
     for s in vys.stavy:
         aM.plot(y, [d[f"M_{s}"] for d in sh], "o-", c=BARVY.get(s), ms=3, label=NAZVY_STAVU[s])
         aV.plot(y, [d[f"V_{s}"] for d in sh], "o-", c=BARVY.get(s), ms=3)
@@ -292,6 +281,164 @@ def plot_pricne(vys: VysledekSil, show: bool = True):
     aM.set_title(f"Max. hodnoty po {'pásech 1 m' if vys.deska else 'nosnících'} "
                  f"(rozhoduje {vys.popisky[gov]})")
     aR.set_xlim(-0.2, B + 0.2)
+    fig.tight_layout()
+    if show:
+        plt.show()
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Příčný řez s příčnou polohou zatížení dopravou
+# ---------------------------------------------------------------------------
+
+def _kota(ax, y0: float, y1: float, z: float, barva: str = "#333333"):
+    """Kóta mezi y0 a y1 ve výšce z (popis = vzdálenost [m])."""
+    ax.annotate("", (y0, z), (y1, z), arrowprops=dict(arrowstyle="<->", color=barva, lw=0.7,
+                                                      shrinkA=0, shrinkB=0))
+    ax.text(0.5 * (y0 + y1), z + 0.03, f"{y1 - y0:.2f}", ha="center", va="bottom", fontsize=6.5,
+            color=barva)
+
+
+def _retez_kot(ax, body, z: float, barva: str = "#333333"):
+    """Řetězec kót přes body (y) ve výšce z, s vynášecími čárkami."""
+    body = sorted({round(float(b), 4) for b in body})
+    for a, b in zip(body[:-1], body[1:]):
+        if b - a > 1e-3:
+            _kota(ax, a, b, z, barva)
+    for y in body:
+        ax.plot([y, y], [z - 0.07, z + 0.07], color=barva, lw=0.7)
+
+
+def popis_vozidla(vys: VysledekSil) -> str:
+    """Popis vozidla s tíhami náprav (charakteristické hodnoty, bez δ)."""
+    from . import schemata_zatizitelnosti as sz
+    V = vys.V
+    if vys.druh_q == "Vr":
+        v = sz.VOZIDLA_VR[vys.schema_q]
+        F = [a.podil * 10.0 * V for a in v.napravy]
+        nap = (f"{len(F)} × {F[0]:.0f}" if max(F) - min(F) < 1e-9 else
+               " + ".join(f"{f:.0f}" for f in F))
+        return f"Vr = {V:.1f} t – {v.nazev} ({v.obrazek})\nnápravy {nap} kN, šířka {v.sirka:g} m"
+    if vys.druh_q == "Ve":
+        return f"Ve = {V:.1f} t – souprava (obr. 7.5)\nnápravy 9 × {10.0 * V / 9.0:.0f} kN, šířka 3 m"
+    return vys.vozidlo
+
+
+def _popis_pruhu(p: dict, vn: float) -> str:
+    txt = p["nazev"]
+    if p["naprava"]:
+        F = 2.0 * p["F_kola"] * vn                                  # tíha nápravy [kN]
+        txt += "\n" + ("2 × " if p["naprava"] == "dvojnaprava" else "") + f"{F:.0f} kN"
+    q = p["q"]
+    return txt + f"\n{q:g}·vn = {q * vn:.2f} kN/m²"
+
+
+def kresli_pricny_rez(ax, vys: VysledekSil, o: Optional[int] = None, rovne: bool = True):
+    """Příčný řez mostovkou (do osy ax): nosníky (posuzovaný oranžově), chodníky, vozovka,
+    zábradlí / svodidla a příčná poloha zatížení dopravou – pruhy schématu Vn s nápravami
+    a rovnoměrným zatížením, nebo obrys vozidla Vr / Ve / MLC; stopy kol; řetězec kót
+    (u Vn a Vr od kraje vozovky u užšího chodníku).  rovne = stejné měřítko os."""
+    from . import schemata_zatizitelnosti as sz
+    K, vyb = vys.K, vys.vybaveni
+    B = K.B
+    hn = float(K.h if vys.deska else K.h_ekv)
+    t_ch, t_v, zt = 0.20, 0.08, 1.55
+    cq, ct = BARVY["q"], "#a52a1a"
+    # nosná konstrukce
+    if vys.deska:
+        ax.add_patch(Rectangle((0.0, -hn), B, hn, fc=C_NOSNIK, ec="#2e75b6", lw=0.8))
+    else:
+        for k, y in enumerate(K.y_nos):
+            ax.add_patch(Rectangle((y - 0.5 * K.b, -hn), K.b, hn, fc=C_NOSNIK, ec="#2e75b6", lw=0.6))
+            ax.text(y, -0.5 * hn, vys.popisky[k], ha="center", va="center", fontsize=6.5,
+                    color="#2e75b6")
+            if K.spara and k < K.N - 1:
+                ax.add_patch(Rectangle((y + 0.5 * K.b, -0.3 * hn), K.b_s, 0.3 * hn, fc=C_SPARA,
+                                       ec="#bbbbbb", lw=0.4))
+    # vybavení
+    w = vyb.sirka_vozovky(B)
+    for y0, sir, nazev in ((0.0, vyb.chodnik_L, "chodník L"),
+                           (B - vyb.chodnik_P, vyb.chodnik_P, "chodník P")):
+        if sir > 0:
+            ax.add_patch(Rectangle((y0, 0.0), sir, t_ch, fc="#cccccc", ec="#888888", lw=0.5))
+            ax.text(y0 + 0.5 * sir, 0.5 * t_ch, f"{nazev} {sir:g} m", ha="center", va="center",
+                    fontsize=5.5)
+    ax.add_patch(Rectangle((vyb.chodnik_L, 0.0), w, t_v, fc="#555555", ec="none"))
+    for l in vyb.liniova_vse(B):
+        v = 1.0 if l.nazev.startswith("zábradlí") else 0.75 if l.nazev.startswith("svodidlo") else 0.3
+        na_chodniku = l.y < vyb.chodnik_L or l.y > B - vyb.chodnik_P
+        ax.add_patch(Rectangle((l.y - 0.5 * l.sirka, t_ch if na_chodniku else t_v), l.sirka, v,
+                               fc="#2e75b6", ec="none", alpha=0.7))
+    # pohyblivé zatížení
+    body = [vyb.chodnik_L, B - vyb.chodnik_P]
+    if "q" in vys.stavy:
+        if vys.druh_q == "Vn":
+            vn = sz.vn_z_Vn(vys.V)
+            for p in vys.pruhy_q:
+                y0, y1 = p["y0"], p["y1"]
+                zb = p["nazev"].startswith("zbý")
+                ax.add_patch(Rectangle((y0, t_v), y1 - y0, 0.1, fc=cq, alpha=0.12 if zb else 0.3,
+                                       ec="none", hatch="///" if zb else None))
+                ax.add_patch(Rectangle((y0, t_v), y1 - y0, 1.25, fill=False, ec=cq, lw=0.8,
+                                       ls="--"))
+                ax.text(0.5 * (y0 + y1), t_v + 0.75, _popis_pruhu(p, vn), ha="center",
+                        va="center", fontsize=6.5, color=ct)
+                body += [y0, y1]
+        else:
+            for y0, y1 in vys.obrys_q:
+                ax.add_patch(Rectangle((y0, t_v + 0.3), y1 - y0, 0.95, fc=cq, alpha=0.12, ec=cq,
+                                       lw=1.0))
+                ax.text(0.5 * (y0 + y1), t_v + 0.78, popis_vozidla(vys), ha="center",
+                        va="center", fontsize=6.5, color=ct)
+                body += [y0, y1]
+        for y, b in vys.stopy_q:
+            ax.add_patch(Rectangle((y - 0.5 * b, t_v), b, 0.14, fc=cq, ec=ct, lw=0.5, alpha=0.9))
+            body.append(y)
+        if vys.druh_q in ("Vn", "Vr"):
+            pp = sz.pricna_poloha(vyb.chodnik_L, vyb.chodnik_P, B)
+            ax.plot([pp.y_kraj] * 2, [-hn, zt + 0.2], color=cq, lw=1.0, ls=":")
+            ax.text(pp.y_kraj, zt + 0.25, f" kraj vozovky u užšího chodníku {pp.strana} ",
+                    ha="right" if pp.strana == "P" else "left", va="bottom", fontsize=6.5, color=ct)
+        else:
+            ax.plot([vys.y_Ve] * 2, [t_v, zt + 0.2], color=cq, lw=0.8, ls="-.")
+            ax.text(vys.y_Ve, zt + 0.25, f"osa vozidla y = {vys.y_Ve:.2f} m", ha="center",
+                    va="bottom", fontsize=6.5, color=ct)
+    _retez_kot(ax, body, zt)
+    # posuzovaný výstup
+    if o is not None:
+        yo = float(vys.vyst.y[o])
+        wo = vys.vyst.sirka_okna if vys.deska else K.b
+        ax.add_patch(Rectangle((yo - 0.5 * wo, -hn), wo, hn, fill=False, ec=C_POS, lw=2.2))
+        ax.text(yo, -hn - 0.06, f"posuzovaný {vys.popisky[o]}", ha="center", va="top", fontsize=7,
+                color=C_POS, fontweight="bold")
+    ax.set_xlim(-0.3, B + 0.3)
+    ax.set_ylim(-hn - 0.45, zt + 0.6)
+    if rovne:
+        ax.set_aspect("equal")
+    ax.set_yticks([])
+    for s in ("left", "right", "top"):
+        ax.spines[s].set_visible(False)
+    ax.set_xlabel("y [m] od levého okraje mostovky; kóty [m]")
+
+
+def nadpis_pricneho_rezu(vys: VysledekSil) -> str:
+    nad = f"Příčný řez – {vys.vozidlo}" if "q" in vys.stavy else "Příčný řez"
+    if vys.poloha_q:
+        nad += f", {vys.poloha_q}"
+    if "q" in vys.stavy:
+        nad += f"; δ = {vys.dyn:.3g}" + (" (1 pruh; δ2, δ3 při více pruzích)"
+                                        if vys.druh_q == "Vn" else "")
+    if vys.q_ch:
+        nad += f"; chodci {vys.q_ch:g} kN/m²"
+    return nad
+
+
+def plot_pricny_rez(vys: VysledekSil, o: Optional[int] = None, show: bool = True):
+    """Samostatný graf příčného řezu s polohou zatížení dopravou."""
+    B = vys.K.B
+    fig, ax = plt.subplots(figsize=(min(max(7.0, 0.8 * B + 1.5), 16.0), 3.8))
+    kresli_pricny_rez(ax, vys, o)
+    ax.set_title(textwrap.fill(nadpis_pricneho_rezu(vys), 110), fontsize=9)
     fig.tight_layout()
     if show:
         plt.show()

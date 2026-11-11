@@ -7,6 +7,8 @@ stavů pro posudek nosníku (modul Posudek PB):
   g0     vlastní tíha nosné konstrukce
            • nosníky: každý nosník SAMOSTATNĚ, bez spolupůsobení (1D spojitý
              nosník o polích K.L se stejným uložením jako most), g0 = A·γ_b,
+             + tíha dobetonávky mezi nosníky A_dob·γ_b – nese ji samostatně sousední
+             dvojice nosníků (každý polovinu; krajní nosník jen ½ dobetonávky),
            • deska: 2D MKP, g0 = h·γ_b po celé ploše,
   g-g0   ostatní stálé zatížení – 2D MKP (příčný roznos):
            skladba vozovky, skladba chodníků, svodidla, zábradlí, další liniová;
@@ -178,6 +180,8 @@ class VysledekSil:
     stavy: Dict[str, StavSil]
     g0: float                           # nosníky: g0 [kN/m] na nosník; deska: [kN/m²]
     g_spary: float = 0.0                # tíha výplně spáry [kN/m]
+    g_dobetonavky: float = 0.0          # tíha jedné dobetonávky mezi nosníky [kN/m] (v g0)
+    g0_dobetonavka: Optional[StavSil] = None  # část g0 od dobetonávky (předává se do posudku)
     Ve: float = 0.0                     # [t] (jen vozidlo Ve)
     dyn: float = 1.0                    # δ (u Vn δ1 – jednoho pruhu)
     dyn_zdroj: str = ""                 # zdůvodnění δ („ČSN 73 6222, čl. 8.4 …“, „zadáno“)
@@ -193,7 +197,9 @@ class VysledekSil:
     q_ch_zdroj: str = ""                # „zadáno“ | odkaz na normu
     poloha_q: str = ""                  # popis příčné polohy pohyblivého zatížení
     stopy_q: list = field(default_factory=list)   # [(y_osy, šířka)] stop kol – příčný řez
-    pruhy_q: list = field(default_factory=list)   # [(y0, y1, popis)] zatěžovacích pruhů (Vn)
+    pruhy_q: list = field(default_factory=list)   # pruhy Vn + zbývající plocha: dict y0, y1, nazev,
+    #                                               naprava, F_kola, q (násobky vn)
+    obrys_q: list = field(default_factory=list)   # [(y0, y1)] obrys vozidla (Vr, Ve, MLC)
     nastaveni_q: dict = field(default_factory=dict)  # vstupy q (pro přepočet jiného vozidla)
     cache: dict = field(default_factory=dict, repr=False)  # sdílené mezivýsledky (qch)
     soucinitele: Soucinitele = field(default_factory=Soucinitele)
@@ -271,17 +277,31 @@ class VysledekSil:
         x[0] = 0.0
         return TabulkaSil(x, s.M_max[o, k].copy(), s.M_min[o, k].copy(), Vmax, Vmin)
 
+    def stale_bez_g0(self) -> List[StavSil]:
+        """Stálé stavy, které posudek nepočítá z průřezu sám: g − g0 a dobetonávka (část g0)."""
+        return [self.stavy["g-g0"]] + ([self.g0_dobetonavka] if self.g0_dobetonavka else [])
+
+    def tabulka_stale_pb(self, o: int) -> TabulkaSil:
+        """Stálé zatížení předávané do posudku na výstupu o: g − g0 + dobetonávka."""
+        st = self.stale_bez_g0()
+        s = st[0]
+        for d in st[1:]:
+            s = s + d
+        return self.tabulka_stavu(o, s)
+
     def kombinace(self, o: int, druh: str, vcetne_g0: bool = False) -> TabulkaSil:
         """Obálka kombinace (ČSN EN 1990) na výstupu o:
-        G = (g0 +) (g − g0), Q = q;  M_max = Σ max(γ_sup·G, γ_inf·G) + f_Q·Q_max."""
+        G = g0 + (g − g0), Q = q;  M_max = Σ max(γ_sup·G, γ_inf·G) + f_Q·Q_max.
+        vcetne_g0=False (předání do posudku, který vlastní tíhu nosníku počítá z průřezu):
+        G = (g − g0) + dobetonávka mezi nosníky (část g0, kterou průřez nosníku nezahrnuje)."""
         if druh not in DRUHY_KOMBINACI:
             raise ValueError(f"Neznámá kombinace '{druh}'.")
         gs, gi, fq = self.soucinitele.faktory(druh)
-        stale = (["g0"] if vcetne_g0 else []) + ["g-g0"]
-        t0 = self.tabulka(o, stale[0])
+        stale = [self.stavy["g0"], self.stavy["g-g0"]] if vcetne_g0 else self.stale_bez_g0()
+        t0 = self.tabulka_stavu(o, stale[0])
         out = TabulkaSil(t0.x.copy(), *[np.zeros_like(t0.x) for _ in range(4)])
         for s in stale:
-            t = self.tabulka(o, s)
+            t = self.tabulka_stavu(o, s)
             for a in ("M_max", "V_max"):
                 v = getattr(t, a)
                 getattr(out, a)[:] += np.maximum(gs * v, gi * v)
@@ -354,6 +374,12 @@ def _nosnik_samostatne(K: Konstrukce):
     Vp = Vn.copy()
     Vp[nos.i_sup] += R
     return nos.xs, M, Vn, Vp, nos.i_sup
+
+
+def _podil_mezer(nv: int) -> np.ndarray:
+    """Podíl zatížení mezer mezi nosníky (spára, dobetonávka) na nosnících, tvar (nv, 1):
+    každou mezeru nesou sousední nosníky po ½ → vnitřní nosník 1, krajní ½."""
+    return np.array([0.5 * (o > 0) + 0.5 * (o < nv - 1) for o in range(nv)])[:, None]
 
 
 def _prenes_1D(xs2: np.ndarray, vyst: Vystupy, o: int, Ltot: float, xs1, M1, Vm1, Vp1,
@@ -571,9 +597,12 @@ def _schema_Vn(model, vyst, K: Konstrukce, vyb: Vybaveni, Vn: float, schema: str
         s["useky"] = us
         slozky.append(s)
         acc_pruhy.append(acc)
-        pruhy_popis.append((p.y0, p.y1, f"pruh {p.cislo}"))
+        pruhy_popis.append(dict(y0=p.y0, y1=p.y1, nazev=f"pruh {p.cislo}", naprava=p.naprava,
+                                F_kola=p.F_kolo, q=p.q_rovnomerne))
     acc_z, us_z = None, []
     if zbytek is not None:
+        pruhy_popis.append(dict(y0=zbytek[0], y1=zbytek[1], nazev="zbývající plocha",
+                                naprava=None, F_kola=0.0, q=1.0))
         us_z = _useky_pasu(K, zbytek[0], zbytek[1], vn, krok_useky, dy_max=1.0)
         acc_z = _soucty_useku(model, vyst, us_z)
         n_st += len(us_z)
@@ -626,7 +655,8 @@ def _schema_Vr(model, vyst, K: Konstrukce, vyb: Vybaveni, Vr: float, schema: str
     if v.sirka > pp.w + 1e-9:
         varovani.append(f"Vozidlo Vr (šířka {v.sirka:g} m) je širší než vozovka ({pp.w:.2f} m).")
     stopy = sorted({(y, b) for y in (y1, y2) for b in {a.sirka for a in v.napravy}})
-    return dict(stav=_stav("q", popis(Vr), ob, n_p), popis=popis,
+    obrys = [(min(pp.y_kraj, pp.y_kraj + pp.smer * v.sirka), max(pp.y_kraj, pp.y_kraj + pp.smer * v.sirka))]
+    return dict(stav=_stav("q", popis(Vr), ob, n_p), popis=popis, obrys=obrys,
                 vozidlo=lambda t: f"Vr {t} t ({v.nazev})", y=yc, poloha=pp.popis, dyn=d,
                 dyn_zdroj=dzdroj, stopy=stopy, pruhy=[], varovani=varovani,
                 rozvor=v.rozchod, b_k=max(a.sirka for a in v.napravy),
@@ -666,6 +696,7 @@ def vnitrni_sily(
     g0: Optional[float] = None,
     gamma_beton: float = GAMMA_BETON,
     g_spary: float = 0.0,
+    A_dobetonavky: float = 0.0,
     # ---- pohyblivé zatížení ----
     Ve: Optional[float] = None,
     MLC: Optional[str] = None,
@@ -700,6 +731,11 @@ def vnitrni_sily(
         gamma_beton: objemová tíha [kN/m³].
         g_spary:     tíha výplně spáry [kN/m] (nese ji samostatně sousední dvojice
                      nosníků, každý polovinu) – přičte se ke g − g0.
+        A_dobetonavky: plocha průřezu jedné dobetonávky mezi sousedními nosníky [m²] →
+                     g_dob = A·γ_b; nese ji samostatně sousední dvojice nosníků (každý
+                     polovinu, bez spolupůsobení) – přičte se ke g0: vnitřní nosník 2 × ½,
+                     krajní nosník ½ (dobetonávka jen z jedné strany).  Do posudku se předává
+                     s g − g0 (posudek počítá z průřezu jen vlastní tíhu nosníku).
         Ve:          vozidlo Ve – výjimečná zatížitelnost [t].
         MLC, typ_MLC: vozidlo MLC (např. "MLC80"), "k" kolové | "p" pásové.
         dist:        MLC: vzdálenost vozidel v koloně [m]; None = jedno vozidlo.
@@ -740,6 +776,10 @@ def vnitrni_sily(
         raise ValueError("Dynamický součinitel musí být kladný.")
     if g_spary < 0:
         raise ValueError("Tíha spáry musí být nezáporná.")
+    if A_dobetonavky is None:
+        A_dobetonavky = 0.0
+    if A_dobetonavky < 0:
+        raise ValueError("Plocha dobetonávky musí být nezáporná.")
     varovani: List[str] = []
 
     # ---- 2D model -----------------------------------------------------------
@@ -780,6 +820,23 @@ def vnitrni_sily(
                              g0_ * M, g0_ * Vm, g0_ * Vp)
         jedn = (M, Vm, Vp)
 
+    # ---- dobetonávka mezi nosníky (část g0, samostatně ½ + ½) -----------------
+    g_dob, s_dob = 0.0, None
+    if A_dobetonavky and K.je_deska:
+        varovani.append("Plocha dobetonávky je zadána, ale konstrukce je deska – ignorováno.")
+    elif A_dobetonavky and nv < 2:
+        varovani.append("Plocha dobetonávky je zadána, ale most má jen jeden nosník – ignorováno.")
+    elif A_dobetonavky:
+        g_dob = float(A_dobetonavky) * gamma_beton
+        Mj, Vmj, Vpj = jedn
+        c = _podil_mezer(nv)
+        s_dob = StavSil.staly("g0", f"dobetonávka mezi nosníky A = {float(A_dobetonavky):g} m², "
+                              f"{g_dob:.3g} kN/m (samostatně, ½ na sousední nosníky)",
+                              g_dob * c * Mj, g_dob * c * Vmj, g_dob * c * Vpj)
+        s_g0 = s_g0 + s_dob
+        s_g0.popis += (f"; dobetonávka {g_dob:.3g} kN/m (A = {float(A_dobetonavky):g} m², "
+                       "samostatně, ½ na sousední nosníky – krajní nosník ½ dobetonávky)")
+
     # ---- g − g0 -----------------------------------------------------------
     platky = vyb.platky(B, x_od, x_do)
     if platky:
@@ -790,7 +847,7 @@ def vnitrni_sily(
         s_g = StavSil.nula("g-g0", "ostatní stálé: nezadáno", shp)
     if g_spary and not K.je_deska and K.spara:
         Mj, Vmj, Vpj = jedn
-        c = np.array([0.5 * (o > 0) + 0.5 * (o < nv - 1) for o in range(nv)])[:, None]
+        c = _podil_mezer(nv)
         s_sp = StavSil.staly("g-g0", "", g_spary * c * Mj, g_spary * c * Vmj,
                              g_spary * c * Vpj)
         s_g = s_g + s_sp
@@ -819,6 +876,7 @@ def vnitrni_sily(
 
     vys = VysledekSil(K=K, vybaveni=vyb, xs=model.xs.copy(), vyst=vyst, stavy=stavy,
                       g0=g0_, g_spary=g_spary if K.spara else 0.0,
+                      g_dobetonavky=g_dob, g0_dobetonavka=s_dob,
                       soucinitele=soucinitele or Soucinitele(), popis=popis,
                       varovani=varovani + pr["varovani"], varovani_zaklad=varovani,
                       kontrola=kontrola, sit=sit_modelu(model), y_vyst=np.asarray(vyst.y, float),
@@ -866,7 +924,7 @@ def _promenne(model, vyst: Vystupy, K: Konstrukce, vyb: Vybaveni, n: dict, cache
     attrs = dict(druh_q=druh, q_ch=q if "qch" in stavy else 0.0, q_ch_zdroj=qz, Ve=float(Ve or 0.0),
                  V=0.0, schema_q="", dyn=1.0, dyn_zdroj="", roz=roz, vozidlo="",
                  y_Ve=float(y_zad) if y_zad is not None else vyb.y_osy_vozovky(B),
-                 rozvor=VE_ROZVOR, b_k=VE_B_K, poloha_q="", stopy_q=[], pruhy_q=[],
+                 rozvor=VE_ROZVOR, b_k=VE_B_K, poloha_q="", stopy_q=[], pruhy_q=[], obrys_q=[],
                  q_nastaveni=None)
 
     # ---- q: pohyblivé zatížení ----------------------------------------------
@@ -925,6 +983,7 @@ def _promenne(model, vyst: Vystupy, K: Konstrukce, vyb: Vybaveni, n: dict, cache
         attrs.update(V=float(Ve or 0.0), dyn=dyn, dyn_zdroj=dyn_zdroj, vozidlo=voz_popis,
                      rozvor=rozvor, b_k=b_k, poloha_q=f"osa y = {y_c:.2f} m",
                      stopy_q=[(y1, b_k), (y2, b_k)],
+                     obrys_q=[(y_c - 1.5, y_c + 1.5)] if druh == "Ve" else [(y_c - pul, y_c + pul)],
                      q_nastaveni=dict(typ="pojezd", polohy=polohy, meritko=1.0, popis=popis,
                                       vozidlo=lambda t: f"Ve {t} t"))
     elif druh in ("Vn", "Vr"):
@@ -942,7 +1001,7 @@ def _promenne(model, vyst: Vystupy, K: Konstrukce, vyb: Vybaveni, n: dict, cache
         varovani += r["varovani"]
         attrs.update(V=V, schema_q=sch, dyn=r["dyn"], dyn_zdroj=r["dyn_zdroj"],
                      vozidlo=r["vozidlo"](f"{V:g}"), y_Ve=r["y"], poloha_q=r["poloha"],
-                     stopy_q=r["stopy"], pruhy_q=r["pruhy"],
+                     stopy_q=r["stopy"], pruhy_q=r["pruhy"], obrys_q=r.get("obrys", []),
                      q_nastaveni=dict(r["q_nastaveni"], popis=lambda VV, t: r["popis"](VV),
                                       vozidlo=r["vozidlo"]))
         if "rozvor" in r:

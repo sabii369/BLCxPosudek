@@ -231,7 +231,7 @@ pro parametrické studie.
 
 | Stav | Obsah | Model |
 |---|---|---|
-| **g0** | vlastní tíha nosné konstrukce | nosníky: každý nosník **samostatně, bez spolupůsobení** (1D spojitý nosník se stejným uložením), g0 = A·γ_b; deska: 2D MKP, g0 = h·γ_b |
+| **g0** | vlastní tíha nosné konstrukce | nosníky: každý nosník **samostatně, bez spolupůsobení** (1D spojitý nosník se stejným uložením), g0 = A·γ_b; + dobetonávka mezi nosníky A_dob·γ_b – nesou ji samostatně sousední nosníky ½ + ½ (krajní nosník jen ½ dobetonávky); deska: 2D MKP, g0 = h·γ_b |
 | **g − g0** | skladba vozovky, skladba chodníků, svodidla, zábradlí, další liniová zatížení | 2D MKP (příčný roznos); tíha výplně spáry g_s se nese samostatně – každý ze sousedních nosníků polovinu |
 | **q_ch** | zatížení chodců q [kN/m²] na chodnících – zadané, nebo podle ČSN 73 6222: s Vn a Vr **2,5 kN/m²** (tab. 7.1, 7.2 – redukovaná hodnota w_f), s Ve **0** (chodci vyloučeni, čl. 3.1.4, 5.2.8), s MLC 0 | 2D MKP – obálka: chodníky rozdělené na úseky ≈ 0,5 m (levý i pravý zvlášť), max = Σ kladných, min = Σ záporných účinků (nepříznivé části plochy vlivu) |
 | **q** | zatížení dopravou × dynamický součinitel δ (zadaný, nebo podle ČSN 73 6222, kap. 8): **Vn** – schéma normální zatížitelnosti, **Vr** – jediné vozidlo výhradní zatížitelnosti (obojí u kraje vozovky u užšího chodníku, viz 7.6), **Ve** – souprava výjimečné zatížitelnosti v ose vozovky, nebo vozidlo **MLC** | 2D MKP – obálka max/min přes polohy vozidla (krok 0,25 m + polohy hrany zatížení v řezech d); u Vn nápravy v pruzích nezávisle a rovnoměrné zatížení v nepříznivých částech plochy vlivu |
@@ -250,6 +250,7 @@ MLC / Ve.
 | svodidlo | kN/m | na každé straně, pás 0,2 m na chodníku u okraje vozovky |
 | plocha nosníku A, γ_b | m², kN/m³ | g0 = A·γ_b (deska: h·γ_b); lze zadat i přímo g0 |
 | tíha výplně spáry | kN/m | jen nosníky se spárou |
+| plocha dobetonávky A_dob | m² | plocha jedné dobetonávky mezi dvěma sousedními nosníky; přičte se ke g0 (vnitřní nosník ½ + ½, krajní ½); do posudku se předává s g − g0 |
 | dynamický součinitel δ | – | násobí zatížení vozidla; prázdné = podle ČSN 73 6222, kap. 8 (viz níže) |
 | zatížení chodníků q_chodnik | kN/m² | prázdné = podle ČSN 73 6222 (Vn, Vr 2,5; Ve 0); 0 = bez chodců |
 | vozidlo Vn / Vr / Ve, MLC | t | jedno zvolené zatížení dopravou (viz 7.6) |
@@ -300,6 +301,8 @@ počty pruhů). Použitá hodnota a její zdroj jsou v popisu stavu q (protokol,
   na převislých koncích se doplní nulové hodnoty.
 - Vlastní tíhu nosníku počítá posudek sám z průřezu → exportuje se jen g − g0 a q
   (`obsahuje_vlastni_tihu = false`); g0 z BLC je v komentáři souboru pro kontrolu.
+  Dobetonávka mezi nosníky (část g0 BLC) průřez posudku nezahrnuje – exportuje se
+  spolu s g − g0 (v kombinacích i v režimu zatěžovacích stavů).
 - Režim **kombinace** (výchozí): obálky 6.10a, 6.10b (nebo 6.10), charakteristické,
   časté a kvazistálé kombinace s plnými M_max, M_min, V_max, V_min.
   Režim **zatezovaci_stavy**: g − g0 jako stálý stav (tabulka) a q jako proměnný stav
@@ -400,7 +403,13 @@ mostu a grafy).
 - vozidlo v poloze pro max M ve středu rozpětí | pro max V u podpory (řez d od osy ložiska);
   poloha se hledá mezi stejnými polohami jako obálka q. U schématu Vn jsou zakresleny
   nápravy pruhů v rozhodujících polohách a rovnoměrné zatížení (světle) v úsecích s nepříznivým
-  účinkem; v nadpisu je počet zatížených pruhů a δ.
+  účinkem; v nadpisu je počet zatížených pruhů a δ,
+- **příčný řez s příčnou polohou zatížení dopravou**: nosníky (posuzovaný oranžově), chodníky,
+  vozovka, zábradlí a svodidla; u Vn zatěžovací pruhy a zbývající plocha s tíhami náprav
+  a rovnoměrným zatížením (hodnoty pro dané vn), u Vr / Ve / MLC obrys vozidla s tíhami náprav;
+  stopy kol, svislice kraje vozovky u užšího chodníku (Vn, Vr) nebo osy vozidla (Ve, MLC)
+  a řetězec kót [m] (pruhy, okraje vozidla, osy stop). Stejný řez je v grafu „Příčné rozdělení“
+  na kartě 0.
 
 **Kapitola napětí v betonu** – pod každý graf „Napětí v krajních vláknech po délce – fáze“
 je doplněn graf „Napětí v řezech“: napětí po výšce průřezu v řezu posudku ve středu
@@ -454,11 +463,27 @@ Zvolené vozidlo musí být Vn, Vr nebo Ve – pro ně se počítá protokol.
   je-li nutné zatížitelnost vyznačit (Vn < 26 t, Vr < 48 t, V_aj < 11,5 t; čl. 14.1).
 - Karta 7: karty MSÚ, MSP a celkem s hodnotami všech druhů, ve sloupci posudků
   „Vn / Vr / Ve [t]“ (∞ = neomezuje / nezávisí, ✗ = nevyhovuje nezávisle na zatížení).
-- Protokol začíná kapitolou „Zatížitelnost podle ČSN 73 6222“ (souhrnná tabulka druhů,
-  V_aj, tabulky po mezních stavech pro každý druh); zbytek protokolu a grafy jsou spočteny pro
-  zvolené vozidlo při jeho zatížitelnosti (rozhodující posudek 100 %).
+- **Protokol** (volba *Protokol a výsledky zatížitelnosti* na kartě 0, `[blc]
+  protokol_zatizitelnosti`, v dávce `--protokol`):
+  - *souhrn* (výchozí) – kapitola 1 „Zatížitelnost podle ČSN 73 6222“ se všemi spočtenými druhy
+    (souhrnná tabulka, V_aj, popis a tabulka po mezních stavech pro každý druh); zbytek
+    protokolu a grafy jsou spočteny pro zvolené vozidlo při jeho zatížitelnosti,
+  - v kapitole 2.4 „Zatížení z modelu mostu (BLC)“ jsou navíc pro spočtené druhy **schémata
+    zatížení** při referenční tíze (Vn = 32 t, Vr = 60 t, Ve = 80 t podle `[blc]`) – půdorys
+    v poloze pro max M a max V a příčný řez s polohou zatížení; v grafu „Vnitřní síly na
+    nosnících“ je místo řádku zatížení dopravou q po řádku **obálka M a V od každé referenční
+    soupravy** (vč. δ, zvýrazněn nosník posuzovaný pro daný druh),
+  - *jen Vn / jen Vr / jen Ve* – kapitola „Zatížitelnost Vr – výhradní (ČSN 73 6222)“ jen
+    s tímto druhem a **posudky celého protokolu při zatížitelnosti tohoto druhu** (jeho
+    rozhodující posudek má využití 100 %, schéma, nosník a chodci odpovídají druhu);
+    karta 7 ukazuje výsledky téhož druhu. Po výpočtu lze volbu přepnout bez nového hledání
+    (posudek druhu se spočte jen poprvé, ≈ 3 s); nespočtený druh se při F5 dopočítá,
+  - v dávce `--protokol vse`: souhrn do `DIR/protokol.html` a protokol každého druhu do
+    `DIR/<druh>/protokol.html`.
+- Grafy zatížení jednotlivých druhů jsou i v seznamu grafů na kartě 7 („Zatížitelnost Vn –
+  zatížení na mostě“, „… – příčný řez“).
 - Trvání: desítky výpočtů posudku na každé schéma (příklad KA-67/12, všechny tři druhy
-  ≈ 40 s; dávka s protokolem ≈ 70 s).
+  ≈ 40 s; dávka se souhrnným protokolem ≈ 70 s, s `--protokol vse` ≈ 85 s).
 
 ### 8.6 Aktuální stáří a oslabení výztuže korozí
 

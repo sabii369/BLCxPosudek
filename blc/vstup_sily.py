@@ -8,7 +8,7 @@ Sekce:
   [konstrukce]   typ_konstrukce, prefabrikat, L, N, b, Iy, h, beton, nu, d, spara, b_s, Iy_s,
                  beton_s, alfa, sikmost, k_v [MN/m na 1 m podpory; 0 = tuhá], uloz,
                  k_rot [MNm/rad na 1 m; prázdné = dokonalé], spoj, beta_s_pevne
-  [stale]        A_nosniku [m²] nebo g0, gamma_beton, g_spary, chodnik_L, chodnik_P,
+  [stale]        A_nosniku [m²] nebo g0, gamma_beton, g_spary, A_dobetonavky [m²], chodnik_L, chodnik_P,
                  g_chodnik [kN/m²], g_vozovka [kN/m²], g_zabradli, g_svodidla [kN/m],
                  [[stale.liniova]] nazev, g, y, sirka
   [pohyblive]    Ve [t] nebo MLC + typ_MLC ("k" | "p") + dist (kolona) nebo Vn / Vr [t]
@@ -66,7 +66,7 @@ def parametry(d: dict) -> dict:
         liniova=[LiniovaZatizeni(l.get("nazev", f"liniové {i + 1}"), float(l["g"]),
                                  float(l["y"]), float(l.get("sirka", 0.2)))
                  for i, l in enumerate(s.get("liniova", []))])
-    for a in ("A_nosniku", "g0", "gamma_beton", "g_spary"):
+    for a in ("A_nosniku", "g0", "gamma_beton", "g_spary", "A_dobetonavky"):
         if a in s:
             kw[a] = s[a]
     p = d.get("pohyblive", {})

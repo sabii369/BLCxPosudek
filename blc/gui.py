@@ -366,6 +366,7 @@ class App(tk.Tk):
             ("Plocha nosníku A", "A_nos", "", "[m²]  (g0 = A·γ; deska: h·γ)"),
             ("Objemová tíha γ", "gamma_b", "25", "[kN/m³]"),
             ("Tíha výplně spáry", "g_sp", "0", "[kN/m]  (½ na sousední nosníky)"),
+            ("Plocha dobetonávky A", "A_dob", "0", "[m²]  (mezi nosníky, v g0; ½ na sousední nosníky)"),
             ("Dynamický součinitel δ", "dyn", "", "[-]  (násobí Ve; prázdné = ČSN 73 6222: 1,05)"),
             ("Osa vozidla Ve y", "y_Ve", "", "[m]  (prázdné = osa vozovky)"),
             ("Krok poloh Ve", "krok_q", "0.25", "[m]"),
@@ -696,6 +697,7 @@ class App(tk.Tk):
                            g_zabradli=self._get("g_zab"), g_svodidla=self._get("g_svo"))
             kw = dict(vybaveni=vyb, A_nosniku=self._opt("A_nos"),
                       gamma_beton=self._get("gamma_b"), g_spary=self._opt("g_sp") or 0.0,
+                      A_dobetonavky=self._opt("A_dob") or 0.0,
                       Ve=self._get("Ve"), dyn=self._opt("dyn"), y_Ve=self._opt("y_Ve"),
                       roznos=bool(e["roznos"].get()), t_voz=self._get("t_voz"),
                       krok=self._get("krok_q"), tisk=False, **self._kw_konstrukce())

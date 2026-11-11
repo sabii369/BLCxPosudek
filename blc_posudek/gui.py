@@ -42,6 +42,9 @@ VOZIDLA_KLIC = {v: k for k, v in VOZIDLA_GUI.items()}
 VOZIDLA_KLIC["Ve"] = "Ve"
 DRUHY_ZAT_GUI = {"vse": "Vn, Vr i Ve", "vozidlo": "jen zvolené vozidlo"}
 DRUHY_ZAT_KLIC = {v: k for k, v in DRUHY_ZAT_GUI.items()}
+PROTOKOL_GUI = {"souhrn": "souhrn – posudky pro zvolené vozidlo", "Vn": "jen Vn – posudky při Vn",
+                "Vr": "jen Vr – posudky při Vr", "Ve": "jen Ve – posudky při Ve"}
+PROTOKOL_KLIC = {v: k for k, v in PROTOKOL_GUI.items()}
 SEDA = "#52514e"
 
 
@@ -106,6 +109,7 @@ class AplikaceMost(Aplikace):
             ("prurez_z_posudku", "A, Iy z průřezu (karta 2)", "bool", True),
             ("nu", "Poissonovo číslo ν", "float", None),
             ("A_nosniku", "A nosníku [m²] (bez převzetí)", "optfloat", None),
+            ("A_dobetonavky", "A dobetonávky mezi nosníky [m²]", "optfloat", None),
             ("Iy", "Iy nosníku [m⁴] (bez převzetí)", "optfloat", None),
             ("h", "Tloušťka desky h [m] (deska)", "optfloat", None)], sloupcu=2, pri_zmene=zm)
         self.f_kon.pack(fill="x")
@@ -225,6 +229,17 @@ class AplikaceMost(Aplikace):
         self.var_zat_druhy = tk.StringVar(value=DRUHY_ZAT_GUI["vse"])
         ttk.Combobox(bt, textvariable=self.var_zat_druhy, state="readonly", width=18,
                      values=list(DRUHY_ZAT_GUI.values())).pack(side="left")
+        bt2 = ttk.Frame(prav)
+        bt2.pack(fill="x", pady=(4, 0))
+        ttk.Label(bt2, text="Protokol a výsledky zatížitelnosti:").pack(side="left")
+        self.var_zat_prot = tk.StringVar(value=PROTOKOL_GUI["souhrn"])
+        cb = ttk.Combobox(bt2, textvariable=self.var_zat_prot, state="readonly", width=34,
+                          values=list(PROTOKOL_GUI.values()))
+        cb.pack(side="left", padx=4)
+        cb.bind("<<ComboboxSelected>>", lambda e: self._prepni_protokol())
+        ttk.Label(bt2, foreground=SEDA, text="jen druh = kapitola zatížitelnosti a posudky při "
+                                             "jeho zatížitelnosti (přepnutí bez nového hledání)"
+                  ).pack(side="left", padx=4)
         self.lbl_blc = ttk.Label(prav, text="Vnitřní síly mostu nejsou spočteny.",
                                  foreground="#b42323", wraplength=700, justify="left")
         self.lbl_blc.pack(anchor="w", pady=4)
@@ -310,6 +325,7 @@ class AplikaceMost(Aplikace):
         out["vozidlo"] = VOZIDLA_KLIC.get(out.get("vozidlo", "Ve"), out.get("vozidlo", "Ve"))
         out["zatizitelnost"] = bool(self.var_zat.get())
         out["zatizitelnost_druhy"] = DRUHY_ZAT_KLIC.get(self.var_zat_druhy.get(), "vse")
+        out["protokol_zatizitelnosti"] = PROTOKOL_KLIC.get(self.var_zat_prot.get(), "souhrn")
         lin = [{k: v for k, v in r.items() if v is not None} for r in self.t_liniova.ziskej()]
         if lin:
             out["liniova"] = lin
@@ -326,6 +342,8 @@ class AplikaceMost(Aplikace):
         dz = m.get("zatizitelnost_druhy", "vse")
         self.var_zat_druhy.set(DRUHY_ZAT_GUI.get(dz if isinstance(dz, str) else "vse",
                                                  DRUHY_ZAT_GUI["vse"]))
+        self.var_zat_prot.set(PROTOKOL_GUI.get(m.get("protokol_zatizitelnosti") or "souhrn",
+                                               PROTOKOL_GUI["souhrn"]))
 
     def _nastav_data(self, d: dict):
         super()._nastav_data(d)
@@ -401,9 +419,11 @@ class AplikaceMost(Aplikace):
         def prace():
             vys = vys0 or vnitrni_sily(**kw)
             if zat:
-                from .zatizitelnost import zatizitelnost
-                res = zatizitelnost(d, vys, prubeh=prubeh)
-                return vys, res.o, res.model
+                from .zatizitelnost import zatizitelnost, protokol_druhu
+                prot = d["blc"].get("protokol_zatizitelnosti") or "souhrn"
+                res = zatizitelnost(d, vys, prubeh=prubeh, protokol=prot)
+                model = protokol_druhu(res, prot, prubeh)
+                return vys, model.blc["o"], model
             _, o, model = spocti(d, vys)
             return vys, o, model
 
@@ -420,6 +440,23 @@ class AplikaceMost(Aplikace):
                         "Výpočet mostu (BLC) a posudku nosníku…")
         if zat:
             self.after(300, self._obnov_prubeh)
+
+    def _prepni_protokol(self):
+        """Po výpočtu zatížitelnosti přepne výsledky a protokol na souhrn / jeden druh
+        (posudek při zatížitelnosti druhu se spočte jen poprvé, hledání se neopakuje)."""
+        res = getattr(self.model, "zatizitelnost", None) if self.model is not None else None
+        if res is None:
+            return
+        celek = res.celek or res
+        volba = PROTOKOL_KLIC.get(self.var_zat_prot.get(), "souhrn")
+        if volba != "souhrn" and volba not in celek.druhy:
+            messagebox.showinfo("Zatížitelnost", f"Zatížitelnost {volba} nebyla spočtena – spusťte "
+                                                 "výpočet znovu (F5).")
+            return
+        from .zatizitelnost import protokol_druhu
+        self._na_pozadi(lambda: protokol_druhu(celek, volba), self._zobraz_vysledky,
+                        f"Posudek při zatížitelnosti {volba}…" if volba != "souhrn" else
+                        "Souhrnný protokol zatížitelnosti…")
 
     def _obnov_prubeh(self):
         """Průběh výpočtu zatížitelnosti do stavového řádku (text nastavuje vlákno výpočtu)."""
@@ -587,7 +624,9 @@ class AplikaceMost(Aplikace):
                   f"{vys.q_ch:g} kN/m²" + (f" ({vys.q_ch_zdroj})" if vys.q_ch_zdroj else "") + "; "
                   f"předání: {zat.get('zpusob')}. "
                   f"Vlastní tíhu nosníku g0 počítá posudek z průřezu (model mostu: g0 = {vys.g0:.2f} "
-                  f"{'kN/m²' if vys.deska else 'kN/m'})."), foreground="#0a7d0a")
+                  f"{'kN/m²' if vys.deska else 'kN/m'})" +
+                  (f"; dobetonávka {vys.g_dobetonavky:.2f} kN/m (½ na sousední nosníky) se předává "
+                   "se stálým g − g0" if vys.g_dobetonavky else "") + "."), foreground="#0a7d0a")
         if jen_stav and self.t_blc.get_children():
             self._oznac_posuzovany(o)
         else:
@@ -655,8 +694,8 @@ class AplikaceMost(Aplikace):
             if Vn is not None and not np.allclose(Vn, Vx):
                 axv.plot(x, Vn, color=c, lw=0.9, ls="--")
         axm.invert_yaxis()
-        axm.set(title="M převzaté do posudku [kNm] (bez g0)", xlabel="x [m]")
-        axv.set(title="V převzaté do posudku [kN] (bez g0)", xlabel="x [m]")
+        axm.set(title="M převzaté do posudku [kNm] (bez vlastní tíhy nosníku)", xlabel="x [m]")
+        axv.set(title="V převzaté do posudku [kN] (bez vlastní tíhy nosníku)", xlabel="x [m]")
         for a in (axm, axv):
             a.grid(alpha=0.3)
         axm.legend(fontsize=7, ncol=2)

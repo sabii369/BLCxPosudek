@@ -67,6 +67,10 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
   sdílenými výpočty, q přeškálované `vys_pro_V`; schémata po posudcích `_slouc`: Vn dvounáprava / náhradní náprava
   < 16 t, Vr 6 / 2 / 3nápravové; stavy nezávisí / neomezuje / klesá; `Vaj`, `V_evidence`); protokol pro zvolené
   vozidlo, `model.zatizitelnost`, kapitola na začátek protokolu; GUI `AplikaceMost._zobraz_vysledky`.
+  Protokol jen pro druh: `protokol_druhu(res, druh)` (posudky při jeho zatížitelnosti; `[blc]
+  protokol_zatizitelnosti`, dávka `--protokol souhrn|Vn|Vr|Ve|vse`, GUI přepínání bez nového hledání);
+  v kapitole BLC (2.4) `blc_zat_pricny` a při zatížitelnosti (`dopln_kapitolu_blc`) `blc_zat_<druh>`, `blc_pricny_<druh>` při referenční tíze; graf `blc_sily` má místo řádku q řádky referenčních souprav
+  (`plotting_sily.kresli_pricny_rez` – příčný řez s polohou zatížení, pruhy, kóty).
 - Vozidlo q: `vnitrni_sily(Ve=…)`, `(Vn=…)`, `(Vr=…)` (+ `schema`), nebo `(MLC=…, typ_MLC="k"|"p", dist=None|kolona)`;
   v `[blc]` `vozidlo = "Vn" | "Vr" | "Ve" | "MLC_k" | "MLC_p"`. Jiné q na stejném MKP: `vys_s_vozidlem(vys, Vn=…)`
   (`_promenne` počítá qch + q; `q_nastaveni` typ "pojezd" / "sestava" pro `polohy_q`).
@@ -85,6 +89,8 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
 - Nosníky = pruhy 2D s h_ekv = (12·Iy/b)^(1/3); šikmé nosníkové mosty: kolmá čela, schodovitý posun.
 - V šikmých konstrukcí vyhodnocovat z 2D obálky (prvek 0,0625 m), ne z kontrolních řezů.
 - **g0 u nosníků: každý nosník samostatně bez spolupůsobení** (1D, stejné uložení, k_v·b); u desky 2D MKP (h·γ).
+  Dobetonávka mezi nosníky (`A_dobetonavky` [m²], `[blc]` / `[stale]`) je součást g0: sousední nosníky ½ + ½
+  samostatně (krajní ½); posudek ji v průřezu nemá → export ji předává se stálým g − g0 (`VysledekSil.g0_dobetonavka`).
 - **g − g0: 2D MKP**; výplň spáry nesou samostatně sousední nosníky (½ + ½).
 - **q: obálka pojezdu** (2D, krok 0,25 m), × δ: **Ve** v ose vozovky (mezi chodníky) nebo `y_vozidla`;
   **Vn a Vr vždy u kraje vozovky u UŽŠÍHO chodníku** (zadání uživatele 11. 11. 2026; při shodných levý; pruh č. 1 /

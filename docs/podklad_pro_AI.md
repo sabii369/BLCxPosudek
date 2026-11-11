@@ -3,7 +3,7 @@
 Dokument je určený AI asistentovi, který bude v tomto repu připravovat a spouštět
 **parametrickou studii**. Popisuje, co program počítá, jak data tečou mezi částmi, jaké
 parametry lze měnit, co se kvůli nim musí přepočítat, kolik to trvá a kde jsou pasti.
-Stav kódu: listopad 2026 (BLC 1.8.0 – zatížitelnost Vn, Vr, Ve podle ČSN 73 6222). Při změně chování programu
+Stav kódu: listopad 2026 (BLC 1.9.0 – zatížitelnost Vn, Vr, Ve podle ČSN 73 6222, protokoly druhů). Při změně chování programu
 dokument aktualizovat.
 
 Doplňkové zdroje: `CLAUDE.md` (pravidla repa, modelová rozhodnutí), `docs/navod.md`
@@ -128,6 +128,7 @@ Výchozí hodnoty jsou v `blc_posudek/vypocet.py: VYCHOZI_BLC` (chybějící kl�
 | `nu` | 0.2 | – | Poissonovo číslo |
 | `d` | 0.5 | m | účinná výška (řez pro V v d od podpory; musí platit 2d < L0) |
 | `spara`, `b_s`, `Iy_s`, `beton_s`, `g_spary` | false | m, m⁴, –, kN/m | podélné spáry mezi nosníky (kloubově připojené, bez vlastní podpory) |
+| `A_dobetonavky` | 0 | m² | plocha jedné dobetonávky mezi sousedními nosníky → g_dob = A·γ_b do g0 (½ + ½ na sousední nosníky, krajní ½); do posudku s g − g0 |
 | `alfa`, `sikmost` | 90, "prava" | °, – | šikmost 90 (kolmý) … 165; "prava"/"leva" |
 | `k_v` | 2000 | MN/m/m | svislá tuhost podpory na 1 m podepřené délky (N·b); 0/prázdné = tuhá |
 | `uloz` | "tvrde" | – | "tvrde" \| "mekke" \| "vetknuti" (+ `k_rot` [MNm/rad/m]) |
@@ -154,6 +155,7 @@ Výchozí hodnoty jsou v `blc_posudek/vypocet.py: VYCHOZI_BLC` (chybějící kl�
 | `t_stale` | (t_vneseni) | dny | jen režim "zatezovaci_stavy" |
 | `zatizitelnost` | false | – | true = místo posouzení výpočet zatížitelnosti |
 | `zatizitelnost_druhy` | "vse" | – | "vse" (Vn, Vr, Ve) \| "vozidlo" \| seznam, např. ["Vn", "Ve"] |
+| `protokol_zatizitelnosti` | "souhrn" | – | "souhrn" \| "Vn" \| "Vr" \| "Ve" (jen druh, posudky při jeho zatížitelnosti) \| "vse" (dávka: souhrn + `DIR/<druh>/`) |
 
 ---
 
@@ -180,7 +182,7 @@ betonu, A a Iy z průřezu posudku, γ_G/γ_G,inf/ξ z `[posouzeni]`, zbytek z `
 
 | Stav | Obsah | Model |
 |---|---|---|
-| `g0` | vlastní tíha nosníku g0 = A·γ_b [kN/m] | **každý nosník samostatně, bez spolupůsobení** (1D, stejné uložení, k_v·b); deska: 2D MKP h·γ_b |
+| `g0` | vlastní tíha nosníku g0 = A·γ_b [kN/m] + dobetonávka A_dob·γ_b | **každý nosník samostatně, bez spolupůsobení** (1D, stejné uložení, k_v·b); dobetonávku nesou sousední nosníky ½ + ½ (krajní ½); deska: 2D MKP h·γ_b |
 | `g-g0` | skladby vozovky a chodníků, zábradlí, svodidla, další liniová; výplň spáry | 2D MKP (příčný roznos); výplň spáry nesou sousední nosníky ½ + ½ samostatně |
 | `qch` | chodci q_chodnik [kN/m²] (podle normy: Vn, Vr 2,5; Ve 0) | 2D MKP – obálka: chodníky rozdělené na úseky 0,5 m, max = Σ kladných, min = Σ záporných účinků |
 | `q` | Vn (schéma obr. 7.1), Vr (jediné vozidlo), Ve nebo MLC × δ | 2D MKP – **obálka pojezdu** (max/min přes polohy); Vn: nápravy pruhů nezávisle + rovnoměrné v nepříznivých úsecích, max_k δ_k·Σ pruhů 1…k |
@@ -237,7 +239,9 @@ Pozor: výběr podle M nemusí dát nosník rozhodující pro smyk (kap. 9).
 - `zpusob = "kombinace"` (výchozí): obálky **6.10a, 6.10b** (nebo 6.10 podle
   `[posouzeni] kombinace_msu`), **char, častá, kvazistálá** s M_max, M_min, V_max, V_min.
 - **Bez g0** (`obsahuje_vlastni_tihu = false`) – posudek si g0 počítá sám z průřezu
-  (A·γ_b) a přičítá ho s γ_G (6.10a, 6.10) a ξ·γ_G (6.10b).
+  (A·γ_b) a přičítá ho s γ_G (6.10a, 6.10) a ξ·γ_G (6.10b). Dobetonávka mezi nosníky
+  (`vys.g0_dobetonavka`, část g0 BLC) se předává se stálým g − g0
+  (`kombinace(..., vcetne_g0=False)`, `tabulka_stale_pb`).
 - **x posudku = x od podpory + (L − L0)/2**; na převislých koncích nuly. Dvojice x nad
   vnitřní podporou se sloučí (u prostého nosníku nenastává).
 - `t_vneseni` z `[blc]`: od tohoto stáří působí kvazistálá kombinace jako stálé zatížení
@@ -327,9 +331,14 @@ v GUI (pruh pod kartami na kartě Výsledky) a ve výpisu dávky (`! Upozorněn�
 
 ## 7. Zatížitelnost (`blc_posudek/zatizitelnost.py`)
 
-`res = zatizitelnost(d, vys=None, o=None, druhy=None)`; zvolené vozidlo musí být Vn, Vr nebo
-Ve (pro ně je protokol `res.model`); `druhy` = ["Vn", "Vr", "Ve"] (výchozí `[blc]
-zatizitelnost_druhy` = "vse") | "vozidlo".
+`res = zatizitelnost(d, vys=None, o=None, druhy=None, protokol=None)`; zvolené vozidlo musí
+být Vn, Vr nebo Ve (pro ně je souhrnný protokol `res.model`); `druhy` = ["Vn", "Vr", "Ve"]
+(výchozí `[blc] zatizitelnost_druhy` = "vse") | "vozidlo"; `protokol` = druh zajistí jeho
+výpočet. **Protokol jen pro jeden druh**: `m = protokol_druhu(res, "Vr")` – posudek při
+zatížitelnosti Vr (rozhodující posudek 100 %), kapitola zatížitelnosti jen s Vr;
+`m.zatizitelnost` = pohled (`jen_druh`, `celek` = res), výsledek se ukládá v `res.modely`.
+`protokol_druhu(res, "souhrn")` = `res.model`. Podklady grafů druhu: `res.druhy[d].vys_V()`
+(most při zatížitelnosti), `.polohy()` (rozhodující polohy).
 
 1. Pro každý druh a schéma se stav q spočte **jednou** na stejném modelu MKP
    (`vys_s_vozidlem`) s referenční tíhou (`[blc] Vn`, `Vr`, `Ve`); účinky jsou v tíze lineární →
@@ -362,6 +371,13 @@ bylo dříve s chodci 3,0 kN/m² 217,4 t – Ve podle normy chodce nezahrnuje.
 Upozornění (kap. 6.3) do zatížitelnosti nevstupují; `res.model.protokol.upozorneni` platí
 pro posudek při zatížitelnosti hlavního druhu.
 
+Obrázky protokolu (`blc_posudek/grafy_most.py`): kapitola BLC `blc_zat_stale`, `blc_zat_q`,
+`blc_zat_pricny` (příčný řez s polohou zatížení – `blc.plotting_sily.plot_pricny_rez`);
+při zatížitelnosti doplní `dopln_kapitolu_blc` do téže kapitoly (2.4) obálky od referenčních
+souprav jako řádky grafu `blc_sily` (místo řádku q; `graf_sil`) a pro každý druh při referenční tíze `blc_zat_<druh>` (půdorys,
+polohy max M / max V – `ZatizitelnostDruhu.vys_ref()`, `.polohy_ref()`) a `blc_pricny_<druh>`;
+kapitola 1 (zatížitelnost) obrázky nemá.
+
 ---
 
 ## 8. Spouštění
@@ -373,7 +389,7 @@ python -m blc_posudek priklady/most_KA67_12.toml -o vystupy/zakladni
 ```
 
 ```bash
-python -m blc_posudek priklady/most_KA67_12.toml -o vystupy/zat --zatizitelnost --druhy Vn,Vr,Ve
+python -m blc_posudek priklady/most_KA67_12.toml -o vystupy/zat --zatizitelnost --druhy Vn,Vr,Ve --protokol vse
 ```
 
 Výstup: `protokol.html` (+ `obrazky/`), `vysledky.json` (`posudky` jako slovníky,

@@ -125,7 +125,9 @@ def vn():
 def test_Vn_schema(vn):
     assert vn.druh_q == "Vn" and vn.schema_q == "dvojnaprava" and vn.V == 32.0
     assert vn.q_ch == 2.5 and "qch" in vn.stavy                     # chodci podle tab. 7.1
-    assert vn.pruhy_q == [(2.5, 5.5, "pruh 1")]                     # 1 pruh u pravého kraje
+    assert [(p["y0"], p["y1"], p["nazev"]) for p in vn.pruhy_q] == [
+        (2.5, 5.5, "pruh 1"), (1.0, 2.5, "zbývající plocha")]       # 1 pruh u pravého kraje
+    assert vn.obrys_q == []
     assert vn.dyn == 1.25 and "u pravého kraje vozovky" in vn.stavy["q"].popis
     assert not vn.varovani
 
@@ -177,6 +179,24 @@ def test_Vr_vozidlo_u_kraje(vn):
     v3 = vys_s_vozidlem(vn, Vr=20.0, schema="3")
     v2 = vys_s_vozidlem(vn, Vr=20.0, schema="2")
     assert v3.stavy["q"].M_max.max() < v2.stavy["q"].M_max.max()
+
+
+def test_pricny_rez(vn):
+    import matplotlib.pyplot as plt
+    from blc.plotting_sily import plot_pricny_rez, popis_vozidla
+    for v in (vn, vys_s_vozidlem(vn, Vr=60.0), vys_s_vozidlem(vn, Ve=80.0),
+              vys_s_vozidlem(vn, MLC="MLC40")):
+        fig = plot_pricny_rez(v, 2, show=False)
+        ax = fig.axes[0]
+        texty = " ".join(x.get_text() for x in ax.texts)
+        assert "posuzovaný N3" in texty and len(ax.patches) > 10
+        if v.druh_q in ("Vn", "Vr"):
+            assert "kraj vozovky u užšího chodníku P" in texty
+        plt.close(fig)
+    vr = vys_s_vozidlem(vn, Vr=60.0)
+    assert vr.obrys_q == [(2.5, 5.5)]                               # šířka 3 m u kraje 5,5 m
+    assert "6 × 100 kN" in popis_vozidla(vr)
+    assert vys_s_vozidlem(vn, Ve=80.0).obrys_q == [(1.75, 4.75)]    # osa vozovky 3,25 m
 
 
 def test_chodci_podle_normy():

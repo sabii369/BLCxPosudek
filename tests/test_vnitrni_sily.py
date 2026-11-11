@@ -118,6 +118,34 @@ def test_g_spary_samostatne():
     assert Mmax[1] == approx(4.0 * L0 ** 2 / 8, rel=3e-3)
 
 
+def test_dobetonavka_v_g0():
+    A, g0 = 0.08, 10.0
+    zakl = dict(L=L0, N=4, b=1.0, Iy=0.014375, beton="C35/45", g0=g0, tisk=False)
+    v = vnitrni_sily(**zakl, A_dobetonavky=A, vybaveni=VYB, Ve=60.0, krok=1.0)
+    gd = A * 25.0
+    assert v.g_dobetonavky == approx(gd)
+    Mmax = [v.tabulka(o, "g0").M_max.max() for o in range(4)]
+    # krajní nosník: g0 + ½ dobetonávky, vnitřní: g0 + 2 × ½
+    for o, c in enumerate((0.5, 1.0, 1.0, 0.5)):
+        assert Mmax[o] == approx((g0 + c * gd) * L0 ** 2 / 8, rel=3e-3)
+    # do posudku (bez vlastní tíhy nosníku) jde g − g0 + dobetonávka
+    v0 = vnitrni_sily(**zakl, vybaveni=VYB, Ve=60.0, krok=1.0)
+    for druh in ("char", "6.10a"):
+        rozd = v.kombinace(0, druh).M_max - v0.kombinace(0, druh).M_max
+        g = v.soucinitele.faktory(druh)[0]
+        assert rozd.max() == approx(g * 0.5 * gd * L0 ** 2 / 8, rel=3e-3)
+    # s vlastní tíhou se dobetonávka nezapočítá dvakrát
+    rozd = v.kombinace(1, "char", vcetne_g0=True).M_max - v0.kombinace(1, "char", vcetne_g0=True).M_max
+    assert rozd.max() == approx(gd * L0 ** 2 / 8, rel=3e-3)
+    tg = v.tabulka_stale_pb(1)
+    assert tg.M_max.max() == approx(v0.tabulka(1, "g-g0").M_max.max() + gd * L0 ** 2 / 8,
+                                    rel=3e-3)
+    txt = toml_zatizeni_pb(v, 1, rezim="zatezovaci_stavy")
+    assert "dobetonávka" in txt
+    with pytest.raises(ValueError):
+        vnitrni_sily(**zakl, A_dobetonavky=-0.1)
+
+
 # ---- q ----------------------------------------------------------------------------
 
 def test_q_obalka_proti_1D(vys):

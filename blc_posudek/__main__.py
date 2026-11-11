@@ -9,6 +9,9 @@ Spuštění spojeného programu BLC × Posudek PB.
                                               zatížitelnost podle ČSN 73 6222: Vn, Vr, Ve pro
                                               η = 100 % každého mezního stavu (též [blc]
                                               zatizitelnost = true, zatizitelnost_druhy)
+      [--protokol souhrn|Vn|Vr|Ve|vse]        protokol: souhrn (všechny druhy, posudky pro
+                                              zvolené vozidlo), jen jeden druh (posudky při
+                                              jeho zatížitelnosti), vse = souhrn + DIR/<druh>/
 """
 
 from __future__ import annotations
@@ -28,6 +31,10 @@ def main(argv=None) -> int:
     ap.add_argument("--druhy", default=None,
                     help="druhy zatížitelnosti, např. Vn,Vr,Ve (výchozí [blc] zatizitelnost_druhy "
                          "= vše); protokol je pro zvolené vozidlo")
+    ap.add_argument("--protokol", default=None, choices=("souhrn", "Vn", "Vr", "Ve", "vse"),
+                    help="protokol zatížitelnosti: souhrn (výchozí, [blc] protokol_zatizitelnosti), "
+                         "jen Vn / Vr / Ve (posudky při jeho zatížitelnosti), vse = souhrn + "
+                         "protokol každého druhu do podsložky")
     a = ap.parse_args(argv)
     if a.gui or a.vstup is None:
         from .gui import main as gui_main
@@ -45,13 +52,21 @@ def main(argv=None) -> int:
     try:
         d = nacti(a.vstup)
         zat = a.zatizitelnost or bool(d.get("blc", {}).get("zatizitelnost"))
+        dalsi = []                                   # (složka, model) – protokoly druhů
         if zat:
-            from .zatizitelnost import zatizitelnost
-            res = zatizitelnost(d, druhy=a.druhy, prubeh=lambda t: print(t, flush=True))
-            vys, o, model = res.vys, res.o, res.model
+            from .zatizitelnost import zatizitelnost, protokol_ze_vstupu, protokol_druhu
+            prot = protokol_ze_vstupu(d, a.protokol)
+            pr = lambda t: print(t, flush=True)  # noqa: E731
+            res = zatizitelnost(d, druhy=a.druhy, prubeh=pr, protokol=prot)
+            model = protokol_druhu(res, "souhrn" if prot == "vse" else prot, pr)
+            vys, o = model.blc["vys"], model.blc["o"]
+            if prot == "vse":
+                dalsi = [(os.path.join(vystup, dr), protokol_druhu(res, dr, pr)) for dr in res.druhy]
         else:
             vys, o, model = spocti(d)
         out = uloz_protokol(model, vystup)
+        for adr, m in dalsi:
+            uloz_protokol(m, adr)
         most = os.path.join(vystup, "most")
         uloz_vysledky(vys, most, vystup=vys.popisky[o])
         uloz_grafy(vys, most, vys.popisky[o])
@@ -77,9 +92,14 @@ def main(argv=None) -> int:
             print(f"  V_aj (jedna náprava, čl. 5.1.7): {res.Vaj:.1f} t")
         for t in res.poznamky:
             print("! " + t)
+        mz = model.zatizitelnost
         for t in model.protokol.upozorneni:
-            print(f"! Upozornění ({res.druh} = {vys.V:.1f} t): {t}")
-        print(f"Protokol (pro {res.druh} = {vys.V:.1f} t): {out}\nVnitřní síly mostu: {most}")
+            print(f"! Upozornění ({mz.druh} = {vys.V:.1f} t): {t}")
+        print(f"Protokol ({'jen ' + mz.druh if mz.jen_druh else 'souhrn'}; posudky pro {mz.druh} = "
+              f"{vys.V:.1f} t): {out}\nVnitřní síly mostu: {most}")
+        for adr, m in dalsi:
+            print(f"Protokol jen {m.zatizitelnost.druh} (posudky pro {m.zatizitelnost.druh} = "
+                  f"{m.blc['vys'].V:.1f} t): {os.path.join(adr, 'protokol.html')}")
         return 0
     print(f"{'MS':4} {'Posudek':42} {'Fáze':28} {'x [m]':>7} {'η':>7}")
     for v in model.protokol.posudky:

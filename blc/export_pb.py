@@ -13,13 +13,14 @@ Soubory ve výstupní složce:
 
 Posudek PB řeší prostý nosník délky L s ložisky ve vzdálenosti (L − L0)/2 od
 konců; x posudku = x od osy první podpory + (L − L0)/2.  Vlastní tíhu nosníku g0
-počítá posudek sám z průřezu, proto se do zatížení výchozí převádí jen g − g0
-a q (obsahuje_vlastni_tihu = false); g0 z BLC je v komentáři pro kontrolu.
+počítá posudek sám z průřezu, proto se do zatížení výchozí převádí jen g − g0,
+dobetonávka mezi nosníky (část g0 BLC, kterou průřez nosníku nezahrnuje) a q
+(obsahuje_vlastni_tihu = false); g0 z BLC je v komentáři pro kontrolu.
 
 Režimy zatížení posudku:
   "kombinace"         (výchozí) obálky kombinací 6.10a, 6.10b (nebo 6.10), char,
                       častá, kvazistálá – přesně max/min M i V,
-  "zatezovaci_stavy"  stálé g − g0 (tabulka x, M, V) + proměnné q (tabulka x, M_max,
+  "zatezovaci_stavy"  stálé g − g0 + dobetonávka (tabulka x, M, V) + proměnné q (tabulka x, M_max,
                       V s větší absolutní hodnotou z V_max / V_min) – kombinace
                       sestaví posudek sám.
 """
@@ -126,6 +127,9 @@ def toml_zatizeni_pb(vys: VysledekSil, o: int, L_nosniku: Optional[float] = None
         f"# g0 z BLC = {vys.g0:.3f} {'kN/m²' if vys.deska else 'kN/m'} – posudek počítá g0 "
         f"z průřezu sám (M_g0,max BLC = {tg0.M_max.max():.2f} {jm})",
     ]
+    if vys.g0_dobetonavka is not None:
+        hl.append(f"# Dobetonávka mezi nosníky {vys.g_dobetonavky:.3f} kN/m (část g0 BLC) se předává "
+                  "se stálým zatížením g − g0 – průřez posudku ji nezahrnuje")
     for st in vys.stavy.values():
         hl.append(f"# {st.nazev}: {st.popis}")
     hl.append(f"# Součinitele: γ_G = {s.gamma_G:g}, γ_G,inf = {s.gamma_G_inf:g}, ξ = {s.xi:g}; "
@@ -150,10 +154,11 @@ def toml_zatizeni_pb(vys: VysledekSil, o: int, L_nosniku: Optional[float] = None
                     f"M_min = {_pole(t.M_min)}", f"V_max = {_pole(t.V_max)}",
                     f"V_min = {_pole(t.V_min)}"]
     else:
-        tg, _, _ = _do_pb(vys, vys.tabulka(o, "g-g0"), L_nosniku)
+        tg, _, _ = _do_pb(vys, vys.tabulka_stale_pb(o), L_nosniku)
         tg = _odstran_dvojice_x(tg)
+        naz = "Ostatní stálé g − g0" + (" + dobetonávka" if vys.g0_dobetonavka is not None else "")
         out += ["", "[[zatizeni.stale]]",
-                f"nazev = {_retezec('Ostatní stálé g − g0 (BLC ' + pop + ')')}",
+                f"nazev = {_retezec(naz + ' (BLC ' + pop + ')')}",
                 f"gamma = {s.gamma_G:g}", f"gamma_inf = {s.gamma_G_inf:g}"]
         if t_stale is not None:
             out.append(f"t = {float(t_stale):g}")
@@ -235,7 +240,7 @@ def vysledky_json(vys: VysledekSil, o_posudek: int) -> dict:
                      "g_zabradli": vyb.g_zabradli, "g_svodidla": vyb.g_svodidla,
                      "liniova": [vars(l) for l in vyb.liniova],
                      "tiha_na_metr": vyb.tiha_na_metr(K.B)},
-        "g0": vys.g0, "g_spary": vys.g_spary, "vozidlo": vys.vozidlo, "Ve": vys.Ve,
+        "g0": vys.g0, "g_spary": vys.g_spary, "g_dobetonavky": vys.g_dobetonavky, "vozidlo": vys.vozidlo, "Ve": vys.Ve,
         "druh_q": vys.druh_q, "V": vys.V, "schema_q": vys.schema_q,
         "dyn": vys.dyn, "dyn_zdroj": vys.dyn_zdroj, "poloha_q": vys.poloha_q,
         "q_chodnik": vys.q_ch, "q_chodnik_zdroj": vys.q_ch_zdroj,

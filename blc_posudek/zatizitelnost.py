@@ -112,9 +112,37 @@ class ZatizitelnostDruhu:
     schemata: Dict[str, VysledekSchematu]
     o: int                               # posuzovaný výstup
     poznamky: List[str] = field(default_factory=list)
+    _cache: dict = field(default_factory=dict, repr=False)
 
     def minimum(self, ms: Optional[str] = None) -> Optional[PosudekZat]:
         return _minimum(self.posudky, ms)
+
+    def vys_V(self) -> VysledekSil:
+        """Most se zatížením rozhodujícího schématu při zatížitelnosti V (neomezuje-li žádný
+        posudek, při referenční tíze)."""
+        if "vys" not in self._cache:
+            r = self.schemata.get(self.schema_V) or self.prvni
+            V = self.V if self.V is not None and self.V > 0 else r.V_ref
+            self._cache["vys"] = vys_pro_V(r.vys, V)
+        return self._cache["vys"]
+
+    def vys_ref(self) -> VysledekSil:
+        """Most se zatížením rozhodujícího schématu při referenční tíze ([blc] Vn, Vr, Ve)."""
+        return (self.schemata.get(self.schema_V) or self.prvni).vys
+
+    def polohy_ref(self) -> dict:
+        """Rozhodující polohy zatížení při referenční tíze."""
+        if "polohy_ref" not in self._cache:
+            from blc.vnitrni_sily import polohy_q
+            self._cache["polohy_ref"] = polohy_q(self.vys_ref(), self.o)
+        return self._cache["polohy_ref"]
+
+    def polohy(self) -> dict:
+        """Rozhodující polohy zatížení (max M ve středu, max V u podpory) při zatížitelnosti."""
+        if "polohy" not in self._cache:
+            from blc.vnitrni_sily import polohy_q
+            self._cache["polohy"] = polohy_q(self.vys_V(), self.o)
+        return self._cache["polohy"]
 
     @property
     def V(self) -> Optional[float]:
@@ -159,13 +187,19 @@ class ZatizitelnostDruhu:
 
 @dataclass
 class VysledekZatizitelnosti:
-    """Zatížitelnosti všech spočtených druhů; protokol pro druh `druh`."""
+    """Zatížitelnosti všech spočtených druhů; protokol (souhrn) pro druh `druh`.
+    protokol_druhu(res, druh) vytvoří protokol jen pro jeden druh – pohled na stejné výsledky
+    s `celek` = úplný výsledek."""
     druhy: Dict[str, ZatizitelnostDruhu]
     druh: str
     vys: Optional[VysledekSil] = None    # most pro druh `druh` při jeho zatížitelnosti
     o: int = 0
     model: object = None                 # posudek při této zatížitelnosti
     poznamky: List[str] = field(default_factory=list)
+    d: Optional[dict] = field(default=None, repr=False)     # vstupní data (pro další protokoly)
+    modely: Dict[str, object] = field(default_factory=dict, repr=False)  # "souhrn" | druh → model
+    celek: Optional["VysledekZatizitelnosti"] = field(default=None, repr=False)
+    jen_druh: bool = False               # pohled jen na jeden druh (protokol druhu)
 
     @property
     def hlavni(self) -> ZatizitelnostDruhu:
@@ -211,7 +245,9 @@ class VysledekZatizitelnosti:
     def Vaj(self) -> Optional[float]:
         """Zatížitelnost na jednu jednoduchou nápravu [t] (čl. 5.1.7): největší zatížení
         nápravy vozidla normální a výhradní zatížitelnosti (3/4 dvounápravového, 3/8
-        třínápravového, 1/6 šestinápravového)."""
+        třínápravového, 1/6 šestinápravového); None, není-li spočtena Vn i Vr."""
+        if not {"Vn", "Vr"} <= set(self.druhy):
+            return None
         vals = []
         for d in ("Vn", "Vr"):
             z = self.druhy.get(d)
@@ -384,7 +420,22 @@ def _vys_druhu(vys: VysledekSil, druh: str, V: float, schema: str = "") -> Vysle
     return vys_s_vozidlem(vys, **{druh: V}, **({"schema": schema} if schema else {}))
 
 
-def _druhy_ze_vstupu(d: dict, druhy) -> List[str]:
+PROTOKOLY = ("souhrn",) + DRUHY        # protokol zatížitelnosti: souhrn | jen jeden druh
+
+
+def protokol_ze_vstupu(d: dict, protokol=None) -> str:
+    """Protokol zatížitelnosti: "souhrn" (všechny druhy, posudky pro zvolené vozidlo) |
+    "Vn" | "Vr" | "Ve" (jen tento druh, posudky při jeho zatížitelnosti) | "vse" (dávka:
+    souhrn + každý druh zvlášť)."""
+    from .vypocet import VYCHOZI_BLC
+    if protokol is None:
+        protokol = {**VYCHOZI_BLC, **d.get("blc", {})}.get("protokol_zatizitelnosti") or "souhrn"
+    if protokol not in PROTOKOLY + ("vse",):
+        raise ValueError(f"Neznámý protokol zatížitelnosti '{protokol}' (souhrn, Vn, Vr, Ve, vse).")
+    return protokol
+
+
+def _druhy_ze_vstupu(d: dict, druhy, protokol: Optional[str] = None) -> List[str]:
     from .vypocet import VYCHOZI_BLC
     b = {**VYCHOZI_BLC, **d.get("blc", {})}
     if druhy is None:
@@ -392,20 +443,51 @@ def _druhy_ze_vstupu(d: dict, druhy) -> List[str]:
     if isinstance(druhy, str):
         druhy = list(DRUHY) if druhy in ("vse", "", "all") else \
             [b["vozidlo"]] if druhy == "vozidlo" else [x.strip() for x in druhy.split(",")]
+    if protokol in DRUHY:                  # protokol jen pro druh → druh se musí spočítat
+        druhy = list(druhy) + [protokol]
     druhy = [x for x in DRUHY if x in druhy]
     if not druhy:
         raise ValueError("Zatížitelnost: zvolte alespoň jeden druh Vn, Vr, Ve.")
     return druhy
 
 
+def protokol_druhu(res: VysledekZatizitelnosti, druh: str = "souhrn", prubeh=None):
+    """Model posudku (protokol) pro zvolený protokol zatížitelnosti: "souhrn" = res.model
+    (kapitola se všemi druhy, posudky pro zvolené vozidlo); druh = posudky při zatížitelnosti
+    tohoto druhu (rozhodující posudek 100 %) a kapitola zatížitelnosti jen s tímto druhem.
+    Výsledek se uloží v res.modely; model.zatizitelnost = pohled na druh (celek = res)."""
+    from .vypocet import spocti
+    res = res.celek or res
+    if druh in (None, "souhrn"):
+        return res.model
+    if druh not in res.druhy:
+        raise ValueError(f"Zatížitelnost {druh} nebyla spočtena (spočteno: {', '.join(res.druhy)}).")
+    if druh in res.modely:
+        return res.modely[druh]
+    z = res.druhy[druh]
+    if prubeh:
+        prubeh(f"Zatížitelnost: posudek při {druh} = {z.vys_V().V:.1f} t (protokol {druh})")
+    vk, o, model = spocti(res.d, z.vys_V(), z.o)
+    pohled = VysledekZatizitelnosti({druh: z}, druh, vk, o, model, list(z.poznamky), d=res.d,
+                                    celek=res, jen_druh=True)
+    model.zatizitelnost = pohled
+    kapitola_zatizitelnost(model, pohled)
+    dopln_kapitolu_blc(model, pohled)
+    res.modely[druh] = model
+    return model
+
+
 def zatizitelnost(d: dict, vys: Optional[VysledekSil] = None, o: Optional[int] = None,
                   druhy=None, tol: float = TOL, max_kol: int = 30, nasobek_max: float = 64.0,
-                  prubeh=None) -> VysledekZatizitelnosti:
+                  prubeh=None, protokol: Optional[str] = None) -> VysledekZatizitelnosti:
     """Zatížitelnost Vn, Vr, Ve pro všechny posudky; d = spojená vstupní data (s [blc]).
     druhy = seznam ("Vn", "Vr", "Ve") | "vse" | "vozidlo" | None (= [blc] zatizitelnost_druhy).
     o = posuzovaný výstup pro všechny druhy (None = podle [blc] vystup / nejzatíženější
-    pro každý druh).  Protokol (res.model) je pro zvolené vozidlo [blc] (je-li mezi druhy),
-    jinak pro první druh.  prubeh(text) – volitelné hlášení průběhu."""
+    pro každý druh).  Souhrnný protokol (res.model) je pro zvolené vozidlo [blc] (je-li mezi
+    druhy), jinak pro první druh; protokol = druh ([blc] protokol_zatizitelnosti) zajistí,
+    že se druh spočte – jeho protokol vytvoří protokol_druhu(res, druh).
+    prubeh(text) – volitelné hlášení průběhu."""
+    import copy
     from .vypocet import VYCHOZI_BLC, parametry_blc, vyber_nosnik, spocti
 
     b = {**VYCHOZI_BLC, **d.get("blc", {})}
@@ -413,7 +495,7 @@ def zatizitelnost(d: dict, vys: Optional[VysledekSil] = None, o: Optional[int] =
     if voz not in DRUHY:
         raise ValueError("Výpočet zatížitelnosti je pro vozidla ČSN 73 6222 – zvolte vozidlo Vn, "
                          "Vr nebo Ve.")
-    druhy = _druhy_ze_vstupu(d, druhy)
+    druhy = _druhy_ze_vstupu(d, druhy, protokol_ze_vstupu(d, protokol))
     if vys is None:
         vys = vnitrni_sily(**parametry_blc(d))
     V_ref = {k: float(b.get(k) or 0.0) for k in DRUHY}
@@ -423,7 +505,7 @@ def zatizitelnost(d: dict, vys: Optional[VysledekSil] = None, o: Optional[int] =
     pevny = o if o is not None else (vyber_nosnik(vys, d) if str(b.get("vystup") or "auto") != "auto"
                                       else None)
     kw = dict(tol=tol, max_kol=max_kol, nasobek_max=nasobek_max, prubeh=prubeh)
-    res = VysledekZatizitelnosti({}, voz if voz in druhy else druhy[0])
+    res = VysledekZatizitelnosti({}, voz if voz in druhy else druhy[0], d=copy.deepcopy(d))
 
     for druh in druhy:
         poradi = {"Vn": ["dvojnaprava"], "Vr": ["6"], "Ve": [""]}[druh]
@@ -455,17 +537,17 @@ def zatizitelnost(d: dict, vys: Optional[VysledekSil] = None, o: Optional[int] =
                               "ale konstrukci je nutné posoudit.")
         res.druhy[druh] = z
 
-    # ---- posudek při zatížitelnosti hlavního druhu (protokol, grafy) -----------
+    # ---- posudek při zatížitelnosti hlavního druhu (souhrnný protokol, grafy) --
     h = res.hlavni
-    V_fin = h.V if h.V is not None and h.V > 0 else h.V_ref
-    r = h.schemata.get(h.schema_V) or h.prvni
     if prubeh:
-        prubeh(f"Zatížitelnost: posudek při {h.druh} = {V_fin:.1f} t")
-    vk, o_p, model = spocti(d, vys_pro_V(r.vys, V_fin), h.o)
+        prubeh(f"Zatížitelnost: posudek při {h.druh} = {h.vys_V().V:.1f} t")
+    vk, o_p, model = spocti(d, h.vys_V(), h.o)
     res.vys, res.o, res.model = vk, o_p, model
+    res.modely["souhrn"] = model
     res.poznamky = list(dict.fromkeys(t for z in res.druhy.values() for t in z.poznamky))
     model.zatizitelnost = res
     kapitola_zatizitelnost(model, res)
+    dopln_kapitolu_blc(model, res)
     return res
 
 
@@ -473,10 +555,50 @@ def zatizitelnost(d: dict, vys: Optional[VysledekSil] = None, o: Optional[int] =
 # Protokol
 # ---------------------------------------------------------------------------
 
+def dopln_kapitolu_blc(model, res: VysledekZatizitelnosti) -> None:
+    """Do kapitoly „Zatížení z modelu mostu (BLC)“ (za obrázky zatížení) doplní pro druhy
+    zatížitelnosti obálku vnitřních sil od referenčních souprav a schémata zatížení (půdorys
+    v rozhodujících polohách a příčný řez) při referenčních tíhách."""
+    from pb_posudek.protokol import Obrazek, fmt
+    kap = next((k for k in model.protokol.kapitoly if k.nazev == "Zatížení z modelu mostu (BLC)"),
+               None)
+    if kap is None:
+        return
+    vyst = "pás" if res.vys.deska else "nosník"
+    ref = ", ".join(f"{d} = {z.V_ref:g} t" for d, z in res.druhy.items())
+    nove = [("text", f"Referenční soupravy zatížitelnosti ({ref}) – schémata zatížení: půdorys "
+                     "v poloze pro max M ve středu rozpětí a max V u podpory a příčný řez s příčnou "
+                     "polohou zatížení. Obálky vnitřních sil od referenčních souprav (vč. δ) jsou "
+                     "v grafu vnitřních sil na nosnících (řádky místo zatížení dopravou q); hodnoty "
+                     "při zatížitelnosti jsou úměrné poměru V / V_ref.")]
+    for druh, z in res.druhy.items():
+        v = z.vys_ref()
+        sch = POPIS_SCHEMAT[v.schema_q or ""].split(" (")[0]
+        nove += [("obrazek", Obrazek(f"blc_zat_{druh}",
+                                     f"Referenční {druh} = {v.V:g} t ({sch}) – zatížení na mostě "
+                                     "v poloze pro max M ve středu rozpětí a max V u podpory, "
+                                     f"posuzovaný {vyst} {v.popisky[z.o]}")),
+                 ("obrazek", Obrazek(f"blc_pricny_{druh}",
+                                     f"Referenční {druh} = {v.V:g} t – příčná poloha zatížení "
+                                     f"dopravou, {v.poloha_q}; kóty [m]"))]
+    i = None
+    for j in range(len(kap.polozky) - 1, -1, -1):        # poslední obrázek zatížení q
+        typ, o = kap.polozky[j]
+        if typ == "obrazek" and o.soubor in ("blc_zat_pricny", "blc_zat_q"):
+            i = j + 1
+            break
+    if i is None:
+        i = len(kap.polozky)
+    kap.polozky[i:i] = nove
+
+
 def kapitola_zatizitelnost(model, res: VysledekZatizitelnosti) -> None:
     """Kapitola protokolu se zatížitelností (na začátek protokolu)."""
     from pb_posudek.protokol import Kapitola, fmt
-    K = Kapitola("Zatížitelnost podle ČSN 73 6222", 1)
+    if res.jen_druh:
+        K = Kapitola(f"Zatížitelnost {res.druh} – {NAZVY_DRUHU[res.druh]} (ČSN 73 6222)", 1)
+    else:
+        K = Kapitola("Zatížitelnost podle ČSN 73 6222", 1)
     vys = res.vys
     vyst = "pás" if vys.deska else "nosník"
     K.text("Pro každý posudek (mezní stav, fáze, kombinace) byla hledána tíha vozidla, při které je "

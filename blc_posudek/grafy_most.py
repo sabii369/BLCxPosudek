@@ -8,6 +8,12 @@ Kapitola zatížení (Zatížení z modelu mostu (BLC)):
   blc_zat_stale   půdorys mostu – vlastní tíha g0 | ostatní stálé g − g0
   blc_zat_q       půdorys mostu – vozidlo v poloze pro max M ve středu rozpětí |
                   pro max V u podpory (řez d od osy ložiska)
+  blc_zat_pricny  příčný řez – příčná poloha zatížení dopravou (pruhy Vn, vozidlo, kóty)
+
+Kapitola zatížení – při výpočtu zatížitelnosti navíc (referenční tíhy Vn, Vr, Ve z [blc];
+  graf sil blc_sily má místo řádku q řádky referenčních souprav):
+  blc_zat_<druh>     půdorys – zatížení v poloze pro max M ve středu a max V u podpory
+  blc_pricny_<druh>  příčný řez s polohou zatížení
 
 Kapitola napětí v betonu (pod graf „Napětí v krajních vláknech po délce – fáze“):
   blc_rez_<i>     napětí po výšce průřezu ve středu rozpětí a u podpory pro fázi i –
@@ -19,14 +25,16 @@ from __future__ import annotations
 import numpy as np
 import matplotlib.pyplot as plt
 
-from blc.plotting_sily import kresli_most
+from blc.plotting_sily import kresli_most, plot_pricny_rez
 from pb_posudek import grafy
 from pb_posudek.zatizeni import NAZVY_KOMBINACI
 
 GRAFY_ZATIZENI = {
     "blc_zat_stale": "Zatížení na mostě – vlastní tíha g0 a ostatní stálé g − g0",
     "blc_zat_q": "Zatížení na mostě – vozidlo v poloze pro max M ve středu rozpětí a max V u podpory",
+    "blc_zat_pricny": "Zatížení na mostě – příčný řez s příčnou polohou zatížení dopravou",
 }
+GRAFY_Q = ("blc_zat_q", "blc_zat_pricny")       # jen je-li zatížení dopravou
 NAZEV_REZY = "Napětí v řezech"
 GRAF_SILY = ("blc_sily", "Vnitřní síly na nosnících od jednotlivých zatěžovacích stavů v půdorysu – "
                          "vlevo M, vpravo V; posuzovaný nosník zvýrazněn, u proměnných obálka max/min")
@@ -60,8 +68,14 @@ def graf_zatizeni(m, klic: str):
     if not b:
         return None
     vys, o, pol = b["vys"], b["o"], b["polohy"]
+    if klic == "blc_zat_pricny":
+        return plot_pricny_rez(vys, o, show=False) if "q" in vys.stavy else None
     rz = rezy_posudku(m)
     rezy = [(rz["stred"][1], "střed"), (rz["podpora"][1], "podpora")]
+    return _panely_zatizeni(vys, o, pol, rezy, klic)
+
+
+def _panely_zatizeni(vys, o, pol, rezy, klic):
     if klic == "blc_zat_stale":
         panely = [("g0", None, "vlastní tíha g0"), ("g-g0", None, "ostatní stálé g − g0")]
     else:
@@ -79,12 +93,28 @@ def graf_zatizeni(m, klic: str):
 
 def graf_sil(m):
     """Vnitřní síly na nosnících v půdorysu (formát obálek BLC): řádek = zatěžovací stav,
-    vlevo M, vpravo V; posuzovaný nosník zvýrazněn."""
+    vlevo M, vpravo V; posuzovaný nosník zvýrazněn.  Při výpočtu zatížitelnosti je místo
+    řádku q (zatížení dopravou při zatížitelnosti) po řádku obálka od každé referenční
+    soupravy Vn, Vr, Ve (vč. δ) se zvýrazněným nosníkem posuzovaným pro daný druh."""
+    import copy
     from blc.plotting_sily import plot_stavy_pudorys
+    from blc_posudek.zatizitelnost import POPIS_SCHEMAT
     b = getattr(m, "blc", None)
     if not b:
         return None
-    return plot_stavy_pudorys(b["vys"], b["o"], show=False)
+    res = getattr(m, "zatizitelnost", None)
+    if res is None or not res.druhy:
+        return plot_stavy_pudorys(b["vys"], b["o"], show=False)
+    vys = copy.copy(b["vys"])
+    vys.stavy = {k: s for k, s in b["vys"].stavy.items() if k != "q"}
+    o_stavu = {}
+    for druh, z in res.druhy.items():
+        v = z.vys_ref()
+        sch = POPIS_SCHEMAT[v.schema_q or ""].split(" (")[0].split(" v pruzích")[0]
+        nazev = f"{druh} = {v.V:g} t ({sch}, δ = {v.dyn:.3g}), posuzovaný {v.popisky[z.o]}"
+        vys.stavy[nazev] = v.stavy["q"]
+        o_stavu[nazev] = z.o
+    return plot_stavy_pudorys(vys, b["o"], list(vys.stavy), show=False, o_stavu=o_stavu)
 
 
 def fn_sily(m, adr):
@@ -178,14 +208,54 @@ def fn_rez(idx: int):
 FUNKCE_ZATIZENI = {k: _fn_zat(k) for k in GRAFY_ZATIZENI}
 
 
+# ---------------------------------------------------------------------------
+# Zatížení druhů zatížitelnosti (Vn, Vr, Ve) – kapitola zatížitelnosti
+# ---------------------------------------------------------------------------
+
+def druhy_zatizitelnosti(m) -> list:
+    res = getattr(m, "zatizitelnost", None)
+    return list(res.druhy) if res is not None else []
+
+
+def graf_zatizitelnosti(m, druh: str, typ: str):
+    """typ "pudorys" – zatížení druhu při referenční tíze v poloze pro max M ve středu
+    a max V u podpory posuzovaného nosníku; "pricny" – příčný řez s polohou zatížení."""
+    res = getattr(m, "zatizitelnost", None)
+    if res is None or druh not in res.druhy:
+        return None
+    z = res.druhy[druh]
+    vys, o = z.vys_ref(), z.o
+    if typ == "pricny":
+        return plot_pricny_rez(vys, o, show=False)
+    pol = z.polohy_ref()
+    if not pol:
+        return None
+    rezy = [(pol["M"].x, "střed"), (pol["V"].x, "podpora")] if "V" in pol else []
+    return _panely_zatizeni(vys, o, pol, rezy, "blc_zat_q")
+
+
+def fn_zatizitelnost(druh: str, typ: str):
+    klic = f"blc_{'zat' if typ == 'pudorys' else 'pricny'}_{druh}"
+
+    def fn(m, adr):
+        fig = graf_zatizitelnosti(m, druh, typ)
+        return None if fig is None else grafy._uloz(fig, adr, klic)
+    fn.__name__ = klic
+    return fn
+
+
 def seznam_grafu(m) -> dict:
     """{název grafu v GUI: fn} – zatížení mostu a napětí v řezech všech fází."""
     out = {}
     if getattr(m, "blc", None):
         for k, nazev in GRAFY_ZATIZENI.items():
-            if k != "blc_zat_q" or m.blc["polohy"]:
+            if k not in GRAFY_Q or m.blc["polohy"]:
                 out[nazev.replace("Zatížení na mostě – ", "Zatížení mostu – ")] = FUNKCE_ZATIZENI[k]
         out["Zatížení mostu – vnitřní síly na nosnících"] = fn_sily
+    for druh in druhy_zatizitelnosti(m):
+        out[f"Zatížitelnost {druh} – zatížení na mostě (referenční)"] = fn_zatizitelnost(druh,
+                                                                                       "pudorys")
+        out[f"Zatížitelnost {druh} – příčný řez (referenční)"] = fn_zatizitelnost(druh, "pricny")
     for idx, f in enumerate(getattr(m, "faze", [])):
         out[f"{NAZEV_REZY} – {f.nazev}"] = fn_rez(idx)
     return out
@@ -202,6 +272,12 @@ def vykresli_most(m, adr) -> dict:
         r = fn_rez(idx)(m, adr)
         if r:
             out[f"blc_rez_{idx}"] = r
+    for druh in druhy_zatizitelnosti(m):
+        for typ in ("pudorys", "pricny"):
+            fn = fn_zatizitelnost(druh, typ)
+            r = fn(m, adr)
+            if r:
+                out[fn.__name__] = r
     return out
 
 

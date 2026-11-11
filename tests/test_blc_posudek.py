@@ -123,11 +123,12 @@ def test_grafy_most(vysledek):
     from blc_posudek.grafy_most import seznam_grafu
     model = vysledek[2]
     s = seznam_grafu(model)
-    assert len(s) == 3 + len(model.faze)
+    assert len(s) == 4 + len(model.faze)                  # g, q, příčný řez, síly + řezy fází
     with grafy.vracet_obrazky():
         for nazev, fn in s.items():
             fig = fn(model, None)
-            n_os = 2 * len(vysledek[0].stavy) if nazev.endswith("na nosnících") else 2
+            n_os = (2 * len(vysledek[0].stavy) if nazev.endswith("na nosnících") else
+                    1 if "příčný řez" in nazev else 2)
             assert fig is not None and len(fig.axes) == n_os, nazev
             plt.close(fig)
 
@@ -135,7 +136,8 @@ def test_grafy_most(vysledek):
 def test_obrazky_v_kapitolach(vysledek):
     model = vysledek[2]
     kap = {k.nazev: [o.soubor for t, o in k.polozky if t == "obrazek"] for k in model.protokol.kapitoly}
-    assert kap["Zatížení z modelu mostu (BLC)"] == ["blc_zat_stale", "blc_zat_q", "blc_sily"]
+    assert kap["Zatížení z modelu mostu (BLC)"] == ["blc_zat_stale", "blc_zat_q", "blc_zat_pricny",
+                                                    "blc_sily"]
     tab = [o for t, o in next(k for k in model.protokol.kapitoly
                               if k.nazev == "Zatížení z modelu mostu (BLC)").polozky if t == "tabulka"]
     assert len(tab) == 2 + 6                               # součinitele, stavy, 6 kombinací
@@ -216,6 +218,8 @@ def test_gui(tmp_path):
         app.uloz()
         ulozeno = tomllib.loads((tmp_path / "most.toml").read_text(encoding="utf-8"))
         assert ulozeno["blc"]["vozidlo"] == "MLC_k"
+        app.var_zat_prot.set("jen Vr – posudky při Vr")
+        assert app.ziskej_data()["blc"]["protokol_zatizitelnosti"] == "Vr"
     finally:
         app.destroy()
 
@@ -235,7 +239,8 @@ def test_posouzeni_Vn_Vr(d, vysledek):
         assert vys.stavy[s].Vs_min == approx(prima.stavy[s].Vs_min)
     assert vys.q_ch == 2.5 and "tab. 7.1" in vys.q_ch_zdroj       # chodci podle normy
     assert "u pravého kraje vozovky (užší chodník P)" in vys.stavy["q"].popis
-    assert [p[:2] for p in vys.pruhy_q] == [(6.25, 9.25), (3.25, 6.25)]   # vozovka 1,5 … 9,25 m
+    assert [(p["y0"], p["y1"]) for p in vys.pruhy_q] == [(6.25, 9.25), (3.25, 6.25), (1.5, 3.25)]
+    assert [p["nazev"] for p in vys.pruhy_q] == ["pruh 1", "pruh 2", "zbývající plocha"]
     _, o, m = spocti(d2, vys)
     pol = m.blc["polohy"]
     assert pol["M"].plosne and len(pol["M"].platky) == 8           # 2 dvounápravy × 4 kola
@@ -290,7 +295,58 @@ def test_zatizitelnost(zat):
     assert zat.Vaj == approx(max(3 / 8 * zat.Vn, zat.Vr / 6))
     assert zat.druhy["Ve"].prvni.vys.q_ch == 0.0                    # Ve: chodci vyloučeni
     assert zat.druhy["Vn"].prvni.vys.q_ch == 2.5
-    assert zat.model.protokol.kapitoly[0].nazev == "Zatížitelnost podle ČSN 73 6222"
+    kap = zat.model.protokol.kapitoly[0]
+    assert kap.nazev == "Zatížitelnost podle ČSN 73 6222"
+    assert not [o for typ, o in kap.polozky if typ == "obrazek"]     # schémata jsou v kap. 2.4
+    blc = next(k for k in zat.model.protokol.kapitoly if k.nazev == "Zatížení z modelu mostu (BLC)")
+    obr = [o.soubor for typ, o in blc.polozky if typ == "obrazek"]
+    assert obr == (["blc_zat_stale", "blc_zat_q", "blc_zat_pricny"] +
+                   [f"blc_{t}_{dr}" for dr in ("Vn", "Vr", "Ve") for t in ("zat", "pricny")] +
+                   ["blc_sily"])
+
+
+def test_grafy_zatizitelnosti(zat):
+    import matplotlib.pyplot as plt
+    from pb_posudek import grafy
+    from blc_posudek.grafy_most import seznam_grafu
+    s = seznam_grafu(zat.model)
+    with grafy.vracet_obrazky():
+        assert "Zatížitelnost – obálky od referenčních souprav" not in s
+        fig = s["Zatížení mostu – vnitřní síly na nosnících"](zat.model, None)
+        tit = [a.get_title() for a in fig.axes[::2]]      # g0, g − g0, chodci, Vn, Vr, Ve (bez q)
+        assert len(tit) == 6 and tit[4].startswith("Vr = 60 t (šestinápravové")
+        assert not any(t.startswith("zatížení dopravou q") for t in tit)
+        plt.close(fig)
+        plt.close(fig)
+        for dr in ("Vn", "Vr", "Ve"):
+            fig = s[f"Zatížitelnost {dr} – zatížení na mostě (referenční)"](zat.model, None)
+            assert len(fig.axes) == 2                         # max M | max V
+            plt.close(fig)
+            fig = s[f"Zatížitelnost {dr} – příčný řez (referenční)"](zat.model, None)
+            assert len(fig.axes) == 1 and dr in fig.axes[0].get_title()
+            plt.close(fig)
+    z = zat.druhy["Vr"]
+    assert z.vys_V().V == approx(z.V) and z.vys_ref().V == 60.0 and z.vys_ref().schema_q == "6"
+    p = z.polohy_ref()
+    assert sum(pl[0] for pl in p["M"].platky) == approx(10.0 * 60.0 * z.vys_ref().dyn)
+
+
+def test_protokol_jednoho_druhu(zat):
+    from blc_posudek.zatizitelnost import klic_posudku, protokol_druhu
+    assert protokol_druhu(zat, "souhrn") is zat.model
+    m = protokol_druhu(zat, "Vr")
+    assert protokol_druhu(zat, "Vr") is m                          # spočteno jednou
+    pohled = m.zatizitelnost
+    assert pohled.jen_druh and pohled.celek is zat and list(pohled.druhy) == ["Vr"]
+    assert m.blc["vys"].druh_q == "Vr" and m.blc["vys"].V == approx(zat.Vr)
+    eta = {klic_posudku(p): p.vyuziti for p in m.protokol.posudky}
+    assert eta[zat.druhy["Vr"].minimum().klic] == approx(1.0, abs=2e-3)   # posudky při Vr
+    kap = m.protokol.kapitoly[0]
+    assert kap.nazev == "Zatížitelnost Vr – výhradní (ČSN 73 6222)"
+    tab = [o.popisek for typ, o in kap.polozky if typ == "tabulka"]
+    assert any("Zatížitelnost Vr po" in x for x in tab) and not any("Vn po" in x for x in tab)
+    assert pohled.Vaj is None                                      # jen s Vn i Vr
+    assert protokol_druhu(pohled, "Vn").zatizitelnost.druh == "Vn"   # z pohledu přes celek
 
 
 def test_slouceni_schemat():
@@ -322,9 +378,14 @@ def test_zatizitelnost_jen_normova_vozidla(d):
 
 def test_davka_zatizitelnost(tmp_path):
     from blc_posudek.__main__ import main
-    assert main([PRIKLAD, "--zatizitelnost", "--druhy", "Ve", "-o", str(tmp_path)]) == 0
+    assert main([PRIKLAD, "--zatizitelnost", "--druhy", "Ve", "--protokol", "vse",
+                 "-o", str(tmp_path)]) == 0
     html = (tmp_path / "protokol.html").read_text(encoding="utf-8")
     assert "Zatížitelnost podle ČSN 73 6222" in html and "Ve – výjimečná (čl. 7.3)" in html
+    assert (tmp_path / "obrazky" / "blc_pricny_Ve.png").exists()
+    html = (tmp_path / "Ve" / "protokol.html").read_text(encoding="utf-8")   # jen Ve
+    assert "Zatížitelnost Ve – výjimečná (ČSN 73 6222)" in html
+    assert "Referenční Ve = 80 t – příčná poloha zatížení dopravou" in html
 
 
 def test_aktualni_stari_a_koroze(d, vysledek):
