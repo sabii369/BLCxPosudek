@@ -143,7 +143,8 @@ def model_ze_slovniku(d: dict) -> NosnikPB:
     n = d.get("nosnik", {})
     L = float(n["L"])
     kabely = [_kabel(k, L, predp, i, n.get("postup_napinani")) for i, k in enumerate(d.get("kabel", []))]
-    vyz = [VrstvaVyztuze(float(v["z"]), float(v["As"]), v.get("nazev", "")) for v in d.get("vyztuz", [])]
+    vyz = [VrstvaVyztuze(float(v["z"]), float(v["As"]), v.get("nazev", ""),
+                         float(v["phi"]) if v.get("phi") not in (None, "") else None) for v in d.get("vyztuz", [])]
     smyk = [SmykovaVyztuz(**_vyber(s, SmykovaVyztuz)) for s in d.get("smykova_vyztuz", [])]
     pr = d.get("prostredi", {})
     co = d.get("casova_osa", {})

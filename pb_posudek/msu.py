@@ -26,6 +26,7 @@ class VrstvaVyztuze:
     z: float
     As: float
     nazev: str = ""
+    phi: float | None = None   # průměr prutů [mm] (šířka trhlin, 7.3.4(3); None = neznámý)
 
 
 @dataclass
