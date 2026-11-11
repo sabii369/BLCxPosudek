@@ -66,16 +66,20 @@ POPISKY_NASTAVENI = {
     "k2": "Tlak – kvazistálá (·f_ck)", "k5": "Napětí v předp. výztuži (·f_pk)",
     "tah_predpeti": "Mez tahu – předpětí a výstavba", "tah_provoz": "Mez tahu – provoz (charakt.)",
     "dekomprese": "Dekomprese – kombinace", "dekomprese_rezim": "Dekomprese – vlákno",
+    "zbytkova_zivotnost": "Zbytková životnost [roky] (tab. 12.3 → dekomprese, trhliny)",
+    "trhliny": "Šířka trhlin – kombinace", "w_max": "Omezení šířky trhlin w_max [mm]",
+    "xi_p": "ξ soudržnost předp. výztuže (prázdné = tab. 6.2)",
     "a_dek": "Hloubka dekomprese od kabelu [mm]", "r_sup": "r_sup (prázdné = dle typu)",
     "r_inf": "r_inf (prázdné = dle typu)", "gamma_P": "γ_P", "gamma_G": "γ_G,sup",
     "gamma_G_inf": "γ_G,inf", "xi": "ξ (6.10b)", "kombinace_msu": "Kombinace MSÚ",
-    "cot_theta_min": "cot θ min", "cot_theta_max": "cot θ max", "kanalky": "Kanálky (b_w,nom)",
+    "cot_theta_min": "cotg θ min", "cot_theta_max": "cotg θ max", "kanalky": "Kanálky (b_w,nom)",
     "pruhyb_limit": "Mezní průhyb L/…", "relaxace_t_max_h": "Relaxace – max. čas [h]",
     "hlavni_napeti": "Posoudit hlavní napětí",
 }
 VOLBY_NASTAVENI = {
     "tah_predpeti": ["fctm", "fctk005", "0"], "tah_provoz": ["fctm", "fctk005", "0"],
     "dekomprese": ["casta", "kvazistala", "zadna"], "dekomprese_rezim": ["krajni", "kabel"],
+    "zbytkova_zivotnost": ["", "50", "15-30", "10"], "trhliny": ["char", "casta", "kvazistala", "zadna"],
     "kombinace_msu": ["6.10ab", "6.10"], "kanalky": ["ocel", "plast"],
 }
 
@@ -1060,7 +1064,8 @@ class Aplikace(tk.Tk):
         lf = ttk.LabelFrame(z, text="Podélná betonářská výztuž", padding=6)
         lf.pack(fill="both", expand=True)
         self.t_vyztuz = Tabulka(lf, [("nazev", "Název", 160, "str", None), ("z", "z [mm]", 90, "float", None),
-                                     ("As", "A_s [mm²]", 90, "float", None)], pri_zmene=self._naplanuj_nahled)
+                                     ("As", "A_s [mm²]", 90, "float", None),
+                                     ("phi", "Ø [mm] (trhliny)", 100, "optfloat", None)], pri_zmene=self._naplanuj_nahled)
         self.t_vyztuz.pack(fill="both", expand=True)
         kal = ttk.Frame(lf)
         kal.pack(fill="x", pady=4)
@@ -1180,7 +1185,7 @@ class Aplikace(tk.Tk):
             else:
                 typ = "optfloat"
             popis = POPISKY_NASTAVENI.get(fl.name, fl.name)
-            if vych is not None and typ != "bool":
+            if vych not in (None, "") and typ != "bool":
                 popis += f"   (výchozí {vych})"
             pole.append((fl.name, popis, typ, vych if typ == "bool" else VOLBY_NASTAVENI.get(fl.name)))
         ttk.Label(f, text=("Hodnoty jsou předvyplněny podle doporučení ČSN EN 1992-1-1; r_sup a r_inf se mění podle "

@@ -17,9 +17,36 @@ from .materialy import Beton, BetonarskaVyztuz, PredpinaciVyztuz
 from .msu import (VrstvaPredpeti, VrstvaVyztuze, ohybova_unosnost, smykova_unosnost)
 from .protokol import Kapitola, Protokol, VysledekPosudku, fmt
 from .prurez import Prurez
+from .trhliny import Vrstva, sirka_trhliny, xi_predpinaci
 from .zatizeni import (DRUHY_KOMBINACI, NAZVY_KOMBINACI, KombinaceVstup, Obalka, ZatezovaciStav,
                        kombinace)
 from .ztraty import ztrata_dlouhodoba_546, ztrata_pokluzem_obecne
+
+
+# ČSN 73 6222, tab. 12.3: kategorie mostu podle informativní zbytkové životnosti a druhu konstrukce
+# (sloupce: předem předpjaté, dodatečně předpjaté soudržné, dodatečně nesoudržné, železobetonové)
+ZBYTKOVA_ZIVOTNOST = {"50": ("S4", "BCDE"), "15-30": ("S3", "CDEF"), "10": ("S1", "DEFG")}
+# ČSN 73 6222, tab. 12.4: kategorie → (kombinace pro dekompresi, kombinace pro šířku trhlin, w_max [mm])
+KRITERIA_KATEGORIE = {
+    "B": ("casta", "char", 0.2),
+    "C": ("kvazistala", "casta", 0.2),
+    "D": ("zadna", "casta", 0.2),
+    "E": ("zadna", "kvazistala", 0.3),
+    "F": ("zadna", "kvazistala", 0.4),
+    "G": ("zadna", "kvazistala", 0.5),
+}
+
+
+def kategorie_mostu(zbytkova_zivotnost: str, typ_predpeti: str) -> str:
+    """Kategorie mostu B–G podle ČSN 73 6222, tab. 12.3 ("" = zbytková životnost nezadána)."""
+    zz = str(zbytkova_zivotnost or "").strip().replace(" až ", "-").replace("–", "-").replace(" ", "")
+    if not zz:
+        return ""
+    if zz not in ZBYTKOVA_ZIVOTNOST:
+        raise ValueError(f"Informativní zbytková životnost „{zbytkova_zivotnost}“ – možnosti: 50, 15-30, 10 let.")
+    sloupec = {"predem": 0, "dodatecne": 1, "nesoudrzne": 2, "zb": 3}
+    typ = next((v for k, v in sloupec.items() if str(typ_predpeti).startswith(k)), 1)
+    return ZBYTKOVA_ZIVOTNOST[zz][1][typ]
 
 
 @dataclass
@@ -41,6 +68,12 @@ class Nastaveni:
     dekomprese: str = "casta"      # casta | kvazistala | zadna
     dekomprese_rezim: str = "krajni"  # krajni | kabel
     a_dek: float = 25.0            # mm – hloubka dekomprese kolem kabelu (EN 1992-2 7.3.1(105))
+    # ČSN 73 6222, tab. 12.3 a 12.4: informativní zbytková životnost → kategorie mostu → kombinace
+    # pro dekompresi a šířku trhlin a w_max ("" = bez kategorie, platí dekomprese/trhliny/w_max níže)
+    zbytkova_zivotnost: str = ""   # "" | "50" | "15-30" | "10"
+    trhliny: str = "zadna"         # kombinace pro šířku trhlin: char | casta | kvazistala | zadna
+    w_max: float = 0.2             # mm – omezení šířky trhlin na povrchu
+    xi_p: float | None = None      # poměr soudržnosti předp. výztuže ξ (tab. 6.2; None = podle typu)
     r_sup: float | None = None     # 5.10.9 (None = podle typu předpětí)
     r_inf: float | None = None
     # MSÚ
@@ -157,6 +190,9 @@ class NosnikPB:
             self.n.r_sup = 1.05 if self.predem else 1.10
         if self.n.r_inf is None:
             self.n.r_inf = 0.95 if self.predem else 0.90
+        self.kategorie = kategorie_mostu(self.n.zbytkova_zivotnost, self.typ)
+        if self.kategorie:
+            self.n.dekomprese, self.n.trhliny, self.n.w_max = KRITERIA_KATEGORIE[self.kategorie]
         self.protokol = Protokol(self.projekt.get("nazev", "Posudek nosníku z předpjatého betonu"))
         self.v: dict = {}  # uložené výsledky pro grafy
 
@@ -1202,6 +1238,17 @@ class NosnikPB:
                f"se uvažuje charakteristickými hodnotami P_k,sup = r_sup·P_m,t a P_k,inf = r_inf·P_m,t "
                f"(r_sup = {fmt(nn.r_sup)}, r_inf = {fmt(nn.r_inf)}, čl. 5.10.9); rozhodující hodnota "
                "je použita pro každé kritérium.")
+        if self.kategorie:
+            dek, trh, wm = KRITERIA_KATEGORIE[self.kategorie]
+            zz = self._zivotnost_klic()
+            K.text(f"Kategorie mostu {self.kategorie} (ČSN 73 6222, tab. 12.3: informativní zbytková životnost "
+                   f"{ZBYTKOVA_ZIVOTNOST[zz][0]} – {zz.replace('-', ' až ')} let, "
+                   f"{'předem předpjatý' if self.predem else 'dodatečně předpjatý se soudržnou výztuží'} most). "
+                   "Návrhová kritéria podle tab. 12.4: dekomprese – "
+                   + (f"kombinace {NAZVY_KOMBINACI[dek]}" if dek != "zadna" else "neověřuje se")
+                   + f"; šířka trhlin – kombinace {NAZVY_KOMBINACI[trh]}, w_max = {fmt(wm, 1)} mm. Tahové "
+                   "napětí v provozních fázích se proto uvádí jen informativně (kritériem jsou dekomprese a "
+                   "šířka trhlin).")
         Mg0 = self.zs_g0.M_max
         h = self.prurez.h
         self.msp_napeti = {}
@@ -1279,6 +1326,10 @@ class NosnikPB:
                         max(-float(vals_min[i]), 0) / lim_c, fz, nazk, float(x[i]),
                         odkaz="5.10.2.2(5)" if f is self.faze[0] else "7.2(2)", skupina="Napětí v betonu"))
                     i = int(np.argmax(vals_max))
+                    if f.provoz and self.kategorie:
+                        Kf.krok(f"Největší tahové napětí – {nazk} (x = {fmt(x[i], 3)} m, informativně)", "σ_{ct}",
+                                "", float(vals_max[i]), "MPa")
+                        continue
                     self.protokol.pridej_posudek(Kf, VysledekPosudku(
                         "Tahové napětí v betonu", "MSP", float(vals_max[i]), lim_t, "MPa",
                         max(float(vals_max[i]), 0) / lim_t if lim_t > 0 else (0 if vals_max[i] <= 0 else math.inf),
@@ -1309,6 +1360,9 @@ class NosnikPB:
                     NAZVY_KOMBINACI[druh], float(x[i]),
                     poznamka=f"vlákno z = {fmt(info['z'][i])} mm; E_d = napětí od zatížení, R_d = |tlak od P_inf|",
                     odkaz="7.3.1, tab. 7.1N", skupina="Dekomprese"))
+            # šířka trhlin (7.3.4; ČSN 73 6222, tab. 12.4)
+            if f.provoz and nn.trhliny != "zadna":
+                self._sirka_trhlin(Kf, f, NP, MP, Mg0, nn.trhliny)
             # napětí v předpínací výztuži v provozu
             if f.provoz:
                 ob = d["char"]
@@ -1328,6 +1382,99 @@ class NosnikPB:
             Kf.obrazek(f"napeti_{self.faze.index(f)}", f"Napětí v krajních vláknech po délce – {f.nazev}")
         K2 = self.protokol.kapitola("Rozdělení napětí po výšce průřezu", 2)
         K2.obrazek("napeti_profil", "Rozdělení normálových napětí ve středu rozpětí v jednotlivých fázích")
+
+    def _zivotnost_klic(self) -> str:
+        return str(self.n.zbytkova_zivotnost).strip().replace(" až ", "-").replace("–", "-").replace(" ", "")
+
+    def _vrstvy_trhliny(self, f: Faze, i: int, NP, MP, r: float) -> list[Vrstva]:
+        """Výztuž pro průřez s trhlinou v řezu i: kabely s ε_p0 = r·σ_pm,t/E_p − σ_c,P(z_p)/E_cm."""
+        b, p = self.beton, self.predp
+        vr = []
+        for k, s, z in zip(self.kabely, f.sigma, self.zk):
+            sc = float(self._napeti(z[i], NP[i], MP[i], 0.0, 0.0, r, idx=i))
+            vr.append(Vrstva(float(z[i]), k.Ap * f.k_Ap, p.Ep, r * float(s[i]) / p.Ep - sc / b.Ecm, True,
+                             nazev=k.nazev))
+        for v in self.vyztuz:
+            vr.append(Vrstva(v.z, v.As * f.k_As, self.betonarska.Es, phi=v.phi, nazev=v.nazev or "výztuž"))
+        return vr
+
+    def _sirka_trhlin(self, Kf: Kapitola, f: Faze, NP, MP, Mg0, druh: str):
+        """Posudek šířky trhlin: neporušený průřez při σ_ct ≤ f_ctm(t), jinak 7.3.4 na průřezu s trhlinou."""
+        b, nn, p = self.beton, self.n, self.predp
+        ob = self.komb[f.nazev][druh]
+        h, x = self.prurez.h, self.x
+        fct = b.fctm_t(f.t)
+        xi = nn.xi_p if nn.xi_p else xi_predpinaci(self.predem, p.druh, b.fck)
+        nazk = NAZVY_KOMBINACI[druh]
+        nej = None            # (výsledek, i, r_naz, σ_ct)
+        s_max = (-math.inf, 0)
+        nenalezeno = []
+        for i in range(len(x)):
+            for r_naz, r in (("sup", nn.r_sup), ("inf", nn.r_inf)):
+                for strana, Mx, zz in ((1, ob.M_max[i], 0.0), (-1, ob.M_min[i], h)):
+                    s_un = float(self._napeti(zz, NP[i], MP[i], Mg0[i], Mx, r, idx=i))
+                    if s_un > s_max[0]:
+                        s_max = (s_un, i)
+                    if s_un <= fct:
+                        continue
+                    vys = sirka_trhliny(self.prurez, b.Ecm, fct, self._vrstvy_trhliny(f, i, NP, MP, r),
+                                        float(Mg0[i] + Mx), xi, strana)
+                    if vys is None:
+                        nenalezeno.append(float(x[i]))
+                    elif nej is None or vys.w > nej[0].w:
+                        nej = (vys, i, r_naz, s_un)
+        odkaz = "7.3.4" + (", ČSN 73 6222 tab. 12.4" if self.kategorie else "")
+        Kf.text(f"<b>Šířka trhlin</b> – kombinace {nazk}, w_max = {fmt(nn.w_max, 2)} mm"
+                + (f" (kategorie mostu {self.kategorie}, ČSN 73 6222, tab. 12.4)" if self.kategorie else "")
+                + ". Průřez je bez trhlin, nepřekročí-li tahové napětí na neporušeném průřezu f_ct,eff = "
+                  f"f_ctm(t) = {fmt(fct)} MPa; jinak se šířka trhliny počítá podle 7.3.4 na pružném průřezu "
+                  "s trhlinou (beton v tahu nepůsobí, předpínací výztuž s počátečním přetvořením "
+                  "ε_p0 = r·σ_pm,t/E_p − σ_c,P(z_p)/E_cm), k_t = 0,4, ξ1 = √ξ, "
+                  f"ξ = {fmt(xi, 2)} (tab. 6.2).")
+        if nenalezeno:
+            Kf.text(f"Upozornění: v řezech x = {', '.join(fmt(v, 2) for v in sorted(set(nenalezeno)))} m "
+                    "nebyl nalezen rovnovážný stav průřezu s trhlinou – šířka trhlin zde není spočtena.")
+        if nej is None:
+            i = s_max[1]
+            Kf.krok(f"Největší tahové napětí na neporušeném průřezu (x = {fmt(x[i], 3)} m)",
+                    "σ_{ct} ≤ f_{ct,eff}", f"{fmt(s_max[0])} ≤ {fmt(fct)}", s_max[0], "MPa", "7.3.2(4)")
+            self.protokol.pridej_posudek(Kf, VysledekPosudku(
+                "Šířka trhlin", "MSP", 0.0, nn.w_max, "mm", 0.0, f.nazev, nazk, float(x[i]),
+                poznamka=f"bez trhlin: σ_ct = {fmt(s_max[0])} ≤ f_ctm = {fmt(fct)} MPa",
+                odkaz=odkaz, skupina="Trhliny"))
+            return
+        v, i, r_naz, s_un = nej
+        okraj = "dolní" if v.strana > 0 else "horní"
+        Kf.text(f"Rozhodující řez x = {fmt(x[i], 3)} m, {okraj} okraj, předpětí P_{r_naz}:")
+        Kf.krok("Tahové napětí na neporušeném průřezu", "σ_{ct} > f_{ct,eff}", f"{fmt(s_un)} > {fmt(fct)}",
+                s_un, "MPa", "7.3.2(4)")
+        Kf.krok("Moment", "M = M_{g0} + M_{ost}", f"{fmt(float(Mg0[i]))} + {fmt(v.M - float(Mg0[i]))}", v.M, "kNm")
+        Kf.krok("Výška tlačené oblasti průřezu s trhlinou", "x", "iterace ΣN = 0, ΣM = M", v.x, "mm")
+        Kf.krok("Napětí v tlačeném okraji", "σ_{c}", "", v.sigma_c, "MPa")
+        if v.vyztuz_s == "betonářská":
+            Kf.krok("Napětí v tažené betonářské výztuži", "σ_{s}", "", v.sigma_s, "MPa", "7.3.4(2)")
+        else:
+            Kf.krok("Přírůstek napětí v předpínací výztuži od dekomprese", "Δσ_{p}", "", v.sigma_s, "MPa",
+                    "7.3.4(2)")
+        Kf.krok("Účinná výška taženého betonu", "h_{c,ef} = min(2,5·(h − d); (h − x)/3; h/2)", "", v.h_cef, "mm",
+                "7.3.2(3)")
+        Kf.krok("Účinná plocha taženého betonu", "A_{c,eff}", "", v.A_ceff, "mm²")
+        Kf.krok("Stupeň vyztužení", "ρ_{p,eff} = (A_{s} + ξ_{1}^{2}·A'_{p})/A_{c,eff}",
+                f"({fmt(v.As_ef)} + {fmt(v.xi1, 3)}^{{2}}·{fmt(v.Ap_ef)})/{fmt(v.A_ceff)}", v.rho, "", "(7.10)")
+        Kf.krok("Rozdíl průměrných přetvoření", "ε_{sm} − ε_{cm} = max([σ_{s} − k_{t}·f_{ct,eff}/ρ_{p,eff}·"
+                "(1 + α_{e}·ρ_{p,eff})]/E_{s}; 0,6·σ_{s}/E_{s})", f"E_s = {fmt(v.E_s)} MPa, α_e = "
+                f"{fmt(v.E_s / b.Ecm, 2)} → {v.deps_vzorec}", v.deps * 1e3, "‰", "(7.9)")
+        if v.s_r_vzorec == "(7.11)":
+            Kf.krok("Maximální vzdálenost trhlin", "s_{r,max} = k_{3}·c + k_{1}·k_{2}·k_{4}·φ/ρ_{p,eff}",
+                    f"3,4·{fmt(v.c)} + 0,8·0,5·0,425·{fmt(v.phi)}/{fmt(v.rho, 4)}", v.s_r, "mm", "(7.11)")
+        else:
+            Kf.krok("Maximální vzdálenost trhlin (v A_c,eff není betonářská výztuž o zadaném průměru)",
+                    "s_{r,max} = 1,3·(h − x)", f"1,3·({fmt(h)} − {fmt(v.x)})", v.s_r, "mm", "(7.14)")
+        Kf.krok("Šířka trhliny", "w_{k} = s_{r,max}·(ε_{sm} − ε_{cm})",
+                f"{fmt(v.s_r)}·{fmt(v.deps * 1e3)}·10^{{−3}}", v.w, "mm", "(7.8)")
+        self.protokol.pridej_posudek(Kf, VysledekPosudku(
+            "Šířka trhlin", "MSP", v.w, nn.w_max, "mm", v.w / nn.w_max, f.nazev, nazk, float(x[i]),
+            poznamka=f"{okraj} okraj, P_{r_naz}, s_r,max {v.s_r_vzorec}", odkaz=odkaz, skupina="Trhliny"))
 
     def _dekomprese(self, NP, MP, Mg0, ob: Obalka):
         """Využití z hlediska dekomprese: η = σ_od zatížení / |σ_od předpětí| v rozhodujícím vláknu."""
@@ -1590,7 +1737,7 @@ class NosnikPB:
         K.text("Smyk podle 6.2: v oblastech bez ohybových trhlin (σ_d ≤ f_ctk,0,05/γ_c v MSÚ) únosnost betonu (6.4) "
                "jako minimum přes úrovně stojiny (6.2.2(2) pozn.), jinak (6.2a,b). Únosnost se smykovou výztuží je "
                "min(V_Rd,s (6.8/6.13); V_Rd,max (6.9/6.14)), celková únosnost V_Rd = max(V_Rd,c; min(V_Rd,s; V_Rd,max)). "
-               f"cot θ je volen v mezích {fmt(nn.cot_theta_min)}–{fmt(nn.cot_theta_max)} pro maximální únosnost. "
+               f"cotg θ je volen v mezích {fmt(nn.cot_theta_min)}–{fmt(nn.cot_theta_max)} pro maximální únosnost. "
                "Účinná výška d je vzdálenost spodní řady ohybové betonářské výztuže od horního okraje (bez "
                "betonářské výztuže odhad d = h − 50 mm), rameno vnitřních sil z = 0,9·d po celé délce. Šířka b_w,nom se v každé "
                "úrovni stojiny zmenšuje o k·Σφ kanálků procházejících touto "
@@ -1707,14 +1854,24 @@ class NosnikPB:
                        f"[{fmt(0.18 / b.gamma_c)}·{fmt(r.k)}·(100·{fmt(r.rho_l)}·{fmt(b.fck)})^{{1/3}} + 0,15·"
                        f"{fmt(min(r.sigma_cp, 0.2 * b.fcd))}]·{fmt(r.bw)}·{fmt(r.d)}·10^{{−3}}", r.V_Rd_c, "kN", "(6.2)")
             K.krok("Smyková výztuž", "A_{sw}/s", f"{fmt(sv.Asw)}/{fmt(sv.s)}", sv.Asw_s, "mm²/mm")
-            K.krok("Součinitel α_cw; redukce ν1; cot θ", "α_{cw}; ν_{1} = 0,6·(1 − f_{ck}/250); cot θ", "",
+            K.krok("Součinitel α_cw; redukce ν1; cotg θ", "α_{cw}; ν_{1} = 0,6·(1 − f_{ck}/250); cotg θ", "",
                    f"{fmt(r.alpha_cw)}; {fmt(r.nu1)}; {fmt(r.cot_theta)}", "", "(6.6N), (6.11N)")
-            K.krok("Únosnost smykové výztuže", "V_{Rd,s} = (A_{sw}/s)·z·f_{ywd}·(cot θ + cot α)·sin α",
-                   f"{fmt(sv.Asw_s)}·{fmt(r.z)}·{fmt(r.mezi['fywd'])}·{fmt(r.cot_theta)}·10^{{−3}}", r.V_Rd_s, "kN", "(6.8), (6.13)")
-            K.krok("Únosnost tlakové diagonály",
-                   "V_{Rd,max} = α_{cw}·b_{w,nom}·z·ν_{1}·f_{cd}·(cot θ + cot α)/(1 + cot^{2}θ)",
-                   f"{fmt(r.alpha_cw)}·{fmt(r.bw_nom)}·{fmt(r.z)}·{fmt(r.nu1)}·{fmt(b.fcd)}·{fmt(r.cot_theta)}/(1 + {fmt(r.cot_theta)}^{{2}})·10^{{−3}}",
-                   r.V_Rd_max, "kN", "(6.9), (6.14)")
+            c, Asw_s, fywd = fmt(r.cot_theta), fmt(sv.Asw_s), fmt(r.mezi['fywd'])
+            if abs(sv.alpha - 90.0) < 1e-9:             # svislé třmínky (6.8), (6.9)
+                K.krok("Únosnost smykové výztuže", "V_{Rd,s} = (A_{sw}/s)·z·f_{ywd}·cotg θ",
+                       f"{Asw_s}·{fmt(r.z)}·{fywd}·{c}·10^{{−3}}", r.V_Rd_s, "kN", "(6.8)")
+                K.krok("Únosnost tlakové diagonály",
+                       "V_{Rd,max} = α_{cw}·b_{w,nom}·z·ν_{1}·f_{cd}/(cotg θ + tg θ)",
+                       f"{fmt(r.alpha_cw)}·{fmt(r.bw_nom)}·{fmt(r.z)}·{fmt(r.nu1)}·{fmt(b.fcd)}/({c} + "
+                       f"{fmt(1.0 / r.cot_theta)})·10^{{−3}}", r.V_Rd_max, "kN", "(6.9)")
+            else:                                       # šikmá smyková výztuž (6.13), (6.14)
+                ca, sa = fmt(r.mezi["cot_alpha"]), fmt(math.sin(math.radians(sv.alpha)))
+                K.krok("Únosnost smykové výztuže", "V_{Rd,s} = (A_{sw}/s)·z·f_{ywd}·(cotg θ + cotg α)·sin α",
+                       f"{Asw_s}·{fmt(r.z)}·{fywd}·({c} + {ca})·{sa}·10^{{−3}}", r.V_Rd_s, "kN", "(6.13)")
+                K.krok("Únosnost tlakové diagonály",
+                       "V_{Rd,max} = α_{cw}·b_{w,nom}·z·ν_{1}·f_{cd}·(cotg θ + cotg α)/(1 + cotg^{2}θ)",
+                       f"{fmt(r.alpha_cw)}·{fmt(r.bw_nom)}·{fmt(r.z)}·{fmt(r.nu1)}·{fmt(b.fcd)}·({c} + {ca})/(1 + "
+                       f"{c}^{{2}})·10^{{−3}}", r.V_Rd_max, "kN", "(6.14)")
             K.krok("Smyková únosnost", "V_{Rd} = max(V_{Rd,c}; min(V_{Rd,s}; V_{Rd,max}))",
                    f"max({fmt(r.V_Rd_c)}; min({fmt(r.V_Rd_s)}; {fmt(r.V_Rd_max)}))", r.V_Rd, "kN", "6.2.1")
             self.protokol.pridej_posudek(K, VysledekPosudku(
@@ -1742,7 +1899,7 @@ class NosnikPB:
                 self.protokol.pridej_posudek(K, VysledekPosudku(
                     "Ohyb + přídavná tahová síla ΔF_td", "MSÚ", float(arr["dF_eta"][j]), 1.0, "–",
                     float(arr["dF_eta"][j]), f.nazev, "MSÚ – základní", float(self.x[j]),
-                    poznamka="(M_Ed/z + ΔF_td)/(M_Rd/z), ΔF_td = 0,5·V_Ed·(cot θ − cot α)", odkaz="6.2.3(7)",
+                    poznamka="(M_Ed/z + ΔF_td)/(M_Rd/z), ΔF_td = 0,5·V_Ed·(cotg θ − cotg α)", odkaz="6.2.3(7)",
                     skupina="Ohyb"))
         K.obrazek("msu_smyk", "Posouvající síly a smykové únosnosti po délce nosníku")
 
@@ -1755,7 +1912,7 @@ class NosnikPB:
                "v MSÚ překročí f_ctk,0,05, musí kotvení soudržností přenést sílu v lanech. Největší napětí, které "
                "mohou lana ve vzdálenosti l_x od konce nosníku přenést, roste lineárně do σ_pm,t na délce l_pt2 a "
                "dále do f_pd na kotevní délce l_bpd. Požadovaná síla v tažené výztuži je F_td = M_Ed/z + ΔF_td, "
-               "ΔF_td = 0,5·V_Ed·(cot θ − cot α) se smykovou výztuží, resp. V_Ed·d/z bez ní (a_l = d); "
+               "ΔF_td = 0,5·V_Ed·(cotg θ − cotg α) se smykovou výztuží, resp. V_Ed·d/z bez ní (a_l = d); "
                "tažená betonářská výztuž se uvažuje silou A_s·f_yd (předpokládá se její zakotvení za podporou).")
         d_l = p.d_lana or 15.7
         lpt2 = 1.2 * self.lpt

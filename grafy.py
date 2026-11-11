@@ -397,7 +397,7 @@ def msu_smyk(m, adr):
     ax.set_ylim(bottom=0)
     ax.set(xlabel="x [m]", ylabel="V [kN]")
     ax.legend(fontsize=7, ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.18))
-    ax.set_title(f"Smyková únosnost – {f} (V_Rd,s = V_Rd,max při optimálním cot θ)")
+    ax.set_title(f"Smyková únosnost – {f} (V_Rd,s = V_Rd,max při optimálním cotg θ)")
     return _uloz(fig, adr, "msu_smyk")
 
 
