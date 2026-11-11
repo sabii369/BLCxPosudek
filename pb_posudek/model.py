@@ -1574,6 +1574,15 @@ class NosnikPB:
                 return sv
         return SmykovaVyztuz(0.0, 1.0)
 
+    def _ucinna_vyska_smyk(self) -> tuple[float, str]:
+        """Účinná výška d [mm] pro smyk: vzdálenost spodní řady ohybové betonářské výztuže od horního
+        okraje; bez betonářské výztuže odhad d = h − 50 mm. Vrací (d, popis)."""
+        h = self.prurez.h
+        z_v = [v.z for v in self.vyztuz if v.As > 0]
+        if z_v:
+            return h - min(z_v), f"h − z_{{s,min}} = {fmt(h)} − {fmt(min(z_v))}"
+        return h - 50.0, f"h − 50 = {fmt(h)} − 50 (betonářská výztuž nezadána – odhad)"
+
     def _msu_smyk(self):
         b, nn = self.beton, self.n
         P = self.prurez
@@ -1582,12 +1591,16 @@ class NosnikPB:
                "jako minimum přes úrovně stojiny (6.2.2(2) pozn.), jinak (6.2a,b). Únosnost se smykovou výztuží je "
                "min(V_Rd,s (6.8/6.13); V_Rd,max (6.9/6.14)), celková únosnost V_Rd = max(V_Rd,c; min(V_Rd,s; V_Rd,max)). "
                f"cot θ je volen v mezích {fmt(nn.cot_theta_min)}–{fmt(nn.cot_theta_max)} pro maximální únosnost. "
-               "Účinná výška d je vzdálenost výslednice tahových sil na mezi únosnosti v ohybu od horního okraje, "
-               "z = 0,9·d. Šířka b_w,nom se v každé úrovni stojiny zmenšuje o k·Σφ kanálků procházejících touto "
+               "Účinná výška d je vzdálenost spodní řady ohybové betonářské výztuže od horního okraje (bez "
+               "betonářské výztuže odhad d = h − 50 mm), rameno vnitřních sil z = 0,9·d po celé délce. Šířka b_w,nom se v každé "
+               "úrovni stojiny zmenšuje o k·Σφ kanálků procházejících touto "
                "úrovní (6.2.3(6)). V_Ed zahrnuje příznivý účinek sklonu kabelů V_P (γ_P = 1,0). Přechod mezi "
                "oblastí bez trhlin a s trhlinami je podle normy nespojitý (jiný model únosnosti betonu).")
         k_d = 0.5 if nn.kanalky == "ocel" else 1.2
         zt = P.zt
+        d, d_popis = self._ucinna_vyska_smyk()
+        K.krok("Účinná výška pro smyk (po celé délce)", "d", d_popis, d, "mm")
+        K.krok("Rameno vnitřních sil (po celé délce)", "z = 0,9·d", f"0,9·{fmt(d)}", 0.9 * d, "mm")
         S_t = float(P.staticky_moment(zt)[0])
         vys_ohyb = {}
         self.msu_V = {}
@@ -1607,23 +1620,16 @@ class NosnikPB:
             for i in np.nonzero(self.v_poli)[0]:
                 cand = [ob.V_max[i] + VP[i], ob.V_min[i] + VP[i]]
                 VEd = max(cand, key=abs)
-                # tažená výztuž a účinná výška z rovnováhy na mezi únosnosti v ohybu (plynulé po délce)
+                # tažená výztuž (ρ_l) z rovnováhy na mezi únosnosti v ohybu; d a z = 0,9·d jsou po délce stálé
                 ro = vys_ohyb.get(i)
                 if ro is not None and ro.konvergence and ro.rameno > 0:
-                    tah = [(v["z"], v["Ap"]) for v in ro.vrstvy_p if v["F"] > 0]
-                    tah += [(v["z"], v["As"]) for v in ro.vrstvy_s if v["F"] > 0]
-                    A_sl = sum(a for _, a in tah)
-                    z_s = ro.z_Fc - ro.rameno
+                    A_sl = sum(v["Ap"] for v in ro.vrstvy_p if v["F"] > 0)
+                    A_sl += sum(v["As"] for v in ro.vrstvy_s if v["F"] > 0)
                 else:
-                    zs_list = [(z[i], k.Ap * f.k_Ap) for z, k in zip(self.zk, self.kabely) if z[i] < zt]
-                    zs_list += [(v.z, v.As * f.k_As) for v in self.vyztuz if v.z < zt]
-                    if not zs_list:
-                        zs_list = [(min(z[i] for z in self.zk), 0.0)]
-                    A_sl = sum(a for _, a in zs_list)
-                    z_s = sum(z * a for z, a in zs_list) / A_sl if A_sl > 0 else zs_list[0][0]
-                d = P.h - z_s
+                    A_sl = sum(k.Ap * f.k_Ap for z, k in zip(self.zk, self.kabely) if z[i] < zt)
+                    A_sl += sum(v.As * f.k_As for v in self.vyztuz if v.z < zt)
                 # šířka stojiny v pásmu mezi tlačeným a taženým pásem, oslabení kanálky v každé úrovni
-                zr = np.linspace(max(z_s, 0.0), min(z_s + 0.9 * d, P.h), 80)
+                zr = np.linspace(max(P.h - d, 0.0), min(P.h - 0.1 * d, P.h), 80)
                 b_z = P.sirka(zr)
                 phi_z = np.zeros_like(zr)
                 if not self.predem:
