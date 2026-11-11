@@ -3,7 +3,7 @@
 Dokument je určený AI asistentovi, který bude v tomto repu připravovat a spouštět
 **parametrickou studii**. Popisuje, co program počítá, jak data tečou mezi částmi, jaké
 parametry lze měnit, co se kvůli nim musí přepočítat, kolik to trvá a kde jsou pasti.
-Stav kódu: listopad 2026 (BLC 1.5.0, commit `4bb10f1`). Při změně chování programu
+Stav kódu: listopad 2026 (BLC 1.8.0 – zatížitelnost Vn, Vr, Ve podle ČSN 73 6222). Při změně chování programu
 dokument aktualizovat.
 
 Doplňkové zdroje: `CLAUDE.md` (pravidla repa, modelová rozhodnutí), `docs/navod.md`
@@ -34,18 +34,19 @@ BLC proti SCIA).
 
 Spojený program `blc_posudek` vezme **jeden vstupní soubor** (vstup Posudku PB + sekce
 `[blc]` s popisem mostu), spočte na **2D MKP modelu celého mostu** (BLC) vnitřní síly všech
-nosníků od zatěžovacích stavů **g0, g − g0, q_ch (chodci), q (vozidlo)**, vybere
+nosníků od zatěžovacích stavů **g0, g − g0, q_ch (chodci), q (doprava)**, vybere
 **nejzatíženější nosník**, z jeho obálek sestaví **kombinace podle ČSN EN 1990** a předá je
 modulu **Posudek PB**, který posoudí předpjatý nosník (ztráty předpětí, časová osa, MSP,
 MSÚ) a vrátí **využití η** každého posudku. Volitelně místo posouzení hledá
-**zatížitelnost** – tíhu vozidla Ve [t], při které je η = 100 % v každém mezním stavu.
+**zatížitelnost podle ČSN 73 6222** – normální Vn, výhradní Vr a výjimečnou Ve [t], při
+které je η = 100 % v každém mezním stavu.
 
 ```
 vstup .toml (posudek + [blc])
    │  blc_posudek.vypocet.nacti()
    ▼
 parametry_blc(d) ──► blc.vnitrni_sily(...) ──► VysledekSil  (2D MKP celého mostu)
-                       g0 (1D, každý nosník zvlášť), g−g0 (2D), q_ch (2D obálka), q (2D obálka pojezdu)
+                       g0 (1D, každý nosník zvlášť), g−g0 (2D), q_ch (2D obálka), q (2D obálka: Vn | Vr | Ve | MLC)
    │  vyber_nosnik(vys, d)  → o  (index posuzovaného nosníku, nejzatíženější podle MSÚ 6.10)
    ▼
 data_pro_posudek(vys, d, o) = kopie d bez [blc] + [zatizeni] z obálek nosníku o
@@ -55,7 +56,7 @@ pb_posudek.vstup.model_ze_slovniku(...) → NosnikPB ; .spocitej()
    ▼
 model.protokol.posudky  → [VysledekPosudku(mezni_stav, nazev, faze, kombinace, x, E_d, R_d, vyuziti …)]
    │
-   └─ (volitelně) blc_posudek.zatizitelnost.zatizitelnost(d) → Ve pro η = 1 každého posudku
+   └─ (volitelně) blc_posudek.zatizitelnost.zatizitelnost(d) → Vn, Vr, Ve pro η = 1 každého posudku
 ```
 
 ---
@@ -65,11 +66,12 @@ model.protokol.posudky  → [VysledekPosudku(mezni_stav, nazev, faze, kombinace,
 | Soubor | Obsah / klíčové funkce |
 |---|---|
 | `blc_posudek/vypocet.py` | **řídicí vrstva**: `nacti`, `VYCHOZI_BLC`, `parametry_blc(d)`, `vlastnosti_prurezu(d)`, `nastaveni_posudku(d)`, `vyber_nosnik(vys, d)`, `zatizeni_z_blc(vys, d, o)`, `data_pro_posudek(vys, d, o)`, `spocti(d, vys=None, o=None)`, `kapitola_blc`, `uloz_protokol_most(model, adr)` |
-| `blc_posudek/zatizitelnost.py` | `zatizitelnost(d, vys=None, o=None, tol=1e-3)` → `VysledekZatizitelnosti`; `vys_pro_Ve(vys, Ve)` (přeškálování q); `klic_posudku(p)` |
+| `blc_posudek/zatizitelnost.py` | `zatizitelnost(d, vys=None, o=None, druhy=None, tol=1e-3)` → `VysledekZatizitelnosti` (`druhy` → `ZatizitelnostDruhu`); `vys_pro_Ve(vys, Ve)`; `klic_posudku(p)`; `_slouc` (volba schématu Vn / Vr po posudcích) |
 | `blc_posudek/__main__.py` | dávka / CLI (`python -m blc_posudek soubor.toml -o slozka [--zatizitelnost]`) |
 | `blc_posudek/gui.py`, `grafy_most.py` | GUI (`AplikaceMost`, karta 0 „Most a zatížení“), grafy mostu do protokolu |
-| `blc/vnitrni_sily.py` | `vnitrni_sily(...)` → `VysledekSil`; `Soucinitele`; `StavSil`; `polohy_q` |
-| `blc/dynamicky_soucinitel.py` | `dynamicky_soucinitel(vozidlo, dyn)` → (δ, zdroj) podle ČSN 73 6222, kap. 8 |
+| `blc/vnitrni_sily.py` | `vnitrni_sily(...)` → `VysledekSil`; `vys_s_vozidlem(vys, Vn=…)` (jiné zatížení dopravou na stejném MKP), `vys_pro_V(vys, V)` (přeškálování q); `Soucinitele`; `StavSil`; `polohy_q` |
+| `blc/schemata_zatizitelnosti.py` | ČSN 73 6222, kap. 7: zatěžovací pruhy, vozidla Vr (`VOZIDLA_VR`), převod Vn ↔ vn, příčná poloha u užšího chodníku, pravidla volby schémat `Vn_ze_schemat`, `Vr_ze_schemat`, chodci `Q_CHODNIKY` |
+| `blc/dynamicky_soucinitel.py` | `dynamicky_soucinitel(vozidlo, dyn, K)` → (δ, zdroj); `delty_zatizitelnosti(K)` → δ1–δ3 (obr. 8.1, L_d tab. 8.1) |
 | `blc/export_pb.py` | `toml_zatizeni_pb`, `zatizeni_pb_dict`, `uloz_vysledky` (JSON/CSV/TOML) |
 | `blc/stale_zatizeni.py` | `Vybaveni` (chodníky, skladby, zábradlí, svodidla), `LiniovaZatizeni` |
 | `blc/geometry.py` | `Konstrukce` (geometrie, uložení, šikmost, validace), `E_betonu` (Ecm z třídy) |
@@ -134,12 +136,12 @@ Výchozí hodnoty jsou v `blc_posudek/vypocet.py: VYCHOZI_BLC` (chybějící kl�
 | `g_chodnik`, `g_vozovka` | 5.0, 2.6 | kN/m² | skladby chodníku a vozovky |
 | `g_zabradli`, `g_svodidla` | 0.5, 0.6 | kN/m | každá strana (pásy 0,2 m) |
 | `[[blc.liniova]]` | – | – | další liniová: `nazev`, `g` [kN/m], `y` [m od levého okraje], `sirka` [m] |
-| `q_chodnik` | 3.0 | kN/m² | chodci (0 = bez stavu q_ch) |
-| `vozidlo` | "Ve" | – | "Ve" \| "MLC_k" \| "MLC_p" |
-| `Ve` | 80 | t | tíha vozidla Ve |
+| `q_chodnik` | vynechat | kN/m² | chodci; vynechané = ČSN 73 6222: s Vn, Vr **2,5**, s Ve **0** (chodci vyloučeni), s MLC 0; 0 = bez stavu q_ch |
+| `vozidlo` | "Ve" | – | "Vn" \| "Vr" \| "Ve" \| "MLC_k" \| "MLC_p" |
+| `Vn`, `Vr`, `Ve` | 32, 60, 80 | t | tíha vozidla normální / výhradní / výjimečné zatížitelnosti (posouzení; u zatížitelnosti referenční hodnota) |
 | `MLC`, `dist` | "MLC80", – | –, m | třída MLC; `dist` = rozestup v koloně (prázdné = jedno vozidlo) |
-| `dyn` | vynechat | – | dynamický součinitel δ (násobí q); vynechaný = ČSN 73 6222, kap. 8: Ve **1,05** (čl. 8.4), MLC 1,0 + varování (`blc/dynamicky_soucinitel.py`); použitý `vys.dyn`, zdroj `vys.dyn_zdroj` |
-| `y_vozidla` | osa vozovky | m | příčná poloha osy vozidla od levého okraje |
+| `dyn` | vynechat | – | dynamický součinitel δ (násobí q); vynechaný = ČSN 73 6222, kap. 8: Ve **1,05** (čl. 8.4), Vr δ1, Vn δ1/δ2/δ3 podle počtu zatížených pruhů (obr. 8.1, z L_d a f), MLC 1,0 + varování; zadaný platí pro všechny; použitý `vys.dyn` (Vn: δ1), zdroj `vys.dyn_zdroj` |
+| `y_vozidla` | osa vozovky | m | příčná poloha osy vozidla Ve / MLC od levého okraje; **Vn a Vr vždy u kraje vozovky u užšího chodníku** |
 | `roznos`, `t_voz` | true, 0.0 | –, m | roznos plošky kola do střednice (h_ekv + 2·t_voz) |
 | `krok` | 0.25 | m | krok poloh vozidla pro obálku |
 | `ex` | 0.125 | m | velikost prvku MKP (viz kap. 9) |
@@ -151,6 +153,7 @@ Výchozí hodnoty jsou v `blc_posudek/vypocet.py: VYCHOZI_BLC` (chybějící kl�
 | `t_vneseni` | (t_provoz) | dny | od kdy působí kvazistálá kombinace (g − g0 …) jako stálá |
 | `t_stale` | (t_vneseni) | dny | jen režim "zatezovaci_stavy" |
 | `zatizitelnost` | false | – | true = místo posouzení výpočet zatížitelnosti |
+| `zatizitelnost_druhy` | "vse" | – | "vse" (Vn, Vr, Ve) \| "vozidlo" \| seznam, např. ["Vn", "Ve"] |
 
 ---
 
@@ -179,8 +182,8 @@ betonu, A a Iy z průřezu posudku, γ_G/γ_G,inf/ξ z `[posouzeni]`, zbytek z `
 |---|---|---|
 | `g0` | vlastní tíha nosníku g0 = A·γ_b [kN/m] | **každý nosník samostatně, bez spolupůsobení** (1D, stejné uložení, k_v·b); deska: 2D MKP h·γ_b |
 | `g-g0` | skladby vozovky a chodníků, zábradlí, svodidla, další liniová; výplň spáry | 2D MKP (příčný roznos); výplň spáry nesou sousední nosníky ½ + ½ samostatně |
-| `qch` | chodci q_chodnik [kN/m²] | 2D MKP – obálka: chodníky rozdělené na úseky 0,5 m, max = Σ kladných, min = Σ záporných účinků |
-| `q` | jedno vozidlo (Ve nebo MLC) × δ (Ve: 1,05 podle ČSN 73 6222, čl. 8.4) | 2D MKP – **obálka pojezdu** (max/min přes polohy) |
+| `qch` | chodci q_chodnik [kN/m²] (podle normy: Vn, Vr 2,5; Ve 0) | 2D MKP – obálka: chodníky rozdělené na úseky 0,5 m, max = Σ kladných, min = Σ záporných účinků |
+| `q` | Vn (schéma obr. 7.1), Vr (jediné vozidlo), Ve nebo MLC × δ | 2D MKP – **obálka pojezdu** (max/min přes polohy); Vn: nápravy pruhů nezávisle + rovnoměrné v nepříznivých úsecích, max_k δ_k·Σ pruhů 1…k |
 
 **Vozidlo Ve** (`blc/beam_1d.py`): 9 náprav po 1,5 m, celková tíha 10·Ve kN (náprava
 10·Ve/9 kN), ploška kola 0,15 m × 1,2 m, osová vzdálenost stop 1,5 m (šířka vozidla 2,7 m).
@@ -188,6 +191,15 @@ Ploška se zvětší o roznos h_ekv (+ 2·t_voz). Polohy: mřížka s krokem `kr
 hrana zatížení padne do řezu d od podpory; vjezd i sjezd (nápravy mimo most se oříznou).
 Vozidlo stojí v **jediné příčné poloze** (osa vozovky mezi chodníky nebo `y_vozidla`);
 nejnepříznivější příčná poloha se nehledá. Přesah vozovky → jen varování (`vys.varovani`).
+
+**Vn a Vr** (`blc/schemata_zatizitelnosti.py`, podrobně `docs/navod.md` kap. 7.6): zatížení
+u kraje vozovky u **užšího chodníku** (pruh č. 1 / vnější okraj vozidla). Vn: vn = Vn/13,33,
+pruhy podle w (čl. 7.1.3), pruhy 1–2 dvounáprava 2 × 50·vn (Vn < 16 t náhradní náprava
+100·vn) + 2,5·vn, pruhy 3–4 náprava 50·vn + vn, zbytek vn; ploška kola 0,4 × 0,4 m (jako LM1).
+Vr: > 50 t šestinápravové (6 × Vr/6 po 1,5 m), 16–50 t třínápravové, jinak dvounápravové;
+oba směry jízdy. `vys.druh_q`, `vys.V`, `vys.schema_q`, `vys.poloha_q`, `vys.pruhy_q`, `vys.q_ch`.
+Vzor (KA-67/12, chodník L 1,5 m, P 0,75 m → vozovka 1,5 … 9,25 m, 2 pruhy od pravého kraje):
+Vn 32 t max M_q 260,6 kNm na N7, Vr 60 t (šestinápravové) 184,5 kNm na N9.
 
 ### 4.3 Kombinace a výběr nosníku
 
@@ -315,29 +327,40 @@ v GUI (pruh pod kartami na kartě Výsledky) a ve výpisu dávky (`! Upozorněn�
 
 ## 7. Zatížitelnost (`blc_posudek/zatizitelnost.py`)
 
-`res = zatizitelnost(d, vys=None, o=None)`; jen pro `vozidlo = "Ve"`.
+`res = zatizitelnost(d, vys=None, o=None, druhy=None)`; zvolené vozidlo musí být Vn, Vr nebo
+Ve (pro ně je protokol `res.model`); `druhy` = ["Vn", "Vr", "Ve"] (výchozí `[blc]
+zatizitelnost_druhy` = "vse") | "vozidlo".
 
-1. Most se spočte **jednou** s referenčním Ve (z `[blc] Ve`). Účinky vozidla jsou v Ve
-   lineární → pro jiné Ve se stav q přeškáluje (`vys_pro_Ve(vys, Ve)`), polohy se nemění.
-   δ násobí Ve; g0, g − g0, q_ch zůstávají. **Posuzovaný nosník je pevný** (vybraný při ref. Ve).
-2. Pro každé zkoušené Ve se spočte celý posudek (jeden výpočet dá η všech posudků).
-3. Rozsah: od Ve_ref se zvětšuje (odhad z lineárního průběhu, nejvýše 4× za krok, max
-   64·Ve_ref), dokud všechny rostoucí posudky nedosáhnou η ≥ 1.
-4. Pro každý posudek regula falsi (Illinois) se sdílenými výpočty; přesnost |η − 1| ≤ 1e-3
-   nebo interval ≤ 0,01 t.
+1. Pro každý druh a schéma se stav q spočte **jednou** na stejném modelu MKP
+   (`vys_s_vozidlem`) s referenční tíhou (`[blc] Vn`, `Vr`, `Ve`); účinky jsou v tíze lineární →
+   pro jinou tíhu se q přeškáluje (`vys_pro_V`), polohy se nemění. δ je v q; g0, g − g0 a q_ch
+   (podle druhu: Vn, Vr 2,5 kN/m², Ve 0) se nemění. **Posuzovaný nosník je pro každý druh pevný**
+   (zadaný `o` / `vystup`, jinak nejzatíženější při referenční tíze prvního schématu).
+2. Pro každou zkoušenou tíhu se spočte celý posudek (jeden výpočet dá η všech posudků).
+3. Rozsah: od reference se zvětšuje (odhad z lineárního průběhu, nejvýše 4× za krok, max
+   64·reference), dokud všechny rostoucí posudky nedosáhnou η ≥ 1.
+4. Pro každý posudek regula falsi (Illinois) se sdílenými výpočty; |η − 1| ≤ 1e-3 nebo 0,01 t.
+5. Schémata (po posudcích, `_slouc`): Vn – dvounáprava; je-li některý posudek < 16 t, spočte se
+   i náhradní náprava a Vn = min(V_náhr, 16) (jinak V_dvoj). Vr – šestinápravové; je-li ≤ 50 t,
+   spočte se dvounápravové, a je-li > 16 t, i třínápravové: Vr = max(V2, V3) ≤ 50.
 
-Výsledek `VysledekZatizitelnosti`: `res.Ve` (= nejmenší Ve přes posudky), `res.minimum("MSÚ")`,
-`res.minimum("MSP")`, `res.posudky` (`PosudekZat`: `klic`, `Ve`, `stav`, `eta_ref`, `eta_0`),
-`res.n_vypoctu`, `res.Ve_max`, `res.poznamky`, `res.model` (posudek při Ve = zatížitelnost),
-`res.vys`, `res.o`. Stavy: `"Ve"` (nalezeno), `"neomezuje"` (do Ve_max η < 1),
-`"nezavisi_ok"` / `"nezavisi_nok"` (nezávisí na Ve), `"klesa"` (η klesá s Ve),
-`"bez_vozidla"` (nevyhovuje už při Ve = 0).
+Výsledek `VysledekZatizitelnosti`: `res.druhy[druh]` → `ZatizitelnostDruhu` (`V` = nejmenší
+přes posudky, `V_evidence` = celé tuny dolů, `minimum("MSÚ"/"MSP")`, `posudky`
+(`PosudekZat`: `klic`, `V`, `stav`, `schema`, `eta_ref`, `eta_0`), `schemata` (výsledky
+jednotlivých schémat s `vys`, `V_ref`, `V_max`, `n_vypoctu`), `o`), zkratky `res.Vn`, `res.Vr`,
+`res.Ve`, `res.Vaj` (náprava, čl. 5.1.7), `res.druh` (protokol), `res.model`, `res.vys`, `res.o`,
+`res.posudky` / `res.minimum()` (hlavní druh), `res.n_vypoctu`, `res.poznamky`. Stavy: `"V"`
+(nalezeno), `"neomezuje"`, `"nezavisi_ok"` / `"nezavisi_nok"`, `"klesa"` (η klesá s tíhou),
+`"bez_vozidla"` (nevyhovuje už bez dopravy).
 
-Vzorový příklad: Ve = **228,3 t** (MSÚ smyková únosnost, konec životnosti), 27 výpočtů
-posudku, ~13 s; MSP rozhoduje hlavní tahové napětí 317,7 t; ohyb MSÚ ~493 t; 8 posudků
-nevyhovuje nezávisle na Ve (napínání, tlak při vnesení předpětí).
+Vzorový příklad (výchozí `[blc]`, chodci podle normy): **Vn = 58,7 t** (MSÚ únosnost tlakové
+diagonály, konec životnosti, nosník N7), **Vr = 181,7 t** (MSP dekomprese, konec životnosti,
+N10; šestinápravové), **Ve = 218,6 t** (MSÚ tlaková diagonála, N6; MSP hlavní tahové napětí
+303,6 t, ohyb MSÚ 475,5 t), V_aj = 30,3 t; ~36 s pro všechny tři druhy (jen Ve ~13 s);
+8 posudků nevyhovuje nezávisle na dopravě (napínání, tlak při vnesení předpětí). Pozn.: Ve
+bylo dříve s chodci 3,0 kN/m² 217,4 t – Ve podle normy chodce nezahrnuje.
 Upozornění (kap. 6.3) do zatížitelnosti nevstupují; `res.model.protokol.upozorneni` platí
-pro posudek při Ve = zatížitelnost.
+pro posudek při zatížitelnosti hlavního druhu.
 
 ---
 
@@ -350,7 +373,7 @@ python -m blc_posudek priklady/most_KA67_12.toml -o vystupy/zakladni
 ```
 
 ```bash
-python -m blc_posudek priklady/most_KA67_12.toml -o vystupy/zat --zatizitelnost
+python -m blc_posudek priklady/most_KA67_12.toml -o vystupy/zat --zatizitelnost --druhy Vn,Vr,Ve
 ```
 
 Výstup: `protokol.html` (+ `obrazky/`), `vysledky.json` (`posudky` jako slovníky,
@@ -364,8 +387,8 @@ vyhovuje, 1 = něco nevyhovuje, 2 = chyba vstupu. Pro studii s mnoha běhy je CL
 ```python
 import copy
 from blc_posudek.vypocet import nacti, parametry_blc, vyber_nosnik, data_pro_posudek
-from blc_posudek.zatizitelnost import zatizitelnost, vys_pro_Ve, klic_posudku
-from blc.vnitrni_sily import vnitrni_sily
+from blc_posudek.zatizitelnost import zatizitelnost, klic_posudku
+from blc.vnitrni_sily import vnitrni_sily, vys_pro_V, vys_s_vozidlem
 from pb_posudek.vstup import model_ze_slovniku
 
 ZAKLAD = nacti("priklady/most_KA67_12.toml")
@@ -401,9 +424,12 @@ se vztahují k aktuální složce.
   vozidla a obrázky do protokolu (~1,1 s navíc); potřebné jen pro `uloz_protokol_most`.
 - Protokol pro vybrané případy: `vys, o, m = spocti(d, vys, o); uloz_protokol_most(m, "vystupy/…")`
   (+ `blc.export_pb.uloz_vysledky(vys, slozka, vystup=vys.popisky[o])` pro síly mostu).
-- Zatížitelnost s již spočteným mostem: `res = zatizitelnost(d, vys=vys, o=o)`.
-- Jiná tíha Ve bez přepočtu MKP: `posudek(d, vys_pro_Ve(vys, 120.0), o)` (q ∝ δ·Ve).
-- Závislost posudků na dopravě: porovnat η z `posudek(d, vys_pro_Ve(vys, 0.0), o)` a z `vys`.
+- Zatížitelnost s již spočteným mostem: `res = zatizitelnost(d, vys=vys, o=o, druhy=["Vn"])`
+  (model MKP se znovu nesestavuje, počítají se jen stavy q schémat).
+- Jiné zatížení dopravou bez nové sítě MKP: `vys_s_vozidlem(vys, Vn=32.0)` / `Vr=60.0` /
+  `Ve=80.0` (i `schema="naprava"`, `q_chodnik=…`); g0 a g − g0 se nepřepočítávají.
+- Jiná tíha téhož schématu bez přepočtu: `posudek(d, vys_pro_V(vys, 120.0), o)` (q ∝ δ·V; Ve, Vn, Vr).
+- Závislost posudků na dopravě: porovnat η z `posudek(d, vys_pro_V(vys, 0.0), o)` a z `vys`.
 
 ### 8.3 Co se musí přepočítat při změně parametru
 
@@ -413,8 +439,9 @@ Most (BLC) je drahý; posudek levný. Most přepočítat, právě když se změn
 
 | Změna | Přepočet mostu (BLC)? | Pozn. |
 |---|---|---|
-| `[blc]` geometrie, uložení, k_v, šikmost, vybavení, chodci, vozidlo, `krok`, `ex` | **ano** | |
-| `[blc] Ve` (při vozidle Ve), `dyn` | ne nutně | `vys_pro_Ve` (lineární přeškálování q) |
+| `[blc]` geometrie, uložení, k_v, šikmost, vybavení, `ex` | **ano** | |
+| `[blc] vozidlo`, chodci, `krok` | jen q (q_ch) | `vys_s_vozidlem(vys, …)` – stejný model MKP |
+| `[blc] Vn` / `Vr` / `Ve` (téhož schématu), `dyn` | ne nutně | `vys_pro_V` (lineární přeškálování q) |
 | `[blc] gamma_Q`, `psi*`, `[posouzeni] gamma_G`, `gamma_G_inf`, `xi` | jen kombinace | MKP se nemění; `vys2 = copy.copy(vys); vys2.soucinitele = Soucinitele(...)` (všechna pole, `blc.vnitrni_sily.Soucinitele`), pak `posudek(d, vys2, o)`; posudek bere γ_G a ξ pro g0 z `d["posouzeni"]` – měnit obojí shodně |
 | `[blc] vystup`, `kriterium`, `rezim`, `t_vneseni`, `t_stale` | ne | jen `posudek(...)` |
 | `[nosnik] L0`, `[beton] trida`/`Ecm`/`objemova_tiha`, `[prurez]` (při `prurez_z_posudku`) | **ano** | sdílené vstupy |
@@ -432,7 +459,9 @@ Naměřeno na vzorovém příkladu (10 nosníků, L0 = 11,4 m, Windows):
 | model mostu, `krok` 0,5 m | ~1,5 s (výsledek beze změny) |
 | posudek (`model_ze_slovniku` + `spocitej`) | ~0,35 s |
 | `spocti` se spočteným mostem | ~1,1 s |
-| zatížitelnost (27 výpočtů posudku) | ~13 s |
+| stav q schématu Vn (2 pruhy) / Vr na hotovém modelu | ~1 s / ~0,7 s |
+| zatížitelnost Ve (27 výpočtů posudku) | ~13 s |
+| zatížitelnost Vn + Vr + Ve | ~36 s |
 | CLI dávka s protokolem a grafy | ~9 s |
 
 Čas mostu roste s počtem uzlů (N, L0, B, 1/ex²) a počtem poloh (L0/krok). Matice tuhosti
@@ -461,13 +490,14 @@ se faktorizuje jednou (`splu`), polohy vozidla se řeší dávkově. Pro mnoho b
    Pro jistotu ve studii posoudit všechny nosníky
    (`for o in range(vys.n_vyst)`, ~0,35 s / nosník) nebo porovnat kritéria "M" a "V".
    Zatížitelnost drží nosník vybraný při referenčním Ve.
-6. **Příčná poloha vozidla** je jedna (osa vozovky / `y_vozidla`) – nehledá se
-   nejnepříznivější. Při změně chodníků se mění osa vozovky, a tím i rozhodující nosník.
+6. **Příčná poloha zatížení** je jedna – Vn a Vr u kraje vozovky u užšího chodníku, Ve a MLC
+   v ose vozovky / `y_vozidla`; nejnepříznivější se nehledá. Při změně chodníků se mění kraj
+   i osa vozovky, a tím i rozhodující nosník (u shodných chodníků se zatěžuje od levého kraje).
 7. **Šikmé konstrukce**: V vyhodnocovat z 2D obálky; u šikmých nosníků singularita V
    v čele (nekonverguje se sítí) – používat V(d). Pro šikmé mosty volit `ex = 0.0625`.
    x výstupu je od osy podpory daného nosníku.
-8. **Součinitele pro Ve** (γ_Q = 1,35, ψ0 = ψ1 = 0,75, ψ2 = 0) jsou převzaty z TS a pro Ve
-   **nejsou ověřené** – ve studii je uvádět jako předpoklad, případně variovat.
+8. **Součinitele**: ψ0 = ψ1 = 0,75 jsou podle ČSN 73 6222, čl. 10.1.1 a 10.2.1 (Vn, Vr, Ve),
+   γ_Q = 1,35 (ČSN EN 1990); ψ2 = 0 norma neuvádí (jako TS). Pro MLC neověřeno.
 9. **Validace** vyhazuje `ValueError`: 2d ≥ L0, α mimo 90–165°, chodníky ≥ B, spára bez
    b_s/Iy_s, N < 2 se spárou, t_akt mimo (t_provoz, t_konec), oslabení mimo 0–100 %,
    `taznost_oslabena` mimo (0, `taznost`] nebo ε_ud,red ≤ ε_p0.
@@ -479,8 +509,10 @@ se faktorizuje jednou (`splu`), polohy vozidla se řeší dávkově. Pro mnoho b
     kopii se sdíleným modelem MKP (jen pro čtení).
 12. Exportované kombinace se zaokrouhlují na 0,01 kNm / kN a x na 1 mm (zanedbatelné).
 13. **Dynamický součinitel**: vstup s explicitním `dyn = 1.0` (starší vstupy) počítá bez
-    dynamiky; δ podle ČSN 73 6222 (Ve 1,05) platí jen při vynechaném `dyn`. Výsledky se
-    liší o 5 % účinků q – ve studii uvádět, s jakým δ se počítalo (`vys.dyn`).
+    dynamiky (u Vn pro všechny počty pruhů); δ podle ČSN 73 6222 (Ve 1,05, Vr δ1, Vn δ1–δ3
+    z vlastní frekvence) platí jen při vynechaném `dyn` – ve studii uvádět `vys.dyn`, `vys.dyn_zdroj`.
+14. **Chodci podle normy**: vynechané `q_chodnik` znamená s Vn, Vr 2,5 kN/m², s Ve 0. Starší
+    vstupy s `q_chodnik = 3.0` počítají chodce i s Ve (vzor dříve: Ve 217,4 t místo 218,6 t).
 
 ---
 

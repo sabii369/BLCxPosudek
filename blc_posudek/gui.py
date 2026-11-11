@@ -4,8 +4,9 @@ gui.py
 Spojený program BLC × Posudek PB – grafické rozhraní Posudku PB s novou první
 kartou „Most a zatížení (BLC)“:
 
-  0  Most a zatížení (BLC)   konstrukce mostu, vybavení (g − g0), vybrané vozidlo (q),
-                              výpočet vnitřních sil, výběr posuzovaného nosníku
+  0  Most a zatížení (BLC)   konstrukce mostu, vybavení (g − g0), chodci, vybrané vozidlo (q:
+                              Vn, Vr, Ve podle ČSN 73 6222 nebo MLC), výpočet vnitřních sil,
+                              výběr posuzovaného nosníku, volba výpočtu zatížitelnosti
   1 – 4, 6, 7                 karty Posudku PB beze změny (materiály, průřez, nosník
                               a předpětí, výztuž, nastavení, výsledky)
   5  Zatížení a čas           prostředí a časová osa; vnější zatížení se NEZADÁVÁ –
@@ -35,8 +36,12 @@ from .vypocet import (VYCHOZI_BLC, parametry_blc, spocti, vyber_nosnik, vlastnos
 KOREN = Path(__file__).resolve().parents[1]
 PRIKLAD_MOST = KOREN / "priklady" / "most_KA67_12.toml"
 NAZEV = "BLC × Posudek PB"
-VOZIDLA_GUI = {"Ve": "Ve", "MLC_k": "MLC kolové", "MLC_p": "MLC pásové"}
+VOZIDLA_GUI = {"Vn": "Vn – normální", "Vr": "Vr – výhradní", "Ve": "Ve – výjimečná",
+               "MLC_k": "MLC kolové", "MLC_p": "MLC pásové"}
 VOZIDLA_KLIC = {v: k for k, v in VOZIDLA_GUI.items()}
+VOZIDLA_KLIC["Ve"] = "Ve"
+DRUHY_ZAT_GUI = {"vse": "Vn, Vr i Ve", "vozidlo": "jen zvolené vozidlo"}
+DRUHY_ZAT_KLIC = {v: k for k, v in DRUHY_ZAT_GUI.items()}
 SEDA = "#52514e"
 
 
@@ -156,29 +161,35 @@ class AplikaceMost(Aplikace):
         self.f_chodci = Formular(lf, [
             ("q_chodnik", "Zatížení chodníků [kN/m²]", "optfloat", None)], sloupcu=2, pri_zmene=zm)
         self.f_chodci.pack(fill="x")
-        ttk.Label(lf, foreground=SEDA, text=(
-            "Na obou chodnících, v nepříznivých částech plochy vlivu (obálka); prázdné / 0 = bez "
-            "zatížení chodců.")).pack(anchor="w")
+        ttk.Label(lf, foreground=SEDA, justify="left", wraplength=540, text=(
+            "Na obou chodnících, v nepříznivých částech plochy vlivu (obálka). Prázdné = podle "
+            "ČSN 73 6222: s Vn a Vr 2,5 kN/m² (tab. 7.1, 7.2), s Ve 0 (chodci vyloučeni, čl. 3.1.4); "
+            "0 = bez zatížení chodců.")).pack(anchor="w")
 
         lf = ttk.LabelFrame(f, text="Vozidlo, které přejíždí most (q)", padding=6)
         lf.pack(fill="x", pady=4)
         self.f_voz = Formular(lf, [
-            ("vozidlo", "Vozidlo", "choice", list(VOZIDLA_GUI.values())),
-            ("Ve", "Ve – tíha vozidla [t]", "optfloat", None),
+            ("vozidlo", "Vozidlo / schéma", "choice", list(VOZIDLA_GUI.values())),
+            ("Vn", "Vn – normální zatížitelnost [t]", "optfloat", None),
+            ("Vr", "Vr – výhradní zatížitelnost [t]", "optfloat", None),
+            ("Ve", "Ve – výjimečná zatížitelnost [t]", "optfloat", None),
             ("MLC", "Třída MLC", "choice", seznam_mlc()),
             ("dist", "Kolona – vzdálenost vozidel [m]", "optfloat", None),
             ("dyn", "Dynamický součinitel δ (prázdné = ČSN 73 6222)", "optfloat", None),
-            ("y_vozidla", "Osa vozidla y [m]", "optfloat", None),
+            ("y_vozidla", "Osa vozidla Ve / MLC y [m]", "optfloat", None),
             ("roznos", "Roznos kola do střednice desky", "bool", True),
             ("t_voz", "Tloušťka vozovky (roznos) [m]", "float", None),
             ("krok", "Krok poloh vozidla [m]", "float", None),
             ("ex", "Velikost prvku MKP [m]", "float", None)], sloupcu=2, pri_zmene=zm)
         self.f_voz.pack(fill="x")
-        ttk.Label(lf, foreground=SEDA, text=(
-            "Jedno vozidlo projíždí po mostě v obou směrech; kolona jen pro MLC (prázdné = jedno "
-            "vozidlo). Osa vozidla prázdná = osa vozovky mezi chodníky. Dynamický součinitel "
-            "prázdný = podle ČSN 73 6222, kap. 8: Ve δ = 1,05 (čl. 8.4); pro MLC norma δ neuvádí "
-            "(uvažuje se 1,0).")).pack(anchor="w")
+        ttk.Label(lf, foreground=SEDA, justify="left", wraplength=540, text=(
+            "ČSN 73 6222: Vn – schéma obr. 7.1 (vn = Vn/13,33; dvounáprava ≥ 16 t, jinak náhradní "
+            "náprava), pruh č. 1 u kraje vozovky u užšího chodníku; Vr – jediné vozidlo (> 50 t "
+            "šestinápravové, > 16 t třínápravové, jinak dvounápravové) vnějším okrajem u téhož "
+            "kraje; Ve – devítinápravová souprava v ose vozovky (nebo v zadané ose y). MLC: jedno "
+            "vozidlo, kolona (prázdné = jedno vozidlo). Vozidla projíždějí v obou směrech. δ prázdné "
+            "= kap. 8: Vn δ1/δ2/δ3 podle počtu pruhů, Vr δ1 (z vlastní frekvence), Ve 1,05; "
+            "MLC 1,0.")).pack(anchor="w")
 
         lf = ttk.LabelFrame(f, text="Předání do posudku", padding=6)
         lf.pack(fill="x", pady=4)
@@ -195,7 +206,8 @@ class AplikaceMost(Aplikace):
         self.f_pred.pack(fill="x")
         ttk.Label(lf, foreground=SEDA, justify="left", text=(
             "auto = nejzatíženější nosník podle MSÚ (6.10, včetně g0). γ_G, γ_G,inf, ξ a kombinace MSÚ "
-            "se berou z karty 6;\nψ pro zvolené vozidlo ověřte (výchozí = TS, ČSN EN 1990 tab. A2.1)."
+            "se berou z karty 6;\nψ0 = ψ1 = 0,75 = ČSN 73 6222, čl. 10.1.1 a 10.2.1 (Vn, Vr, Ve); "
+            "pro MLC ověřte."
         )).pack(anchor="w")
 
         # pravý sloupec – výpočet a výsledky
@@ -208,8 +220,11 @@ class AplikaceMost(Aplikace):
         ttk.Button(bt, text="▶▶  Most + posudek (F5)", style="Akce.TButton",
                    command=self.spocitej).pack(side="left", padx=6)
         self.var_zat = tk.BooleanVar(value=False)
-        ttk.Checkbutton(bt, text="Výpočet zatížitelnosti – hledat Ve pro η = 100 % (místo posouzení)",
-                        variable=self.var_zat, command=self._naplanuj_nahled).pack(side="left", padx=8)
+        ttk.Checkbutton(bt, text="Zatížitelnost (η = 100 %) místo posouzení:",
+                        variable=self.var_zat, command=self._naplanuj_nahled).pack(side="left", padx=(8, 2))
+        self.var_zat_druhy = tk.StringVar(value=DRUHY_ZAT_GUI["vse"])
+        ttk.Combobox(bt, textvariable=self.var_zat_druhy, state="readonly", width=18,
+                     values=list(DRUHY_ZAT_GUI.values())).pack(side="left")
         self.lbl_blc = ttk.Label(prav, text="Vnitřní síly mostu nejsou spočteny.",
                                  foreground="#b42323", wraplength=700, justify="left")
         self.lbl_blc.pack(anchor="w", pady=4)
@@ -294,6 +309,7 @@ class AplikaceMost(Aplikace):
             out.update(fm.ziskej())
         out["vozidlo"] = VOZIDLA_KLIC.get(out.get("vozidlo", "Ve"), out.get("vozidlo", "Ve"))
         out["zatizitelnost"] = bool(self.var_zat.get())
+        out["zatizitelnost_druhy"] = DRUHY_ZAT_KLIC.get(self.var_zat_druhy.get(), "vse")
         lin = [{k: v for k, v in r.items() if v is not None} for r in self.t_liniova.ziskej()]
         if lin:
             out["liniova"] = lin
@@ -307,6 +323,9 @@ class AplikaceMost(Aplikace):
             fm.nastav(m)
         self.t_liniova.nastav(b.get("liniova", []))
         self.var_zat.set(bool(m.get("zatizitelnost", False)))
+        dz = m.get("zatizitelnost_druhy", "vse")
+        self.var_zat_druhy.set(DRUHY_ZAT_GUI.get(dz if isinstance(dz, str) else "vse",
+                                                 DRUHY_ZAT_GUI["vse"]))
 
     def _nastav_data(self, d: dict):
         super()._nastav_data(d)
@@ -370,16 +389,20 @@ class AplikaceMost(Aplikace):
             return
         vys0 = self._blc_vys if klic == self._blc_klic else None
         zat = bool(d["blc"].get("zatizitelnost"))
-        if zat and d["blc"].get("vozidlo", "Ve") != "Ve":
-            messagebox.showerror("Zatížitelnost", "Výpočet zatížitelnosti je pro vozidlo Ve – "
-                                                  "zvolte na kartě 0 vozidlo Ve.")
+        if zat and d["blc"].get("vozidlo", "Ve") not in ("Vn", "Vr", "Ve"):
+            messagebox.showerror("Zatížitelnost", "Výpočet zatížitelnosti je pro vozidla ČSN 73 6222 – "
+                                                  "zvolte na kartě 0 vozidlo Vn, Vr nebo Ve.")
             return
+        self._prubeh_text = ""
+
+        def prubeh(t):
+            self._prubeh_text = t
 
         def prace():
             vys = vys0 or vnitrni_sily(**kw)
             if zat:
                 from .zatizitelnost import zatizitelnost
-                res = zatizitelnost(d, vys)
+                res = zatizitelnost(d, vys, prubeh=prubeh)
                 return vys, res.o, res.model
             _, o, model = spocti(d, vys)
             return vys, o, model
@@ -392,12 +415,22 @@ class AplikaceMost(Aplikace):
             if self._protokol_po_vypoctu:
                 self._protokol_po_vypoctu = False
                 self.after(10, self.protokol)
-        self._na_pozadi(prace, hotovo, "Výpočet zatížitelnosti – hledání Ve pro každý mezní stav "
-                                       "(desítky výpočtů posudku)…" if zat else
+        self._na_pozadi(prace, hotovo, "Výpočet zatížitelnosti – hledání tíhy vozidla pro každý mezní "
+                                       "stav (desítky výpočtů posudku na druh)…" if zat else
                         "Výpočet mostu (BLC) a posudku nosníku…")
+        if zat:
+            self.after(300, self._obnov_prubeh)
+
+    def _obnov_prubeh(self):
+        """Průběh výpočtu zatížitelnosti do stavového řádku (text nastavuje vlákno výpočtu)."""
+        if not self._zaneprazdnen:
+            return
+        if self._prubeh_text:
+            self.stav.set(self._prubeh_text + " …")
+        self.after(300, self._obnov_prubeh)
 
     def _zobraz_vysledky(self, model):
-        """Výsledky posudku; při výpočtu zatížitelnosti místo využití Ve [t]."""
+        """Výsledky posudku; při výpočtu zatížitelnosti místo využití tíhy Vn / Vr / Ve [t]."""
         super()._zobraz_vysledky(model)
         res = getattr(model, "zatizitelnost", None)
         nadpisy = {"MSÚ": "MSÚ – nejvyšší využití", "MSP": "MSP – nejvyšší využití",
@@ -407,20 +440,28 @@ class AplikaceMost(Aplikace):
             self.t_vys.column("eta", width=56)
             for ms, (v, _) in self.karty.items():
                 v.master.configure(text=nadpisy[ms])
+                v.configure(font=("Segoe UI", 20, "bold"))
             return
         from .zatizitelnost import klic_posudku
-        zat = {p.klic: p for p in res.posudky}
-        self.t_vys.heading("eta", text="Ve [t]")
-        self.t_vys.column("eta", width=205)
-        m_all = res.minimum()
+        druhy = list(res.druhy)
+        zat = {d: {p.klic: p for p in z.posudky} for d, z in res.druhy.items()}
+        mins = {d: z.minimum() for d, z in res.druhy.items()}
+        self.t_vys.heading("eta", text=" / ".join(druhy) + " [t]")
+        self.t_vys.column("eta", width=230 if len(druhy) == 1 else 190)
         for iid, v in self._radky:
-            p = zat.get(klic_posudku(v))
-            if p is None:
+            pp = [zat[d].get(klic_posudku(v)) for d in druhy]
+            if any(p is None for p in pp):
                 continue
-            self.t_vys.set(iid, "eta", p.text)
-            if p.stav in ("nezavisi_nok", "bez_vozidla"):
+            stavy = {p.stav for p in pp}
+            if len(druhy) == 1 or (len(stavy) == 1 and "V" not in stavy):
+                txt = pp[0].text
+            else:
+                txt = " / ".join(p.kratky for p in pp)
+            self.t_vys.set(iid, "eta", txt)
+            if stavy & {"nezavisi_nok", "bez_vozidla"}:
                 tag = "bad"
-            elif p.stav == "Ve" and m_all is not None and abs(p.Ve - m_all.Ve) < 1e-6:
+            elif any(p.stav == "V" and mins[d] is not None and abs(p.V - mins[d].V) < 1e-6
+                     for d, p in zip(druhy, pp)):
                 tag = "warn"
             else:
                 tag = "ok"
@@ -428,31 +469,33 @@ class AplikaceMost(Aplikace):
         for ms in ("MSÚ", "MSP"):
             v, det = self.karty[ms]
             v.master.configure(text=f"{ms} – zatížitelnost")
+            casti = []
+            for d, z in res.druhy.items():
+                mm = z.minimum(ms)
+                casti.append(f"{d} > {z.V_max:.0f}" if mm is None else f"{d} {mm.V:.1f}")
+            v.configure(text=" · ".join(casti) + " t", foreground="#1a1a1a",
+                        font=("Segoe UI", 20 if len(druhy) == 1 else 13, "bold"))
             mm = res.minimum(ms)
-            if mm is None:
-                v.configure(text="neomezuje", foreground="#0a7d0a")
-                det.configure(text=f"do Ve = {res.Ve_max:.0f} t")
-            else:
-                v.configure(text=f"Ve = {mm.Ve:.1f} t", foreground="#1a1a1a")
-                det.configure(text=f"{mm.klic[1]} – {mm.klic[2]}")
+            det.configure(text=f"{res.druh}: " + (f"{mm.klic[1]} – {mm.klic[2]}" if mm else
+                                                   "neomezuje"))
         v, det = self.karty["Celkem"]
-        v.master.configure(text="Zatížitelnost")
+        v.master.configure(text="Zatížitelnost (ČSN 73 6222)")
         nok = len(res.nevyhovuji_nezavisle)
-        if m_all is None:
-            v.configure(text=f"Ve > {res.Ve_max:.0f} t", foreground="#0a7d0a")
-        else:
-            v.configure(text=f"Ve = {m_all.Ve:.1f} t", foreground="#0a7d0a" if not nok else "#8a5a00")
+        txt = " · ".join(f"{d} {z.V:.1f}" if z.V is not None else f"{d} > {z.V_max:.0f}"
+                         for d, z in res.druhy.items()) + " t"
+        v.configure(text=txt, foreground="#0a7d0a" if not nok else "#8a5a00",
+                    font=("Segoe UI", 20 if len(druhy) == 1 else 13, "bold"))
         upoz = model.protokol.upozorneni
+        Vaj = res.Vaj
         det.configure(text=(f"{res.n_vypoctu} výpočtů posudku" +
-                            (f"; {nok} posudků nevyhovuje nezávisle na Ve" if nok else "") +
+                            (f"; V_aj = {Vaj:.1f} t" if Vaj is not None else "") +
+                            (f"; {nok} posudků nevyhovuje nezávisle na zatížení" if nok else "") +
                             (f"; upozornění {len(upoz)}" if upoz else "")))
-        self.lbl_souhrn.configure(
-            text=("Zatížitelnost " + (f"Ve = {m_all.Ve:.1f} t" if m_all else f"Ve > {res.Ve_max:.0f} t")),
-            foreground="#0a7d0a" if not nok else "#8a5a00")
-        self.stav.set(f"Zatížitelnost: " + (f"Ve = {m_all.Ve:.1f} t ({m_all.klic[0]} {m_all.klic[1]} – "
-                                             f"{m_all.klic[2]})" if m_all else "neomezena")
-                      + f"; protokol a grafy pro toto Ve"
-                      + (f"; upozornění {len(upoz)} (karta Výsledky)." if upoz else "."))
+        self.lbl_souhrn.configure(text="Zatížitelnost " + txt,
+                                  foreground="#0a7d0a" if not nok else "#8a5a00")
+        self.stav.set(f"Zatížitelnost: {txt}; protokol a grafy pro {res.druh} = "
+                      f"{res.vys.V:.1f} t" + (f"; upozornění {len(upoz)} (karta Výsledky)." if upoz
+                                              else "."))
 
     def protokol(self):
         """HTML protokol posudku včetně kapitoly a grafů zatížení mostu."""
@@ -531,8 +574,8 @@ class AplikaceMost(Aplikace):
             return
         o = vyber_nosnik(vys, d)
         pop = vys.popisky[o]
-        txt = (f"✔ {vys.popis}\nVozidlo: {vys.vozidlo}, osa y = {vys.y_Ve:.2f} m; "
-               f"posuzovaný {'pás' if vys.deska else 'nosník'}: {pop}")
+        txt = (f"✔ {vys.popis}\nVozidlo: {vys.vozidlo}, {vys.poloha_q}; chodci "
+               f"{vys.q_ch:g} kN/m²; posuzovaný {'pás' if vys.deska else 'nosník'}: {pop}")
         if vys.varovani:
             txt += "\n! " + "\n! ".join(vys.varovani)
         self.lbl_blc.configure(text=txt, foreground="#0a7d0a")
@@ -540,7 +583,8 @@ class AplikaceMost(Aplikace):
         zat = d["zatizeni"]
         self.lbl_zat.configure(
             text=(f"Posuzovaný {'pás' if vys.deska else 'nosník'} {pop} (y = {float(vys.vyst.y[o]):.2f} m), "
-                  f"vozidlo {vys.vozidlo}, δ = {vys.dyn:g} ({vys.dyn_zdroj}); "
+                  f"vozidlo {vys.vozidlo}, δ = {vys.dyn:.3g} ({vys.dyn_zdroj}); chodci "
+                  f"{vys.q_ch:g} kN/m²" + (f" ({vys.q_ch_zdroj})" if vys.q_ch_zdroj else "") + "; "
                   f"předání: {zat.get('zpusob')}. "
                   f"Vlastní tíhu nosníku g0 počítá posudek z průřezu (model mostu: g0 = {vys.g0:.2f} "
                   f"{'kN/m²' if vys.deska else 'kN/m'})."), foreground="#0a7d0a")

@@ -828,6 +828,17 @@ def obalky_2D(model: DeskaMKP, stavy, y1: float, y2: float, b_k: float,
            se původní nápravy posunuté o dx, roznos dělá platky_z_naprav.
     Soustava se řeší po dávkách (jedna LU faktorizace, více pravých stran).
     """
+    return obalky_2D_platky(
+        model, (platky_z_naprav(posun(ax0, dx), y1, y2, b_k, roz) for ax0, _ in stavy), davka)
+
+
+def obalky_2D_platky(model: DeskaMKP, polohy, davka: int = 48) -> Obalky2D:
+    """
+    Obálky M(x), V(x) na každém výstupu přes polohy zatížení zadané přímo ploškami.
+
+    polohy: iterovatelné seznamy plošek (F, x0, x1, y0, y1) v rámci 2D – jeden seznam =
+            jedna poloha zatížení; polohy bez zatížení na konstrukci se vynechají.
+    """
     V = model.vyst
     n, nx = V.n, model.nx
     inf = np.inf
@@ -849,8 +860,8 @@ def obalky_2D(model: DeskaMKP, stavy, y1: float, y2: float, b_k: float,
         ob.n_stavu += F.shape[1]
 
     buf = []
-    for ax0, _ in stavy:
-        f = model.zatizeni(platky_z_naprav(posun(ax0, dx), y1, y2, b_k, roz))
+    for pl in polohy:
+        f = model.zatizeni(pl)
         if not np.any(f):
             continue
         buf.append(f)

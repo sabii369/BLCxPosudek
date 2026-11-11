@@ -23,7 +23,7 @@ git subtree pull --prefix=pb_posudek <tmp> pb_split -m "Aktualizace pb_posudek"
 ```bash
 python -m blc_posudek                 # spojený program (GUI s priklady/most_KA67_12.toml)
 python -m blc_posudek priklady/most_KA67_12.toml -o vystup   # dávka: most → posudek → protokol
-python -m pytest                      # všechny testy (~40 s)
+python -m pytest                      # všechny testy (~2 min 15 s; z toho zatížitelnost Vn, Vr, Ve ~1 min)
 python -m pytest tests/test_vnitrni_sily.py
 python -m blc --sily priklady/sily_KA67_12.toml [--pb "../Posudek PB/examples/nosnik_KA67_12.toml"]
 python -m blc --demo                  # konzolový výpočet MLC vs Ve + PNG do vystupy/demo (gitignore)
@@ -38,7 +38,8 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
 ## Struktura
 - `blc/` balíček: `comparison.py` (`porovnani_zatizeni` – MLC vs Ve), `beam_1d.py` (`Nosnik1D`, konstanty vozidla `VE_*`),
   `plate_fem.py` (`DeskaMKP`, `KAPPA`, `obalky_2D`), `slab_fem.py` (`DeskaSikmaMKP`), `geometry.py` (`Konstrukce`),
-  `vehicles.py`, `dynamicky_soucinitel.py` (δ podle ČSN 73 6222, kap. 8), `prefabrikaty.py` + `data/Prefabrikáty.xlsx`, `plotting.py`, `gui.py` (`App`, `OknoSil`), `__main__.py`.
+  `vehicles.py`, `dynamicky_soucinitel.py` (δ podle ČSN 73 6222, kap. 8: Ve 1,05, δ1–δ3 z L_d a f – obr. 8.1),
+  `schemata_zatizitelnosti.py` (ČSN 73 6222, kap. 7: pruhy, vozidla Vr, Vn ↔ vn, příčná poloha, volba schémat), `prefabrikaty.py` + `data/Prefabrikáty.xlsx`, `plotting.py`, `gui.py` (`App`, `OknoSil`), `__main__.py`.
 - Vnitřní síly pro posudek:
   - `stale_zatizeni.py` – `Vybaveni` (chodník L/P, g chodníku a vozovky [kN/m²], zábradlí, svodidla, `LiniovaZatizeni`) → plošky MKP,
   - `vnitrni_sily.py` – `vnitrni_sily(...)` → `VysledekSil` (`stavy` g0 / g-g0 / q jako `StavSil` na síti 2D,
@@ -61,12 +62,16 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
   `taznost` (neoslabená, sklon zpevnění) a `taznost_oslabena` (koroze) → `Faze.eps_ud_p` ve stejných fázích,
   `ohybova_unosnost(eps_ud_p=…)` – diagram se jen zkrátí na 0,9·ε_uk,red; GUI karta 1. Mez lineárního dotvarování (7.2(3))
   není posudek: krok výpočtu + při překročení `Protokol.upozorneni` (souhrn HTML, GUI `lbl_upozorneni`, výpis dávky).
-- Zatížitelnost: `blc_posudek/zatizitelnost.py` – `zatizitelnost(d, vys)` → `VysledekZatizitelnosti` (Ve pro η = 1
-  každého posudku; `vys_pro_Ve` přeškáluje q z referenčního Ve; Illinois se sdílenými výpočty posudku; stavy
-  nezávisí / neomezuje / klesá); `model.zatizitelnost`, kapitola na začátek protokolu; GUI `AplikaceMost._zobraz_vysledky`.
-- Vozidlo q: `vnitrni_sily(Ve=…)` nebo `vnitrni_sily(MLC=…, typ_MLC="k"|"p", dist=None|kolona)`; v `[blc]`
-  `vozidlo = "Ve" | "MLC_k" | "MLC_p"`.
+- Zatížitelnost: `blc_posudek/zatizitelnost.py` – `zatizitelnost(d, vys, druhy=…)` → `VysledekZatizitelnosti`
+  (`druhy` Vn, Vr, Ve → `ZatizitelnostDruhu`; tíha pro η = 1 každého posudku po schématech – `_hledej`, Illinois se
+  sdílenými výpočty, q přeškálované `vys_pro_V`; schémata po posudcích `_slouc`: Vn dvounáprava / náhradní náprava
+  < 16 t, Vr 6 / 2 / 3nápravové; stavy nezávisí / neomezuje / klesá; `Vaj`, `V_evidence`); protokol pro zvolené
+  vozidlo, `model.zatizitelnost`, kapitola na začátek protokolu; GUI `AplikaceMost._zobraz_vysledky`.
+- Vozidlo q: `vnitrni_sily(Ve=…)`, `(Vn=…)`, `(Vr=…)` (+ `schema`), nebo `(MLC=…, typ_MLC="k"|"p", dist=None|kolona)`;
+  v `[blc]` `vozidlo = "Vn" | "Vr" | "Ve" | "MLC_k" | "MLC_p"`. Jiné q na stejném MKP: `vys_s_vozidlem(vys, Vn=…)`
+  (`_promenne` počítá qch + q; `q_nastaveni` typ "pojezd" / "sestava" pro `polohy_q`).
 - `tests/`: `test_nosnik_1d.py`, `test_deska_mkp.py`, `test_porovnani.py`, `test_vnitrni_sily.py`, `test_blc_posudek.py`,
+  `test_zatizitelnost_csn.py` (schémata Vn/Vr, δ1–δ3, chodci podle normy),
   `test_regrese.py` + `referencni_pripady.py` + `referencni_hodnoty.json` (výsledky ověřeného stavu z 21. 10. 2026).
 - `docs/navod.md` = uživatelský návod (kap. 7 = vnitřní síly pro posudek) – při změně chování aktualizovat.
 - `docs/podklad_pro_AI.md` = podklad pro AI k parametrické studii (tok dat, vstupy `[blc]`, co se přepočítává,
@@ -81,16 +86,21 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
 - V šikmých konstrukcí vyhodnocovat z 2D obálky (prvek 0,0625 m), ne z kontrolních řezů.
 - **g0 u nosníků: každý nosník samostatně bez spolupůsobení** (1D, stejné uložení, k_v·b); u desky 2D MKP (h·γ).
 - **g − g0: 2D MKP**; výplň spáry nesou samostatně sousední nosníky (½ + ½).
-- **q: obálka pojezdu Ve** (2D, krok 0,25 m) v ose vozovky (mezi chodníky), × δ; δ nezadané = ČSN 73 6222,
-  kap. 8 (`blc/dynamicky_soucinitel.py`: Ve 1,05 čl. 8.4; MLC norma neuvádí → 1,0 + varování; chodci 1,00).
+- **q: obálka pojezdu** (2D, krok 0,25 m), × δ: **Ve** v ose vozovky (mezi chodníky) nebo `y_vozidla`;
+  **Vn a Vr vždy u kraje vozovky u UŽŠÍHO chodníku** (zadání uživatele 11. 11. 2026; při shodných levý; pruh č. 1 /
+  vnější okraj vozidla u kraje, nejnepříznivější poloha se nehledá). Vn: nápravy pruhů nezávisle, rovnoměrné
+  v nepříznivých úsecích, ploška kola 0,4 × 0,4 m (LM1), max_k δ_k·Σ pruhů 1…k. δ nezadané = ČSN 73 6222, kap. 8
+  (Ve 1,05 čl. 8.4; Vr δ1; Vn δ1/δ2/δ3; MLC norma neuvádí → 1,0 + varování; chodci 1,00).
+- **Chodci nezadaní = podle ČSN 73 6222**: s Vn a Vr 2,5 kN/m² (tab. 7.1, 7.2), s Ve 0 (čl. 3.1.4, 5.2.8), s MLC 0.
 - Export do posudku: bez g0 (posudek si g0 počítá z průřezu, `obsahuje_vlastni_tihu = false`),
   x posudku = x od podpory + (L − L0)/2; výchozí režim „kombinace“ (6.10a, 6.10b, char, častá, kvazistálá).
-- Výchozí ψ0 = ψ1 = 0,75, ψ2 = 0, γ_Q = 1,35 (TS) – pro Ve neověřeno, je to vstup.
+- Výchozí ψ0 = ψ1 = 0,75 (ČSN 73 6222, čl. 10.1.1, 10.2.1 – Vn, Vr, Ve), ψ2 = 0 (norma neuvádí), γ_Q = 1,35; je to vstup.
 
 ## Pravidla práce
 - Kódový styl: české názvy proměnných a funkcí, docstringy česky – držet se okolního kódu.
 - Po každé změně spustit `python -m pytest`. Pokud změna modelu ZÁMĚRNĚ mění výsledky: přegenerovat
   referenční hodnoty, rozdíl v `referencni_hodnoty.json` ukázat uživateli a popsat v commitu.
 - Commit jen na požádání; push na `origin` jen po potvrzení. `upstream` = původní BLC (jen fetch).
-- Otevřené: další pohyblivá zatížení (Vn, Vr, LM1 …), hledání nejnepříznivější příčné polohy vozidla,
+- Otevřené: další pohyblivá zatížení (LM1 …), vodorovné síly (čl. 7.4), zatížitelnost rovnoměrným zatížením,
+  posouzení všech nosníků v zatížitelnosti (teď jeden nosník na druh),
   tabulka M_max/M_min/V_max/V_min pro proměnné stavy v Posudku PB, parametrická studie.

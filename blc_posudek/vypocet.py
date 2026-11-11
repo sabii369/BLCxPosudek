@@ -17,11 +17,14 @@ Sekce [blc]:
                Iy_s, beton_s, alfa, sikmost, k_v [MN/m/m], uloz, k_rot [MNm/rad/m], spoj
   stálé        chodnik_L, chodnik_P, g_chodnik, g_vozovka, g_zabradli, g_svodidla, g_spary,
                [[blc.liniova]] nazev, g, y, sirka
-  chodci       q_chodnik [kN/m²] (zatížení chodníků, obálka), gamma_Qch, psi0_ch, psi1_ch, psi2_ch
-  vozidlo      vozidlo = "Ve" | "MLC_k" | "MLC_p", Ve [t], MLC (třída), dist (kolona; prázdné =
-               jedno vozidlo), dyn (prázdné = podle ČSN 73 6222, kap. 8: Ve δ = 1,05),
-               y_vozidla (prázdné = osa vozovky), roznos, t_voz, krok, ex
-  zatížitelnost zatizitelnost = true → místo posouzení hledá Ve pro η = 100 % každého posudku
+  chodci       q_chodnik [kN/m²] (zatížení chodníků, obálka; prázdné = podle ČSN 73 6222:
+               Vn, Vr 2,5 kN/m², Ve 0), gamma_Qch, psi0_ch, psi1_ch, psi2_ch
+  vozidlo      vozidlo = "Vn" | "Vr" | "Ve" | "MLC_k" | "MLC_p", Vn, Vr, Ve [t], MLC (třída),
+               dist (kolona; prázdné = jedno vozidlo), dyn (prázdné = podle ČSN 73 6222, kap. 8:
+               Ve δ = 1,05, Vr δ1, Vn δ1–δ3), y_vozidla (Ve, MLC; prázdné = osa vozovky; Vn a Vr
+               vždy u kraje vozovky u užšího chodníku), roznos, t_voz, krok, ex
+  zatížitelnost zatizitelnost = true → místo posouzení hledá Vn, Vr, Ve pro η = 100 % každého
+               posudku; zatizitelnost_druhy = "vse" | "vozidlo" | ["Vn", "Ve", …]
   předání      vystup ("auto" | "N3"), kriterium ("M" | "M-" | "V"), rezim ("kombinace" |
                "zatezovaci_stavy"), gamma_Q, psi0, psi1, psi2, t_vneseni, t_stale
 """
@@ -36,7 +39,8 @@ from blc.export_pb import zatizeni_pb_dict
 from blc.stale_zatizeni import Vybaveni, LiniovaZatizeni
 from blc.vnitrni_sily import vnitrni_sily, polohy_q, Soucinitele, VysledekSil, NAZVY_STAVU
 
-VOZIDLA = {"Ve": "Ve – výjimečná zatížitelnost", "MLC_k": "MLC kolové", "MLC_p": "MLC pásové"}
+VOZIDLA = {"Vn": "Vn – normální zatížitelnost", "Vr": "Vr – výhradní zatížitelnost",
+           "Ve": "Ve – výjimečná zatížitelnost", "MLC_k": "MLC kolové", "MLC_p": "MLC pásové"}
 
 VYCHOZI_BLC = {
     "typ_konstrukce": "nosniky", "N": 10, "b": 1.0, "prurez_z_posudku": True,
@@ -44,12 +48,12 @@ VYCHOZI_BLC = {
     "uloz": "tvrde", "spoj": "kloub",
     "chodnik_L": 1.5, "chodnik_P": 1.5, "g_chodnik": 5.0, "g_vozovka": 2.6,
     "g_zabradli": 0.5, "g_svodidla": 0.6, "g_spary": 0.0,
-    "vozidlo": "Ve", "Ve": 80.0, "MLC": "MLC80", "dyn": None, "roznos": True, "t_voz": 0.0,
-    "krok": 0.25, "ex": 0.125,
+    "vozidlo": "Ve", "Vn": 32.0, "Vr": 60.0, "Ve": 80.0, "MLC": "MLC80", "dyn": None,
+    "roznos": True, "t_voz": 0.0, "krok": 0.25, "ex": 0.125,
     "vystup": "auto", "kriterium": "M", "rezim": "kombinace",
     "gamma_Q": 1.35, "psi0": 0.75, "psi1": 0.75, "psi2": 0.0,
-    "q_chodnik": 3.0, "gamma_Qch": 1.35, "psi0_ch": 0.75, "psi1_ch": 0.75, "psi2_ch": 0.0,
-    "zatizitelnost": False,
+    "q_chodnik": None, "gamma_Qch": 1.35, "psi0_ch": 0.75, "psi1_ch": 0.75, "psi2_ch": 0.0,
+    "zatizitelnost": False, "zatizitelnost_druhy": "vse",
 }
 
 
@@ -127,15 +131,17 @@ def parametry_blc(d: dict) -> dict:
                                  float(l.get("sirka", 0.2)))
                  for i, l in enumerate(b.get("liniova", []))])
     voz = b["vozidlo"]
-    if voz == "Ve":
-        kw["Ve"] = float(b["Ve"])
+    if voz in ("Ve", "Vn", "Vr"):
+        if not _f(b.get(voz)) or float(b[voz]) <= 0:
+            raise ValueError(f"Zadejte tíhu vozidla {voz} > 0 [t].")
+        kw[voz] = float(b[voz])
     elif voz in ("MLC_k", "MLC_p"):
         kw.update(MLC=b["MLC"], typ_MLC="k" if voz == "MLC_k" else "p", dist=_f(b.get("dist")))
     else:
-        raise ValueError(f"Neznámé vozidlo '{voz}' (Ve, MLC_k, MLC_p).")
-    kw.update(dyn=_f(b.get("dyn")), y_Ve=_f(b.get("y_vozidla")), roznos=bool(b["roznos"]),
-              t_voz=float(b["t_voz"]), krok=float(b["krok"]), ex=float(b["ex"]),
-              q_chodnik=float(b.get("q_chodnik") or 0.0))
+        raise ValueError(f"Neznámé vozidlo '{voz}' (Vn, Vr, Ve, MLC_k, MLC_p).")
+    kw.update(dyn=_f(b.get("dyn")), y_Ve=_f(b.get("y_vozidla")) if voz not in ("Vn", "Vr") else None,
+              roznos=bool(b["roznos"]), t_voz=float(b["t_voz"]), krok=float(b["krok"]),
+              ex=float(b["ex"]), q_chodnik=_f(b.get("q_chodnik")))
     ns = nastaveni_posudku(d)
     kw["soucinitele"] = Soucinitele(gamma_G=float(ns["gamma_G"]),
                                     gamma_G_inf=float(ns["gamma_G_inf"]), xi=float(ns["xi"]),
@@ -198,8 +204,10 @@ def kapitola_blc(model, vys: VysledekSil, o: int) -> None:
         xs, xp = fmt(model.x[rz["stred"][0]]), fmt(model.x[rz["podpora"][0]])
         K.text(f"Zatížení na mostě; posuzovaný {vyst} je vyznačen oranžově, řezy posudku „střed“ "
                f"(x = {xs} m) a „podpora“ (x = {xp} m, nejblíže vzdálenosti d od osy ložiska) "
-               "červeně. Vozidlo je zobrazeno v poloze s největším ohybovým momentem ve středu "
-               "rozpětí a s největší posouvající silou u podpory (polohy z výpočtu obálky).")
+               "červeně. Pohyblivé zatížení je zobrazeno v poloze s největším ohybovým momentem ve "
+               "středu rozpětí a s největší posouvající silou u podpory (polohy z výpočtu obálky; "
+               "u schématu Vn nápravy v pruzích a rovnoměrné zatížení – světle – v nepříznivých "
+               "částech plochy vlivu).")
         for p in b["polohy"].values():
             K.text(p.popis + ".")
         for k, nazev in GRAFY_ZATIZENI.items():
@@ -225,7 +233,8 @@ def kapitola_blc(model, vys: VysledekSil, o: int) -> None:
                         f"příznivé stálé γ_G,inf = {fmt(s.gamma_G_inf, 2)}); účinek = Σ γ·ψ·E, "
                         "proměnná zatížení působí současně")
     K.text("Pozn.: γ_G a ξ jsou převzaty z nastavení posouzení, γ a ψ proměnných zatížení ze zadání "
-           "mostu; pro zvolené vozidlo je nutné je ověřit.")
+           "mostu (pro zatížitelnost Vn, Vr, Ve udává ČSN 73 6222, čl. 10.1.1 a 10.2.1, ψ0 = ψ1 = "
+           "0,75; γ podle ČSN EN 1990); pro vozidla MLC je nutné je ověřit.")
     # vnitřní síly od stavů
     K.obrazek(GRAF_SILY[0], GRAF_SILY[1])
     stavy = list(vys.stavy)

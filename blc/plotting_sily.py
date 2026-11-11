@@ -10,6 +10,7 @@ Grafy vnitřních sil pro posudek (vnitrni_sily.VysledekSil):
 """
 
 from __future__ import annotations
+import textwrap
 from typing import Optional, Sequence
 
 import matplotlib.pyplot as plt
@@ -83,6 +84,10 @@ def kresli_most(ax, vys: VysledekSil, o: int, stav: str, poloha: Optional[Poloha
             ax.text(K.x0(0.0) + L, -0.08 * B, f"výplň spáry {vys.g_spary:g} kN/m (samostatně)",
                     ha="right", va="top", fontsize=7)
     elif stav == "q" and poloha is not None:
+        for x0, x1, y0, y1, q in getattr(poloha, "plosne", []):     # rovnoměrné (schéma Vn)
+            y0c, y1c = max(0.0, y0), min(B, y1)
+            ax.add_patch(Rectangle((x0, y0c), x1 - x0, y1c - y0c, fc=BARVY["q"], alpha=0.18,
+                                   ec="none", lw=0))
         for F, x0, x1, y0, y1 in poloha.platky:
             y0c, y1c = max(0.0, y0), min(B, y1)
             xa = K.x0(0.5 * (y0c + y1c))
@@ -91,7 +96,11 @@ def kresli_most(ax, vys: VysledekSil, o: int, stav: str, poloha: Optional[Poloha
                 continue
             ax.add_patch(Rectangle((x0c, y0c), x1c - x0c, y1c - y0c, fc=BARVY["q"], alpha=0.6,
                                    ec="#a52a1a", lw=0.5))
-        ax.set_title(poloha.popis.replace(": ", ":\n", 1), fontsize=8.5)
+        hl, _, hodn = poloha.popis.rpartition(": ")
+        sirka = max(30, int(11 * ax.get_figure().get_figwidth() /
+                            max(1, len(ax.get_figure().axes))))
+        ax.set_title(textwrap.fill(hl + ":", sirka) + "\n" + hodn if hl else
+                     textwrap.fill(poloha.popis, sirka), fontsize=8.5)
     # posuzovaný výstup
     yo = float(vys.vyst.y[o])
     if vys.deska:
@@ -249,8 +258,15 @@ def plot_pricne(vys: VysledekSil, show: bool = True):
         aR.add_patch(plt.Rectangle((l.y - 0.5 * l.sirka, 0.4), l.sirka, 0.35, color="#2e75b6"))
         aR.text(l.y, 0.85, f"{l.nazev}\n{l.g:g}", ha="center", va="bottom", fontsize=6)
     if "q" in vys.stavy:
-        for yc in (vys.y_Ve - 0.5 * vys.rozvor, vys.y_Ve + 0.5 * vys.rozvor):
-            aR.add_patch(plt.Rectangle((yc - 0.5 * vys.b_k, -0.45), vys.b_k, 0.3,
+        for y0, y1, pop in getattr(vys, "pruhy_q", []):          # zatěžovací pruhy (Vn)
+            aR.add_patch(plt.Rectangle((y0, -0.5), y1 - y0, 0.4, fill=False, ec="#e74c3c", lw=0.8,
+                                       ls="--"))
+            aR.text(0.5 * (y0 + y1), -0.3, pop, ha="center", va="center", fontsize=6,
+                    color="#e74c3c")
+        stopy = getattr(vys, "stopy_q", None) or [
+            (vys.y_Ve - 0.5 * vys.rozvor, vys.b_k), (vys.y_Ve + 0.5 * vys.rozvor, vys.b_k)]
+        for yc, bk in stopy:
+            aR.add_patch(plt.Rectangle((yc - 0.5 * bk, -0.45), bk, 0.3,
                                        color="#e74c3c", alpha=0.7))
         aR.text(vys.y_Ve, -0.75, vys.vozidlo, ha="center", fontsize=7, color="#e74c3c")
     if not vys.deska:

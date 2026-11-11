@@ -236,7 +236,9 @@ def vysledky_json(vys: VysledekSil, o_posudek: int) -> dict:
                      "liniova": [vars(l) for l in vyb.liniova],
                      "tiha_na_metr": vyb.tiha_na_metr(K.B)},
         "g0": vys.g0, "g_spary": vys.g_spary, "vozidlo": vys.vozidlo, "Ve": vys.Ve,
-        "dyn": vys.dyn, "dyn_zdroj": vys.dyn_zdroj,
+        "druh_q": vys.druh_q, "V": vys.V, "schema_q": vys.schema_q,
+        "dyn": vys.dyn, "dyn_zdroj": vys.dyn_zdroj, "poloha_q": vys.poloha_q,
+        "q_chodnik": vys.q_ch, "q_chodnik_zdroj": vys.q_ch_zdroj,
         "y_Ve": vys.y_Ve, "roznos": vys.roz,
         "soucinitele": vars(s),
         "stavy": {k: {"nazev": NAZVY_STAVU[k], "popis": v.popis, "n_stavu": v.n_stavu}

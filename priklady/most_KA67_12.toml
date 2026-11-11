@@ -170,11 +170,13 @@ g_chodnik = 5.0              # [kN/m²]
 g_vozovka = 2.6              # [kN/m²]
 g_zabradli = 0.5             # [kN/m] každá strana
 g_svodidla = 0.6             # [kN/m] každá strana
-q_chodnik = 3.0              # zatížení chodců [kN/m²]
-vozidlo = "Ve"               # "Ve" | "MLC_k" | "MLC_p"
-Ve = 80.0                    # [t]
+# q_chodnik = 2.5            # chodci [kN/m²]; vynechat = podle ČSN 73 6222 (Vn, Vr 2,5; Ve 0)
+vozidlo = "Ve"               # "Vn" | "Vr" | "Ve" | "MLC_k" | "MLC_p"
+Vn = 32.0                    # normální zatížitelnost [t] (schéma obr. 7.1, u kraje vozovky)
+Vr = 60.0                    # výhradní zatížitelnost [t] (jediné vozidlo, u kraje vozovky)
+Ve = 80.0                    # výjimečná zatížitelnost [t] (souprava v ose vozovky)
 MLC = "MLC80"
-# dyn = 1.05                 # δ; vynechat = podle ČSN 73 6222, kap. 8 (Ve: čl. 8.4, δ = 1,05)
+# dyn = 1.05                 # δ; vynechat = podle ČSN 73 6222, kap. 8 (Ve 1,05; Vr δ1; Vn δ1–δ3)
 roznos = true
 t_voz = 0.0
 krok = 0.25
