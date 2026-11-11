@@ -30,6 +30,17 @@ def vysledek(d):
     return spocti(copy.deepcopy(d))
 
 
+def test_beta_s_pevne(d):
+    assert parametry_blc(d)["beta_s_pevne"] is False
+    d2 = copy.deepcopy(d)
+    d2["blc"]["beta_s_pevne"] = True
+    kw = parametry_blc(d2)
+    assert kw["beta_s_pevne"] is True
+    K = Konstrukce(L=[kw["L"]], N=kw["N"], b=kw["b"], E=3.4e7, Iy=kw["Iy"], k_pod=kw["k_pod"],
+                   uloz=kw["uloz"], beta_s_pevne=kw["beta_s_pevne"])
+    assert not K.beta_s_sleduje and "β_s = 0" in K.popis_ulozeni()
+
+
 def test_parametry_z_posudku(d):
     kw = parametry_blc(d)
     A, Iy = vlastnosti_prurezu(d)

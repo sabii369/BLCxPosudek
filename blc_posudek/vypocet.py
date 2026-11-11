@@ -14,7 +14,8 @@ Převzato z posudku (jedno zadání pro oba výpočty):
   γ_G, γ_G,inf, ξ, kombinace MSÚ      [posouzeni]
 Sekce [blc]:
   konstrukce   typ_konstrukce, N, b, h, A_nosniku, Iy, prurez_z_posudku, nu, d, spara, b_s,
-               Iy_s, beton_s, alfa, sikmost, k_v [MN/m/m], uloz, k_rot [MNm/rad/m], spoj
+               Iy_s, beton_s, alfa, sikmost, k_v [MN/m/m], uloz, k_rot [MNm/rad/m], spoj,
+               beta_s_pevne (true = β_s = 0 i u pružné podpory – jen pro srovnání se SCIA)
   stálé        A_dobetonavky [m²] (dobetonávka mezi nosníky → g0, ½ na sousední nosníky, do
                posudku s g − g0), chodnik_L, chodnik_P, g_chodnik, g_vozovka, g_zabradli,
                g_svodidla, g_spary,
@@ -49,7 +50,7 @@ VOZIDLA = {"Vn": "Vn – normální zatížitelnost", "Vr": "Vr – výhradní z
 VYCHOZI_BLC = {
     "typ_konstrukce": "nosniky", "N": 10, "b": 1.0, "prurez_z_posudku": True,
     "nu": 0.2, "d": 0.5, "spara": False, "alfa": 90.0, "sikmost": "prava", "k_v": 2000.0,
-    "uloz": "tvrde", "spoj": "kloub",
+    "uloz": "tvrde", "spoj": "kloub", "beta_s_pevne": False,
     "chodnik_L": 1.5, "chodnik_P": 1.5, "g_chodnik": 5.0, "g_vozovka": 2.6,
     "g_zabradli": 0.5, "g_svodidla": 0.6, "g_spary": 0.0,
     "A_dobetonavky": 0.0,
@@ -102,6 +103,7 @@ def parametry_blc(d: dict) -> dict:
     deska = b["typ_konstrukce"] == "deska"
     kw = dict(L=L0, typ_konstrukce=b["typ_konstrukce"], nu=float(b["nu"]), d=float(b["d"]),
               alfa=float(b["alfa"]), sikmost=b["sikmost"], uloz=b["uloz"], spoj=b["spoj"],
+              beta_s_pevne=bool(b.get("beta_s_pevne", False)),
               b=float(b["b"]), tisk=False)
     if beton.get("Ecm"):
         kw["E"] = float(beton["Ecm"])

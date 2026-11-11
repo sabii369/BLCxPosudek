@@ -134,11 +134,15 @@ class AplikaceMost(Aplikace):
             ("k_v", "Tuhost podpory k_v [MN/m/m]", "optfloat", None),
             ("uloz", "Uložení", "choice", ["tvrde", "mekke", "vetknuti"]),
             ("k_rot", "Vetknutí k_φ [MNm/rad/m]", "optfloat", None),
-            ("spoj", "Spojení nosníků bez spáry", "choice", ["kloub", "deska"])],
+            ("spoj", "Spojení nosníků bez spáry", "choice", ["kloub", "deska"]),
+            ("beta_s_pevne", "β_s = 0 i u pružné podpory", "bool", False)],
             sloupcu=2, pri_zmene=zm)
         self.f_uloz.pack(fill="x")
         ttk.Label(lf, foreground=SEDA, text="k_v prázdné / 0 = tuhá podpora; k_φ prázdné = dokonalé "
-                                            "vetknutí (jen uložení „vetknuti“)").pack(anchor="w")
+                                            "vetknutí (jen uložení „vetknuti“); β_s = 0 = zjednodušená "
+                                            "vazba (SCIA s vetknutou rotací podél podpory) – jen pro "
+                                            "srovnání, platí pro tvrdé uložení na pružné podpoře"
+                  ).pack(anchor="w")
 
         lf = ttk.LabelFrame(f, text="Ostatní stálé zatížení g − g0 (vybavení mostu)", padding=6)
         lf.pack(fill="x", pady=4)

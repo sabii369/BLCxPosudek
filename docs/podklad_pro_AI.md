@@ -132,6 +132,7 @@ Výchozí hodnoty jsou v `blc_posudek/vypocet.py: VYCHOZI_BLC` (chybějící kl�
 | `alfa`, `sikmost` | 90, "prava" | °, – | šikmost 90 (kolmý) … 165; "prava"/"leva" |
 | `k_v` | 2000 | MN/m/m | svislá tuhost podpory na 1 m podepřené délky (N·b); 0/prázdné = tuhá |
 | `uloz` | "tvrde" | – | "tvrde" \| "mekke" \| "vetknuti" (+ `k_rot` [MNm/rad/m]) |
+| `beta_s_pevne` | false | – | true = β_s = 0 i u pružné podpory (zjednodušená vazba, jen pro srovnání se SCIA; u tvrdého uložení s k_v) |
 | `spoj` | "kloub" | – | spojení nosníků bez spáry: "kloub" \| "deska" (tuhé) |
 | `chodnik_L`, `chodnik_P` | 1.5, 1.5 | m | šířky chodníků u okrajů mostovky (vozovka mezi nimi) |
 | `g_chodnik`, `g_vozovka` | 5.0, 2.6 | kN/m² | skladby chodníku a vozovky |
