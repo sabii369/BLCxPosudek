@@ -37,7 +37,8 @@ GRAFY_ZATIZENI = {
 GRAFY_Q = ("blc_zat_q", "blc_zat_pricny")       # jen je-li zatížení dopravou
 NAZEV_REZY = "Napětí v řezech"
 GRAF_SILY = ("blc_sily", "Vnitřní síly na nosnících od jednotlivých zatěžovacích stavů v půdorysu – "
-                         "vlevo M, vpravo V; posuzovaný nosník zvýrazněn, u proměnných obálka max/min")
+                         "vlevo M, vpravo V; posuzovaný nosník zvýrazněn, u proměnných obálka max/min; "
+                         "zatížení dopravou bez dynamického součinitele δ")
 
 
 def rezy_posudku(m) -> dict:
@@ -91,28 +92,46 @@ def _panely_zatizeni(vys, o, pol, rezy, klic):
     return fig
 
 
+def q_bez_dyn(vys):
+    """Stav q bez dynamického součinitele (δ = 1) – viz blc.vnitrni_sily.vys_charakteristicky."""
+    from blc.vnitrni_sily import vys_charakteristicky
+    return vys_charakteristicky(vys).stavy.get("q")
+
+
 def graf_sil(m):
     """Vnitřní síly na nosnících v půdorysu (formát obálek BLC): řádek = zatěžovací stav,
-    vlevo M, vpravo V; posuzovaný nosník zvýrazněn.  Při výpočtu zatížitelnosti je místo
-    řádku q (zatížení dopravou při zatížitelnosti) po řádku obálka od každé referenční
-    soupravy Vn, Vr, Ve (vč. δ) se zvýrazněným nosníkem posuzovaným pro daný druh."""
+    vlevo M, vpravo V; posuzovaný nosník zvýrazněn; zatížení dopravou BEZ dynamického
+    součinitele.  Při výpočtu zatížitelnosti je místo řádku q (zatížení dopravou při
+    zatížitelnosti) po řádku obálka od každé referenční soupravy Vn, Vr, Ve se zvýrazněným
+    nosníkem posuzovaným pro daný druh."""
     import copy
     from blc.plotting_sily import plot_stavy_pudorys
     from blc_posudek.zatizitelnost import POPIS_SCHEMAT
     b = getattr(m, "blc", None)
     if not b:
         return None
-    res = getattr(m, "zatizitelnost", None)
-    if res is None or not res.druhy:
-        return plot_stavy_pudorys(b["vys"], b["o"], show=False)
     vys = copy.copy(b["vys"])
     vys.stavy = {k: s for k, s in b["vys"].stavy.items() if k != "q"}
     o_stavu = {}
+    res = getattr(m, "zatizitelnost", None)
+    if res is None or not res.druhy:
+        if "q" in b["vys"].stavy:
+            vys.stavy[f"zatížení dopravou q – {b['vys'].vozidlo}, bez δ"] = q_bez_dyn(b["vys"])
+        return plot_stavy_pudorys(vys, b["o"], list(vys.stavy), show=False)
+    # chodci: protokol pro Ve je nemá (čl. 3.1.4) – vzít z druhu, který je zahrnuje (Vn, Vr)
+    s_ch = {d: z.vys_ref() for d, z in res.druhy.items() if "qch" in z.vys_ref().stavy}
+    vys.stavy.pop("qch", None)
+    if s_ch:
+        v = next(iter(s_ch.values()))
+        bez = [d for d in res.druhy if d not in s_ch]
+        nazev = (f"zatížení chodců q_ch = {v.q_ch:g} kN/m² (s {', '.join(s_ch)}"
+                 + (f"; s {', '.join(bez)} chodci nejsou" if bez else "") + ")")
+        vys.stavy[nazev] = v.stavy["qch"]
     for druh, z in res.druhy.items():
         v = z.vys_ref()
         sch = POPIS_SCHEMAT[v.schema_q or ""].split(" (")[0].split(" v pruzích")[0]
-        nazev = f"{druh} = {v.V:g} t ({sch}, δ = {v.dyn:.3g}), posuzovaný {v.popisky[z.o]}"
-        vys.stavy[nazev] = v.stavy["q"]
+        nazev = f"{druh} = {v.V:g} t ({sch}, bez δ), posuzovaný {v.popisky[z.o]}"
+        vys.stavy[nazev] = q_bez_dyn(v)
         o_stavu[nazev] = z.o
     return plot_stavy_pudorys(vys, b["o"], list(vys.stavy), show=False, o_stavu=o_stavu)
 

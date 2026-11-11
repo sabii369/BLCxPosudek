@@ -51,6 +51,9 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
   `spocti` → `model.blc = {vys, o, polohy}`, `kapitola_blc` + `grafy_most.vloz_do_protokolu` (obrázky do kapitol), `uloz_protokol_most` = protokol posudku
   + grafy mostu), `grafy_most.py` (půdorysy se zatížením do kapitoly zatížení, napětí v řezech střed/podpora pod graf každé fáze z `msp_napeti`; tvar `fn(model, adr)` jako
   `pb_posudek.grafy`), `gui.py` (`AplikaceMost`), `__main__.py`; vzor `priklady/most_KA67_12.toml`.
+- **Grafy vnitřních sil = charakteristické hodnoty bez součinitelů** (γ, ψ, δ; zadání uživatele – kontrola
+  s jinými výpočty): `vnitrni_sily.vys_charakteristicky` (q bez δ, u Vn přepočet s dyn = 1) v `plot_sily`,
+  `plot_stavy_pudorys`, `plot_pricne` (bez M_Ed), `grafy_most.graf_sil`; posudky a kombinace se součiniteli.
 - `vnitrni_sily.polohy_q(vys, o)` = rozhodující polohy vozidla (max M ve středu, max V v řezu d) z poloh obálky;
   `VysledekSil.model` a `q_nastaveni` drží 2D model a generátor poloh; `plotting_sily.kresli_most` = půdorys.
 - Stavy: `g0`, `g-g0`, `qch` (chodci, `q_chodnik` [kN/m²], obálka přes úseky chodníků – `_chodniky`), `q` (doprava).

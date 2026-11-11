@@ -326,6 +326,16 @@ def test_grafy_zatizitelnosti(zat):
         fig = s["Zatížení mostu – vnitřní síly na nosnících"](zat.model, None)
         tit = [a.get_title() for a in fig.axes[::2]]      # g0, g − g0, chodci, Vn, Vr, Ve (bez q)
         assert len(tit) == 6 and tit[4].startswith("Vr = 60 t (šestinápravové")
+        assert tit[2].startswith("zatížení chodců q_ch = 2.5 kN/m² (s Vn, Vr; s Ve chodci nejsou)")
+        assert "bez δ" in tit[4]
+        from blc_posudek.grafy_most import q_bez_dyn
+        for dr in ("Vn", "Vr", "Ve"):                    # δ1 = 1,25 (Vn: 1 nebo 2 pruhy), Ve 1,05
+            v = zat.druhy[dr].vys_ref()
+            q0 = q_bez_dyn(v)
+            if dr == "Vn":
+                assert (q0.M_max <= v.stavy["q"].M_max / 1.2 + 1e-9).all()
+            else:
+                assert q0.M_max == approx(v.stavy["q"].M_max / v.dyn)
         assert not any(t.startswith("zatížení dopravou q") for t in tit)
         plt.close(fig)
         plt.close(fig)

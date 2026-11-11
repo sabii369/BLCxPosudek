@@ -421,12 +421,20 @@ Grafy jsou i v seznamu grafů na kartě 7 (za grafem napětí příslušné fáz
 
 ### 8.4 Součinitele a kombinace (kapitola zatížení protokolu)
 
+**Grafy vnitřních sil** (graf sil na nosnících v protokolu, grafy *Průběhy sil*, *Vnitřní síly
+na nosnících* a *Příčné rozdělení* na kartě 0, `prubehy_sil.png`, `pricne_rozdeleni.png`)
+jsou v **charakteristických hodnotách bez kombinačních, dílčích a dynamických součinitelů**
+– pro kontrolu s jinými statickými výpočty. Posudky, kombinace a tabulky kombinací
+součinitele obsahují (γ, ψ, ξ, δ).
+
 Kapitola „Zatížení z modelu mostu (BLC)“ obsahuje postupně: popis stavů, zatížení na mostě,
 **tabulku dílčích součinitelů γ a součinitelů kombinace ψ** pro skupiny g0 + (g − g0),
 q – chodci a q – doprava (char., častá, kvazistálá, 6.10a, 6.10b, 6.10; u stálých v 6.10b
 ψ = ξ), **graf vnitřních sil M, V na nosnících** od jednotlivých stavů ve formátu obálek BLC
 (půdorys, průběh vynesen od osy každého nosníku, řádek = zatěžovací stav, vlevo M, vpravo V,
-posuzovaný nosník zvýrazněn, u proměnných max červeně / min modře), tabulku maxim po nosnících od stavů
+posuzovaný nosník zvýrazněn, u proměnných max červeně / min modře; zatížení dopravou
+se kreslí **bez dynamického součinitele δ** – u Vn přepočtené s δ = 1 pro
+všechny počty pruhů), tabulku maxim po nosnících od stavů
 a **šest tabulek kombinací** – po nosnících max/min M (s polohou max M) a max/min V.
 
 Účinek kombinace = Σ γ·ψ·E (proměnná zatížení chodci a doprava působí současně);
@@ -472,7 +480,7 @@ Zvolené vozidlo musí být Vn, Vr nebo Ve – pro ně se počítá protokol.
     zatížení** při referenční tíze (Vn = 32 t, Vr = 60 t, Ve = 80 t podle `[blc]`) – půdorys
     v poloze pro max M a max V a příčný řez s polohou zatížení; v grafu „Vnitřní síly na
     nosnících“ je místo řádku zatížení dopravou q po řádku **obálka M a V od každé referenční
-    soupravy** (vč. δ, zvýrazněn nosník posuzovaný pro daný druh),
+    soupravy** (zvýrazněn nosník posuzovaný pro daný druh),
   - *jen Vn / jen Vr / jen Ve* – kapitola „Zatížitelnost Vr – výhradní (ČSN 73 6222)“ jen
     s tímto druhem a **posudky celého protokolu při zatížitelnosti tohoto druhu** (jeho
     rozhodující posudek má využití 100 %, schéma, nosník a chodci odpovídají druhu);

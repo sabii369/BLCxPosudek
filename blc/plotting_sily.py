@@ -2,6 +2,8 @@
 plotting_sily.py
 ================
 Grafy vnitřních sil pro posudek (vnitrni_sily.VysledekSil):
+  Síly se kreslí v CHARAKTERISTICKÝCH hodnotách – bez kombinačních, dílčích a dynamických
+  součinitelů (q bez δ: vnitrni_sily.vys_charakteristicky) – pro kontrolu s jinými výpočty.
   plot_sily     průběhy M a V stavů g0, g − g0, q (obálka) na jednom výstupu,
   plot_pricne   příčné rozdělení: max M a max |V| stavů po výstupech + příčný řez
                 (chodníky, vozovka, liniová zatížení, poloha vozidla),
@@ -20,7 +22,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Polygon, Rectangle
 
-from .vnitrni_sily import VysledekSil, NAZVY_STAVU, PolohaVozidla
+from .vnitrni_sily import VysledekSil, NAZVY_STAVU, PolohaVozidla, vys_charakteristicky
+
+
+def _nazev_stavu(st: str) -> str:
+    return NAZVY_STAVU[st] + (" (bez δ)" if st == "q" else "") if st in NAZVY_STAVU else st
 
 BARVY = {"g0": "#7f7f7f", "g-g0": "#2e75b6", "qch": "#1baf7a", "q": "#e74c3c"}
 C_NOSNIK, C_SPARA, C_POS = "#d5e8f5", "#eeeeee", "#f39c12"
@@ -158,6 +164,7 @@ def plot_stavy_pudorys(vys: VysledekSil, o: Optional[int] = None,
     u proměnných stavů max červeně a min modře; posuzovaný výstup o zvýrazněn
     (o_stavu = {stav: výstup} – jiný zvýrazněný výstup pro daný řádek)."""
     from .plotting import _pudorys_sil, _hladky, _rozsah, _meze
+    vys = vys_charakteristicky(vys)
     geo = _geometrie_pudorysu(vys)
     V, xs = vys.vyst, vys.xs
     stavy = list(stavy or vys.stavy)
@@ -193,7 +200,7 @@ def plot_stavy_pudorys(vys: VysledekSil, o: Optional[int] = None,
             _pudorys_sil(ax, geo, V, xs, r1, velic, velic, jed,
                          zvyrazni=(o_stavu or {}).get(st, o), radky2=r2)
             obal = " – obálka (max červeně, min modře)" if s.pohyblivy else ""
-            ax.set_title(f"{NAZVY_STAVU.get(st, st)}: {velic} [{jed}]{obal}", fontsize=9,
+            ax.set_title(f"{_nazev_stavu(st)}: {velic} [{jed}]{obal}", fontsize=9,
                          fontweight="bold")
             if r == len(stavy) - 1:
                 ax.set_xlabel("x [m] (globální, ve směru osy prvku)")
@@ -219,21 +226,22 @@ def plot_zatizeni_most(vys: VysledekSil, o: int, stav: str,
 
 
 def plot_sily(vys: VysledekSil, o: int, show: bool = True):
-    """Průběhy M(x), V(x) stavů na výstupu o (0-based)."""
+    """Průběhy M(x), V(x) stavů na výstupu o (0-based) – charakteristické hodnoty (q bez δ)."""
+    vys = vys_charakteristicky(vys)
     jm, jv = vys.jednotky
     fig, (aM, aV) = plt.subplots(2, 1, figsize=(10, 7.5), sharex=True)
     for s in vys.stavy:
         t = vys.tabulka(o, s)
         c = BARVY.get(s, None)
         if vys.stavy[s].pohyblivy:
-            aM.plot(t.x, t.M_max, c=c, label=f"{NAZVY_STAVU[s]} – max")
-            aM.plot(t.x, t.M_min, c=c, ls="--", label=f"{NAZVY_STAVU[s]} – min")
+            aM.plot(t.x, t.M_max, c=c, label=f"{_nazev_stavu(s)} – max")
+            aM.plot(t.x, t.M_min, c=c, ls="--", label=f"{_nazev_stavu(s)} – min")
             aV.plot(t.x, t.V_max, c=c)
             aV.plot(t.x, t.V_min, c=c, ls="--")
             aM.fill_between(t.x, t.M_min, t.M_max, color=c, alpha=0.08)
             aV.fill_between(t.x, t.V_min, t.V_max, color=c, alpha=0.08)
         else:
-            aM.plot(t.x, t.M_max, c=c, label=NAZVY_STAVU[s])
+            aM.plot(t.x, t.M_max, c=c, label=_nazev_stavu(s))
             aV.plot(t.x, t.V_max, c=c)
     xp = np.array(vys.K.x_podpor)
     for a in (aM, aV):
@@ -247,7 +255,7 @@ def plot_sily(vys: VysledekSil, o: int, show: bool = True):
     aV.set_xlabel("x od osy první podpory [m]")
     aM.legend(fontsize=8, loc="lower right")
     aM.set_title(f"Vnitřní síly – {'pás' if vys.deska else 'nosník'} {vys.popisky[o]} "
-                 f"(y = {float(vys.vyst.y[o]):.2f} m)")
+                 f"(y = {float(vys.vyst.y[o]):.2f} m) – charakteristické hodnoty bez součinitelů")
     fig.tight_layout()
     if show:
         plt.show()
@@ -255,22 +263,22 @@ def plot_sily(vys: VysledekSil, o: int, show: bool = True):
 
 
 def plot_pricne(vys: VysledekSil, show: bool = True):
-    """Max M a max |V| jednotlivých stavů po výstupech a příčný řez mostovkou."""
+    """Max M a max |V| jednotlivých stavů po výstupech (charakteristické hodnoty, q bez δ)
+    a příčný řez mostovkou; svislice = nejzatíženější výstup (výběr podle MSÚ 6.10)."""
+    gov = vys.rozhodujici("M")
+    vys = vys_charakteristicky(vys)
     jm, jv = vys.jednotky
     sh = vys.souhrn()
     y = np.array([d["y"] for d in sh])
     B = vys.K.B
     fig, (aR, aM, aV) = plt.subplots(3, 1, figsize=(10, 10), sharex=True,
                                      gridspec_kw={"height_ratios": [1.7, 2.2, 2.2]})
-    gov = vys.rozhodujici("M")
     kresli_pricny_rez(aR, vys, gov, rovne=False)
     aR.set_xlabel("")
     aR.set_title("Příčný řez – vybavení a poloha zatížení dopravou")
     for s in vys.stavy:
-        aM.plot(y, [d[f"M_{s}"] for d in sh], "o-", c=BARVY.get(s), ms=3, label=NAZVY_STAVU[s])
+        aM.plot(y, [d[f"M_{s}"] for d in sh], "o-", c=BARVY.get(s), ms=3, label=_nazev_stavu(s))
         aV.plot(y, [d[f"V_{s}"] for d in sh], "o-", c=BARVY.get(s), ms=3)
-    aM.plot(y, [d["M_Ed"] for d in sh], "s-", c="k", ms=3, label="M_Ed (6.10, vč. g0)")
-    aV.plot(y, [d["V_Ed"] for d in sh], "s-", c="k", ms=3)
     for a in (aM, aV):
         a.axvline(y[gov], c="#f39c12", lw=1.5, alpha=0.7)
         a.grid(alpha=0.3)
@@ -278,8 +286,8 @@ def plot_pricne(vys: VysledekSil, show: bool = True):
     aV.set_ylabel(f"max |V| [{jv}]")
     aV.set_xlabel("y – příčná poloha osy výstupu [m]")
     aM.legend(fontsize=8)
-    aM.set_title(f"Max. hodnoty po {'pásech 1 m' if vys.deska else 'nosnících'} "
-                 f"(rozhoduje {vys.popisky[gov]})")
+    aM.set_title(f"Max. charakteristické hodnoty po {'pásech 1 m' if vys.deska else 'nosnících'} "
+                 f"bez součinitelů (rozhoduje {vys.popisky[gov]})")
     aR.set_xlim(-0.2, B + 0.2)
     fig.tight_layout()
     if show:

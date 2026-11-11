@@ -1030,6 +1030,33 @@ def vys_s_vozidlem(vys: VysledekSil, **zmeny) -> VysledekSil:
     return out
 
 
+def vys_charakteristicky(vys: VysledekSil) -> VysledekSil:
+    """Kopie výsledku pro VYKRESLENÍ sil v charakteristických hodnotách: stav q bez
+    dynamického součinitele (δ = 1).  U Vn nelze jen dělit (δ_k podle počtu pruhů) – q se na
+    stejném modelu MKP přepočte s dyn = 1 (výsledek v vys.cache); přeškálovaný stav
+    (zatížitelnost) se přeškáluje stejně.  Posudky a kombinace používají původní vys."""
+    if getattr(vys, "_bez_dyn", False) or "q" not in vys.stavy:
+        return vys
+    out = copy.copy(vys)
+    out.stavy = dict(vys.stavy)
+    if abs(vys.dyn - 1.0) > 1e-12 or vys.druh_q == "Vn":
+        n = vys.nastaveni_q
+        klic = ("bez_dyn", vys.druh_q, n.get(vys.druh_q), vys.schema_q, n.get("MLC"),
+                n.get("typ_MLC"), n.get("dist"), n.get("y_Ve"))
+        if klic not in vys.cache:
+            zm = {"dyn": 1.0}
+            if vys.druh_q in ("Vn", "Vr"):
+                zm.update({vys.druh_q: n[vys.druh_q], "schema": vys.schema_q})
+            vys.cache[klic] = vys_s_vozidlem(vys, **zm)
+        w = vys.cache[klic]
+        if vys.druh_q in ("Ve", "Vn", "Vr") and w.V and abs(w.V - vys.V) > 1e-9:
+            w = vys_pro_V(w, vys.V)
+        out.stavy["q"] = w.stavy["q"]
+    out.dyn, out.dyn_zdroj = 1.0, "bez dynamického součinitele (charakteristické hodnoty)"
+    out._bez_dyn = True
+    return out
+
+
 def vys_pro_V(vys: VysledekSil, V: float) -> VysledekSil:
     """Kopie výsledku se stavem q přeškálovaným na tíhu vozidla / zatížitelnost V [t]
     (Ve, Vn, Vr – účinky jsou v V lineární, polohy a schéma se nemění)."""
