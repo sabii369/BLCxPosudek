@@ -42,7 +42,9 @@ from typing import Optional
 
 from blc.export_pb import zatizeni_pb_dict
 from blc.stale_zatizeni import Vybaveni, LiniovaZatizeni
-from blc.vnitrni_sily import vnitrni_sily, polohy_q, Soucinitele, VysledekSil, NAZVY_STAVU
+from blc.vnitrni_sily import (vnitrni_sily, polohy_q, vys_s_vozidlem, Soucinitele, VysledekSil,
+                              NAZVY_STAVU)
+from blc.schemata_zatizitelnosti import POPIS_SCHEMAT
 
 VOZIDLA = {"Vn": "Vn – normální zatížitelnost", "Vr": "Vr – výhradní zatížitelnost",
            "Ve": "Ve – výjimečná zatížitelnost", "MLC_k": "MLC kolové", "MLC_p": "MLC pásové"}
@@ -190,6 +192,23 @@ def data_pro_posudek(vys: VysledekSil, d: dict, o: Optional[int] = None) -> dict
     return out
 
 
+#: referenční soupravy zatížitelnosti [t] pro tabulku maxim po nosnících v protokolu
+REFERENCNI_SOUPRAVY = {"Vn": 32.0, "Vr": 60.0, "Ve": 80.0}
+
+
+def sily_referencnich_souprav(vys: VysledekSil) -> dict:
+    """{druh: VysledekSil} se stavem q od referenční soupravy (REFERENCNI_SOUPRAVY) na stejném
+    modelu MKP, bez dynamického součinitele (δ = 1, charakteristické hodnoty); schéma podle tíhy
+    (Vn 32 t dvounáprava, Vr 60 t šestinápravové).  Výsledky se ukládají do vys.cache."""
+    out = {}
+    for druh, V in REFERENCNI_SOUPRAVY.items():
+        klic = ("ref_souprava_bez_dyn", druh, V, vys.nastaveni_q.get("y_Ve"))
+        if klic not in vys.cache:
+            vys.cache[klic] = vys_s_vozidlem(vys, **{druh: V}, dyn=1.0)
+        out[druh] = vys.cache[klic]
+    return out
+
+
 def kapitola_blc(model, vys: VysledekSil, o: int) -> None:
     """Vloží do protokolu posudku kapitolu zatížení a vnitřních sil z modelu mostu
     (před kapitolu Zatížení a časová osa): popis stavů, zatížení na mostě, součinitele,
@@ -248,17 +267,28 @@ def kapitola_blc(model, vys: VysledekSil, o: int) -> None:
     K.text("Pozn.: γ_G a ξ jsou převzaty z nastavení posouzení, γ a ψ proměnných zatížení ze zadání "
            "mostu (pro zatížitelnost Vn, Vr, Ve udává ČSN 73 6222, čl. 10.1.1 a 10.2.1, ψ0 = ψ1 = "
            "0,75; γ podle ČSN EN 1990); pro vozidla MLC je nutné je ověřit.")
-    # vnitřní síly od stavů
+    # vnitřní síly od stavů; místo zadaného zatížení dopravou referenční soupravy Vn, Vr, Ve
     K.obrazek(GRAF_SILY[0], GRAF_SILY[1])
-    stavy = list(vys.stavy)
+    stavy = [k for k in vys.stavy if k != "q"]
+    ref = sily_referencnich_souprav(vys)
     rows = []
     for i, dd in enumerate(vys.souhrn()):
+        tq = [r.tabulka(i, "q") for r in ref.values()]
         rows.append([dd["vystup"] + (" ◄" if i == o else ""), fmt(dd["y"])] +
-                    [fmt(dd["M_" + k]) for k in stavy] + [fmt(dd["V_" + k]) for k in stavy])
-    kr = {"g0": "g0", "g-g0": "g − g0", "qch": "chodci", "q": "doprava"}
+                    [fmt(dd["M_" + k]) for k in stavy] + [fmt(float(t.M_max.max())) for t in tq] +
+                    [fmt(dd["V_" + k]) for k in stavy] + [fmt(float(t.V_abs.max())) for t in tq])
+    kr = {"g0": "g0", "g-g0": "g − g0", "qch": "chodci"}
+    nq = [f"{d} {V:g} t" for d, V in REFERENCNI_SOUPRAVY.items()]
+    sch = ", ".join(f"{d} {r.V:g} t – {POPIS_SCHEMAT[r.schema_q or '']}"
+                    for d, r in ref.items() if d != "Ve")
     K.tabulka([vyst.capitalize(), "y [m]"] + [f"max M {kr[k]} [{jm}]" for k in stavy] +
-              [f"max |V| {kr[k]} [{jv}]" for k in stavy], rows,
-              f"Maxima vnitřních sil po nosnících od jednotlivých zatěžovacích stavů; ◄ = posuzovaný")
+              [f"max M {n} [{jm}]" for n in nq] + [f"max |V| {kr[k]} [{jv}]" for k in stavy] +
+              [f"max |V| {n} [{jv}]" for n in nq], rows,
+              "Maxima vnitřních sil po nosnících od jednotlivých zatěžovacích stavů a od referenčních "
+              "souprav zatížitelnosti (ČSN 73 6222; charakteristické hodnoty bez dynamického "
+              f"součinitele δ; {sch}; Vn a Vr u kraje vozovky u užšího chodníku, Ve "
+              f"{'v ose vozovky' if ref['Ve'].nastaveni_q.get('y_Ve') is None else 'v zadané poloze'}"
+              "); ◄ = posuzovaný")
     # kombinace po nosnících
     K.text("Vnitřní síly kombinací po nosnících – extrémy po délce nosníku; kombinace obsahují "
            "vlastní tíhu g0 z modelu mostu, ostatní stálé g − g0 a proměnná zatížení podle tabulky "

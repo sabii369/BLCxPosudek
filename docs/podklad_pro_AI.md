@@ -65,7 +65,7 @@ model.protokol.posudky  → [VysledekPosudku(mezni_stav, nazev, faze, kombinace,
 
 | Soubor | Obsah / klíčové funkce |
 |---|---|
-| `blc_posudek/vypocet.py` | **řídicí vrstva**: `nacti`, `VYCHOZI_BLC`, `parametry_blc(d)`, `vlastnosti_prurezu(d)`, `nastaveni_posudku(d)`, `vyber_nosnik(vys, d)`, `zatizeni_z_blc(vys, d, o)`, `data_pro_posudek(vys, d, o)`, `spocti(d, vys=None, o=None)`, `kapitola_blc`, `uloz_protokol_most(model, adr)` |
+| `blc_posudek/vypocet.py` | **řídicí vrstva**: `nacti`, `VYCHOZI_BLC`, `parametry_blc(d)`, `vlastnosti_prurezu(d)`, `nastaveni_posudku(d)`, `vyber_nosnik(vys, d)`, `zatizeni_z_blc(vys, d, o)`, `data_pro_posudek(vys, d, o)`, `spocti(d, vys=None, o=None)`, `kapitola_blc` (tabulka maxim po nosnících s referenčními soupravami `REFERENCNI_SOUPRAVY` Vn 32 t, Vr 60 t, Ve 80 t bez δ – `sily_referencnich_souprav(vys)`, ve `vys.cache`, +~2,7 s na první `spocti` mostu), `uloz_protokol_most(model, adr)` |
 | `blc_posudek/zatizitelnost.py` | `zatizitelnost(d, vys=None, o=None, druhy=None, tol=1e-3)` → `VysledekZatizitelnosti` (`druhy` → `ZatizitelnostDruhu`); `vys_pro_Ve(vys, Ve)`; `klic_posudku(p)`; `_slouc` (volba schématu Vn / Vr po posudcích) |
 | `blc_posudek/__main__.py` | dávka / CLI (`python -m blc_posudek soubor.toml -o slozka [--zatizitelnost]`) |
 | `blc_posudek/gui.py`, `grafy_most.py` | GUI (`AplikaceMost`, karta 0 „Most a zatížení“), grafy mostu do protokolu |
@@ -484,7 +484,7 @@ Naměřeno na vzorovém příkladu (10 nosníků, L0 = 11,4 m, Windows):
 | model mostu, `ex` = 0,0625 m | ~7 s (V_q +1,2 %, M beze změny) |
 | model mostu, `krok` 0,5 m | ~1,5 s (výsledek beze změny) |
 | posudek (`model_ze_slovniku` + `spocitej`) | ~0,35 s |
-| `spocti` se spočteným mostem | ~1,1 s |
+| `spocti` se spočteným mostem | ~1,1 s (poprvé +~2,7 s – referenční soupravy do tabulky protokolu) |
 | stav q schématu Vn (2 pruhy) / Vr na hotovém modelu | ~1 s / ~0,7 s |
 | zatížitelnost Ve (27 výpočtů posudku) | ~13 s |
 | zatížitelnost Vn + Vr + Ve | ~36 s |
