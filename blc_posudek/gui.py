@@ -204,18 +204,12 @@ class AplikaceMost(Aplikace):
         self.f_pred = Formular(lf, [
             ("vystup", "Posuzovaný nosník", "choice", ["auto"]),
             ("kriterium", "Nejzatíženější podle", "choice", ["M", "M-", "V"]),
-            ("rezim", "Předání zatížení", "choice", ["kombinace", "zatezovaci_stavy"]),
-            ("gamma_Q", "γ_Q – doprava", "float", None),
-            ("psi0", "ψ0 – doprava", "float", None), ("psi1", "ψ1 – doprava", "float", None),
-            ("psi2", "ψ2 – doprava", "float", None),
-            ("gamma_Qch", "γ_Q – chodci", "float", None),
-            ("psi0_ch", "ψ0 – chodci", "float", None), ("psi1_ch", "ψ1 – chodci", "float", None),
-            ("psi2_ch", "ψ2 – chodci", "float", None)], sloupcu=2, pri_zmene=zm)
+            ("rezim", "Předání zatížení", "choice", ["kombinace", "zatezovaci_stavy"])],
+            sloupcu=2, pri_zmene=zm)
         self.f_pred.pack(fill="x")
         ttk.Label(lf, foreground=SEDA, justify="left", text=(
-            "auto = nejzatíženější nosník podle MSÚ (6.10, včetně g0). γ_G, γ_G,inf, ξ a kombinace MSÚ "
-            "se berou z karty 6;\nψ0 = ψ1 = 0,75 = ČSN 73 6222, čl. 10.1.1 a 10.2.1 (Vn, Vr, Ve); "
-            "pro MLC ověřte."
+            "auto = nejzatíženější nosník podle MSÚ (6.10, včetně g0). Dílčí součinitele všech zatížení "
+            "(stálá, doprava, chodci, teplota) jsou na kartě 5, kombinace MSÚ na kartě 6."
         )).pack(anchor="w")
 
         # pravý sloupec – výpočet a výsledky
@@ -301,8 +295,23 @@ class AplikaceMost(Aplikace):
     def _zalozka_zatizeni(self):
         super()._zalozka_zatizeni()
         z = self.ram_zat.master
-        for w in z.winfo_children()[1:]:          # volba způsobu zadání a zadávací panely
+        for w in (self.ram_zpusob, self.ram_zat):  # volba způsobu zadání a zadávací panely
             w.pack_forget()
+        # součinitele proměnných zatížení mostu v sekci dílčích součinitelů (vedle stálých a teploty)
+        zm = self._naplanuj_nahled
+        for atr, nazev, prip in (("f_souc_doprava", "Doprava q", ""), ("f_souc_chodci", "Chodci q_ch", "_ch")):
+            sf = ttk.LabelFrame(self.ram_soucinitele, text=nazev, padding=4)
+            sf.pack(side="left", fill="x", expand=True, anchor="n", padx=(8, 0), before=self.lf_souc_teplota)
+            fm = Formular(sf, [(f"gamma_Q{'ch' if prip else ''}", "γ_Q", "float", None),
+                               (f"psi0{prip}", "ψ0 (6.10a)", "float", None),
+                               (f"psi1{prip}", "ψ1 (častá)", "float", None),
+                               (f"psi2{prip}", "ψ2 (kvazistálá)", "float", None)], pri_zmene=zm)
+            fm.pack(fill="x")
+            setattr(self, atr, fm)
+        ttk.Label(self.ram_soucinitele.master, foreground=SEDA, justify="left", text=(
+            "Doprava a chodci: charakteristická γ = ψ = 1; ψ0 = ψ1 = 0,75 = ČSN 73 6222, čl. 10.1.1 a "
+            "10.2.1 (Vn, Vr, Ve), pro MLC ověřte; ψ2 norma neuvádí. Stálá: 6.10a a 6.10 γ_G,sup, "
+            "6.10b ξ·γ_G,sup, příznivě γ_G,inf.")).pack(anchor="w", pady=(4, 0))
         lf = ttk.LabelFrame(z, text="Vnější zatížení – převzato z obálek vnitřních sil mostu "
                                     "(karta 0)", padding=6)
         lf.pack(fill="both", expand=True, pady=(8, 0))
@@ -324,7 +333,7 @@ class AplikaceMost(Aplikace):
     def _blc_data(self) -> dict:
         out = {}
         for fm in (self.f_kon, self.f_spara, self.f_uloz, self.f_vyb, self.f_chodci, self.f_voz,
-                   self.f_pred, self.f_cas_blc):
+                   self.f_pred, self.f_cas_blc, self.f_souc_doprava, self.f_souc_chodci):
             out.update(fm.ziskej())
         out["vozidlo"] = VOZIDLA_KLIC.get(out.get("vozidlo", "Ve"), out.get("vozidlo", "Ve"))
         out["zatizitelnost"] = bool(self.var_zat.get())
@@ -339,7 +348,7 @@ class AplikaceMost(Aplikace):
         m = {**VYCHOZI_BLC, **b}
         m["vozidlo"] = VOZIDLA_GUI.get(m.get("vozidlo", "Ve"), m.get("vozidlo"))
         for fm in (self.f_kon, self.f_spara, self.f_uloz, self.f_vyb, self.f_chodci, self.f_voz,
-                   self.f_pred, self.f_cas_blc):
+                   self.f_pred, self.f_cas_blc, self.f_souc_doprava, self.f_souc_chodci):
             fm.nastav(m)
         self.t_liniova.nastav(b.get("liniova", []))
         self.var_zat.set(bool(m.get("zatizitelnost", False)))

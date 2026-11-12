@@ -69,6 +69,9 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
   napětí (přesná integrace po průřezu, Excel zjednodušuje) × γ·ψ kombinace nepříznivě k napětí v betonu v provozu
   (tlak/tah char, dotvarování, dekomprese, hlavní napětí; ne trhliny, ne MSÚ); `msp_napeti` klíče `(P, M, varianta)`,
   `grafy_most.profily_faze` nelineární průběh; GUI karta 5.
+- GUI: všechny dílčí součinitele zatížení na kartě 5, sekce „Dílčí součinitele zatížení“ (`ram_soucinitele`):
+  stálá `f_souc_stale` (γ_G, γ_G,inf, ξ → `[posouzeni]`, ne na kartě 6), doprava / chodci `f_souc_doprava`,
+  `f_souc_chodci` (→ `[blc]`, ne na kartě 0), teplota `f_teplota_souc`; kombinace MSÚ a γ_P zůstávají na kartě 6.
 - Zatížitelnost: `blc_posudek/zatizitelnost.py` – `zatizitelnost(d, vys, druhy=…)` → `VysledekZatizitelnosti`
   (`druhy` Vn, Vr, Ve → `ZatizitelnostDruhu`; tíha pro η = 1 každého posudku po schématech – `_hledej`, Illinois se
   sdílenými výpočty, q přeškálované `vys_pro_V`; schémata po posudcích `_slouc`: Vn dvounáprava / náhradní náprava

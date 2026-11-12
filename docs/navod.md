@@ -377,7 +377,9 @@ mostu a grafy).
    posuzovaný nosník (auto = nejzatíženější podle M, M− nebo V), způsob předání, γ_Q a ψ.
 2. Karty 1–4: materiály, průřez (z něj A a Iy nosníku pro model mostu – lze vypnout
    a zadat ručně), kabely, výztuž.
-3. Karta 5: prostředí, časová osa a stáří, od kterého působí g − g0 / kvazistálá kombinace.
+3. Karta 5: prostředí, časová osa a stáří, od kterého působí g − g0 / kvazistálá kombinace;
+   sekce **Dílčí součinitele zatížení** – všechny součinitele na jednom místě: stálá (γ_G,sup,
+   γ_G,inf, ξ), doprava q a chodci q_ch (γ_Q, ψ0, ψ1, ψ2), teplota (γ, ψ po kombinacích).
    Vnější zatížení se nezadává – zobrazí se kombinace převzaté z obálek.
    Karta 6 (nastavení posouzení): **Zbytková životnost** 50 / 15-30 / 10 let určí kategorii
    mostu podle ČSN 73 6222, tab. 12.3 (předem předpjatý B/C/D, dodatečně soudržně C/D/E)
@@ -395,8 +397,9 @@ mostu a grafy).
   kartě 0 je zvýrazněn; dvojklikem na řádek se zvolí jiný.
 - Předává se g − g0 a q (g0 počítá posudek z průřezu), výchozí jako obálky kombinací
   6.10a, 6.10b (nebo 6.10 podle karty 6), charakteristické, časté a kvazistálé.
-- Součinitele: γ_G, γ_G,inf, ξ a kombinace MSÚ z karty 6 (stejné pro g0 i g − g0),
-  γ_Q, ψ0, ψ1, ψ2 z karty 0 (výchozí ψ0 = ψ1 = 0,75 podle ČSN 73 6222, čl. 10; pro MLC ověřit).
+- Součinitele: γ_G, γ_G,inf, ξ (stejné pro g0 i g − g0) a γ_Q, ψ0, ψ1, ψ2 dopravy a chodců
+  z karty 5, sekce Dílčí součinitele zatížení (výchozí ψ0 = ψ1 = 0,75 podle ČSN 73 6222, čl. 10;
+  pro MLC ověřit); kombinace MSÚ (6.10a/b nebo 6.10) z karty 6.
 - Změní-li se vstup ovlivňující model mostu (i průřez nebo rozpětí), karta 0 a 5 to
   hlásí a F5 most přepočítá.
 
@@ -440,12 +443,15 @@ q – chodci a q – doprava (char., častá, kvazistálá, 6.10a, 6.10b, 6.10; 
 (půdorys, průběh vynesen od osy každého nosníku, řádek = zatěžovací stav, vlevo M, vpravo V,
 posuzovaný nosník zvýrazněn, u proměnných max červeně / min modře; zatížení dopravou
 se kreslí **bez dynamického součinitele δ** – u Vn přepočtené s δ = 1 pro
-všechny počty pruhů), tabulku maxim po nosnících od stavů
+všechny počty pruhů), tabulku maxim po nosnících od stavů g0, g − g0 (a chodců), kde je místo
+zadaného zatížení dopravou max M a max |V| od **referenčních souprav Vn 32 t, Vr 60 t a Ve 80 t**
+(nezávisle na zvoleném vozidle; charakteristické hodnoty bez δ, schéma podle tíhy, poloha jako
+v kap. 7 – Vn, Vr u kraje vozovky u užšího chodníku, Ve v ose vozovky),
 a **šest tabulek kombinací** – po nosnících max/min M (s polohou max M) a max/min V.
 
 Účinek kombinace = Σ γ·ψ·E (proměnná zatížení chodci a doprava působí současně);
-příznivé stálé γ_G,inf. Kombinace v tabulkách obsahují g0 z modelu mostu. γ_G a ξ jsou
-z karty 6, γ a ψ chodců a dopravy z karty 0 (výchozí 1,35 / 0,75 / 0,75 / 0).
+příznivé stálé γ_G,inf. Kombinace v tabulkách obsahují g0 z modelu mostu. γ_G, ξ i γ a ψ
+chodců a dopravy (výchozí 1,35 / 0,75 / 0,75 / 0) jsou na kartě 5 v sekci Dílčí součinitele zatížení.
 Do posudku se předávají g − g0, q_ch a q (g0 si posudek počítá sám).
 
 ### 8.5 Výpočet zatížitelnosti (ČSN 73 6222)
@@ -539,7 +545,8 @@ není zaškrtnuto „Uvažovat“ = teplota se neuvažuje):
   průměrné přetvoření oblasti její plochou a těžiště bere z teplotního obrazce bez vlivu
   šířky – u obdélníku je to shodné, u průřezu s pásnicemi (KA) se napětí liší o ≈ 0,1 MPa
   (KA-73/15: horní vlákna při oteplení −1,05 místo −1,19 MPa).
-- **Dílčí součinitele** γ, ψ pro kombinace (výchozí): charakteristická 1,0 / 0,6, častá
+- **Dílčí součinitele** γ, ψ pro kombinace (karta 5, sekce Dílčí součinitele zatížení; výchozí):
+  charakteristická 1,0 / 0,6, častá
   1,0 / 0,6, kvazistálá 1,0 / 0,5, MSÚ 6.10a, 6.10b, 6.10 1,5 / 0,6
   (`soucinitele = { char = [1.0, 0.6], … }`). Primární napětí × γ·ψ se v **provozních
   fázích** přičte k napětí v betonu **jen nepříznivě** (rozhoduje oteplení, ochlazení, nebo

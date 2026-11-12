@@ -186,6 +186,10 @@ def test_davka(tmp_path):
     assert "δ = 1.05 (ČSN 73 6222, čl. 8.4, výjimečná zatížitelnost)" in html
     for naz in ("charakteristická", "častá", "kvazistálá", "MSÚ 6.10a", "MSÚ 6.10b", "MSÚ 6.10"):
         assert f"Kombinace {naz} – vnitřní síly po nosnících" in html
+    # tabulka maxim po nosnících: místo zadané dopravy referenční soupravy Vn, Vr, Ve
+    for n in ("Vn 32 t", "Vr 60 t", "Ve 80 t"):
+        assert f"max M {n} [kNm]" in html and f"max |V| {n} [kN]" in html
+    assert "max M doprava" not in html
     assert (tmp_path / "obrazky" / "blc_sily.png").exists()
     assert "<figcaption>Zatížení na mostě – vlastní tíha g0" in html
     assert "<figcaption>Zatížení na mostě – vozidlo v poloze pro max M" in html
@@ -453,3 +457,28 @@ def test_gui_koroze():
         assert d["predpinaci_vyztuz"]["taznost_oslabena"] == 12.0
     finally:
         app.destroy()
+
+
+@pytest.mark.skipif(not _tk(), reason="není k dispozici grafické prostředí")
+def test_gui_soucinitele_na_karte_5():
+    """Dílčí součinitele stálých zatížení, dopravy, chodců a teploty jsou všechny na kartě 5."""
+    from blc_posudek.gui import AplikaceMost
+    app = AplikaceMost(PRIKLAD)
+    try:
+        app.update()
+        sekce = str(app.ram_soucinitele)
+        for fm in (app.f_souc_stale, app.f_souc_doprava, app.f_souc_chodci, app.f_teplota_souc):
+            assert str(fm).startswith(sekce)
+        assert str(app.f_cas).split('.')[:3] == sekce.split('.')[:3]          # stejná karta jako čas. osa
+        assert "gamma_Q" not in app.f_pred.prom and "gamma_G" not in app.f_nastaveni.prom
+        assert app.f_souc_doprava.prom["psi0"].get() == "0.75"
+        app.f_souc_doprava.prom["gamma_Q"].set("1.5")
+        app.f_souc_chodci.prom["psi1_ch"].set("0.4")
+        app.f_souc_stale.prom["gamma_G"].set("1.4")
+        d = app.ziskej_data()
+        assert d["blc"]["gamma_Q"] == 1.5 and d["blc"]["psi1_ch"] == 0.4
+        assert d["posouzeni"]["gamma_G"] == 1.4
+        assert parametry_blc(d)["soucinitele"].gamma_Q == 1.5
+    finally:
+        app.destroy()
+
