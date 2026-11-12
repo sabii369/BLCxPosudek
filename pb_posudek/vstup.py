@@ -10,6 +10,7 @@ from .kabel import Kabel, geometrie_parabola, geometrie_polygon, geometrie_primk
 from .materialy import Beton, BetonarskaVyztuz, PredpinaciVyztuz
 from .model import Nastaveni, NosnikPB, SmykovaVyztuz
 from .msu import VrstvaVyztuze
+from .protokol import cislo
 from .prurez import Prurez
 from .teplota import Teplota
 from .zatizeni import KombinaceVstup, ZatezovaciStav
@@ -53,13 +54,13 @@ def geometrie_kabelu(d: dict, L: float, i: int = 0, povinne: tuple = ()):
         raise ValueError(f"Kabel {d.get('nazev', i + 1)} (geometrie {typ}): chybí {', '.join(chybi)}")
     if typ == "parabola":
         g = geometrie_parabola(L, d["z_L"], d["z_S"], d.get("z_P", d["z_L"]), d.get("x_S"))
-        popis = f"parabola z = {d['z_L']} / {d['z_S']} / {d.get('z_P', d['z_L'])} mm"
+        popis = f"parabola z = {cislo(d['z_L'])} / {cislo(d['z_S'])} / {cislo(d.get('z_P', d['z_L']))} mm"
     elif typ == "polygon":
         g = geometrie_polygon([tuple(b) for b in d["body"]], d.get("polomery"))
         popis = f"polygon ({len(d['body'])} bodů" + (", zaoblení R" if d.get("polomery") else "") + ")"
     elif typ == "primka":
         g = geometrie_primka(L, d["z_L"], d.get("z_P"))
-        popis = f"přímka z = {d['z_L']}" + (f" → {d['z_P']}" if d.get("z_P") is not None else "") + " mm"
+        popis = f"přímka z = {cislo(d['z_L'])}" + (f" → {cislo(d['z_P'])}" if d.get("z_P") is not None else "") + " mm"
     else:
         raise ValueError(f"Neznámá geometrie kabelu: {typ}")
     return g, popis

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from . import __version__
 from .grafy import vykresli_vse
-from .protokol import Krok, Obrazek, Tabulka, VysledekPosudku, fmt
+from .protokol import Krok, Obrazek, Tabulka, VysledekPosudku, fmt, procenta
 
 _SUB = re.compile(r"_\{([^{}]*)\}")
 _SUP = re.compile(r"\^\{([^{}]*)\}")
@@ -113,7 +113,7 @@ def _posudek_html(v: VysledekPosudku) -> str:
     return (f'<div class="chk{cls}"><div class="n"><b>{html.escape(v.nazev)}</b>{odk}<br>'
             f'<small>{html.escape(v.faze)}{komb}{misto}</small>{pozn}</div>'
             f'<div>E<sub>d</sub> = {_mat(fmt(v.E_d))} {v.jednotka} ≤ R<sub>d</sub> = {_mat(fmt(v.R_d))} {v.jednotka}</div>'
-            f'<div class="e">η = {v.vyuziti * 100:.1f} %</div>{tag}</div>')
+            f'<div class="e">η = {procenta(v.vyuziti)}</div>{tag}</div>')
 
 
 def _souhrn(model) -> str:
@@ -126,7 +126,7 @@ def _souhrn(model) -> str:
         mx = max(p, key=lambda v: v.vyuziti)
         ok = all(v.vyhovuje for v in p)
         out.append(f'<div class="card"><div class="lbl">{ms} – nejvyšší využití</div>'
-                   f'<div class="big">{mx.vyuziti * 100:.0f} %</div>'
+                   f'<div class="big">{procenta(mx.vyuziti, 0)}</div>'
                    f'<div>{html.escape(mx.nazev)} ({html.escape(mx.faze)})</div>'
                    f'<div style="margin-top:6px">{TAG_OK_ALL if ok else TAG_BAD_ALL}</div></div>')
     cards = '<div class="cards">' + "".join(out) + "</div>"
@@ -145,7 +145,7 @@ def _souhrn(model) -> str:
             mx = max(vs, key=lambda v: v.vyuziti)
             rows.append(f"<tr><td>{ms}</td><td>{html.escape(s)}</td><td>{html.escape(mx.nazev)}</td>"
                         f"<td>{html.escape(mx.faze)}</td><td class=num>{fmt(mx.x, 3) if mx.x is not None else '–'}</td>"
-                        f"<td class=num>{mx.vyuziti * 100:.1f} %</td><td>{_bar(mx.vyuziti)}</td>"
+                        f"<td class=num>{procenta(mx.vyuziti)}</td><td>{_bar(mx.vyuziti)}</td>"
                         f"<td>{TAG_ANO if all(v.vyhovuje for v in vs) else TAG_NE}</td></tr>")
     tab = ('<div class="wrap"><table><caption>Využití podle mezních stavů a skupin posudků (maximum přes všechny fáze)'
            '</caption><tr><th>MS</th><th>Skupina</th><th>Rozhodující posudek</th><th>Fáze</th><th>x [m]</th>'
@@ -155,7 +155,7 @@ def _souhrn(model) -> str:
         full.append(f"<tr><td>{v.mezni_stav}</td><td>{html.escape(v.nazev)}</td><td>{html.escape(v.faze)}</td>"
                     f"<td>{html.escape(v.kombinace)}</td><td class=num>{fmt(v.x, 3) if v.x is not None else '–'}</td>"
                     f"<td class=num>{_mat(fmt(v.E_d))}</td><td class=num>{_mat(fmt(v.R_d))}</td><td>{v.jednotka}</td>"
-                    f"<td class=num>{v.vyuziti * 100:.1f} %</td><td>{_bar(v.vyuziti)}</td></tr>")
+                    f"<td class=num>{procenta(v.vyuziti)}</td><td>{_bar(v.vyuziti)}</td></tr>")
     tab2 = ('<details><summary>Všechny posudky ({} položek)</summary><div class="wrap"><table>'
             '<tr><th>MS</th><th>Posudek</th><th>Fáze</th><th>Kombinace</th><th>x [m]</th><th>E<sub>d</sub></th>'
             '<th>R<sub>d</sub></th><th></th><th>η</th><th></th></tr>{}</table></div></details>').format(
