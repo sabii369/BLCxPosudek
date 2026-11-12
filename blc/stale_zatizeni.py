@@ -23,6 +23,7 @@ mimo konstrukci (za osou krajní podpory) jde do opěry.
 """
 
 from __future__ import annotations
+from .cisla import cz
 import math
 from dataclasses import dataclass, field
 from typing import List, Tuple
@@ -59,12 +60,12 @@ class Vybaveni:
             if v < 0:
                 raise ValueError(f"{nazev} musí být nezáporné.")
         if self.chodnik_L + self.chodnik_P >= B - 1e-9:
-            raise ValueError(f"Chodníky ({self.chodnik_L:g} + {self.chodnik_P:g} m) "
-                             f"zabírají celou šířku mostovky B = {B:g} m.")
+            raise ValueError(f"Chodníky ({cz(self.chodnik_L)} + {cz(self.chodnik_P)} m) "
+                             f"zabírají celou šířku mostovky B = {cz(B)} m.")
         for l in self.liniova:
             if not (0.0 <= l.y <= B):
-                raise ValueError(f"Liniové zatížení '{l.nazev}': y = {l.y:g} m leží mimo "
-                                 f"mostovku 0 … {B:g} m.")
+                raise ValueError(f"Liniové zatížení '{l.nazev}': y = {cz(l.y)} m leží mimo "
+                                 f"mostovku 0 … {cz(B)} m.")
             if l.sirka <= 0:
                 raise ValueError(f"Liniové zatížení '{l.nazev}': šířka musí být kladná.")
 
@@ -102,12 +103,12 @@ class Vybaveni:
         return out + list(self.liniova)
 
     def popis(self, B: float) -> str:
-        t = (f"chodníky {self.chodnik_L:g} + {self.chodnik_P:g} m "
-             f"(g = {self.g_chodnik:g} kN/m²), vozovka {self.sirka_vozovky(B):g} m "
-             f"(g = {self.g_vozovka:g} kN/m²)")
+        t = (f"chodníky {cz(self.chodnik_L)} + {cz(self.chodnik_P)} m "
+             f"(g = {cz(self.g_chodnik)} kN/m²), vozovka {cz(self.sirka_vozovky(B))} m "
+             f"(g = {cz(self.g_vozovka)} kN/m²)")
         lin = self.liniova_vse(B)
         if lin:
-            t += "; " + ", ".join(f"{l.nazev} {l.g:g} kN/m (y = {l.y:.2f} m)" for l in lin)
+            t += "; " + ", ".join(f"{l.nazev} {cz(l.g)} kN/m (y = {cz(l.y, 2)} m)" for l in lin)
         return t
 
     def tiha_na_metr(self, B: float) -> float:

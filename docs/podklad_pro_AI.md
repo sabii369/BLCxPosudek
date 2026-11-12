@@ -65,9 +65,9 @@ model.protokol.posudky  → [VysledekPosudku(mezni_stav, nazev, faze, kombinace,
 
 | Soubor | Obsah / klíčové funkce |
 |---|---|
-| `blc_posudek/vypocet.py` | **řídicí vrstva**: `nacti`, `VYCHOZI_BLC`, `parametry_blc(d)`, `vlastnosti_prurezu(d)`, `nastaveni_posudku(d)`, `vyber_nosnik(vys, d)`, `zatizeni_z_blc(vys, d, o)`, `data_pro_posudek(vys, d, o)`, `spocti(d, vys=None, o=None)`, `kapitola_blc` (tabulka maxim po nosnících s referenčními soupravami `REFERENCNI_SOUPRAVY` Vn 32 t, Vr 60 t, Ve 80 t bez δ – `sily_referencnich_souprav(vys)`, ve `vys.cache`, +~2,7 s na první `spocti` mostu), `uloz_protokol_most(model, adr)` |
+| `blc_posudek/vypocet.py` | **řídicí vrstva**: `nacti`, `VYCHOZI_BLC`, `parametry_blc(d)`, `vlastnosti_prurezu(d)`, `nastaveni_posudku(d)`, `vyber_nosnik(vys, d)`, `zatizeni_z_blc(vys, d, o)`, `data_pro_posudek(vys, d, o)`, `spocti(d, vys=None, o=None)` (jen most + posudek, `model.blc = {vys, o}`), `vys_se_soucinitely(vys, s)`, `klic_mkp(kw)`, `polohy_modelu(model)` (líně, ~0,8 s), `priprav_protokol(model)` (kapitola BLC + zatížitelnosti, obrázky; jednou), `kapitola_blc` (tabulka maxim po nosnících s referenčními soupravami `REFERENCNI_SOUPRAVY` Vn 32 t, Vr 60 t, Ve 80 t bez δ – `sily_referencnich_souprav(vys)`, ve `vys.cache`, ~2,7 s jen při protokolu), `uloz_protokol_most(model, adr)` (volá `priprav_protokol`) |
 | `blc_posudek/zatizitelnost.py` | `zatizitelnost(d, vys=None, o=None, druhy=None, tol=1e-3)` → `VysledekZatizitelnosti` (`druhy` → `ZatizitelnostDruhu`); `vys_pro_Ve(vys, Ve)`; `klic_posudku(p)`; `_slouc` (volba schématu Vn / Vr po posudcích) |
-| `blc_posudek/__main__.py` | dávka / CLI (`python -m blc_posudek soubor.toml -o slozka [--zatizitelnost]`) |
+| `blc_posudek/__main__.py`, `davka.py` | CLI (`python -m blc_posudek soubor.toml -o slozka [--zatizitelnost]`); `davka.py`: `vypocet_souboru(cesta, vystup, …, bez_protokolu)`, dávka více souborů / složky → `souhrn.csv` (`davka`, `radek_souhrnu`, `-j N` procesy), `jedno_vlakno()` |
 | `blc_posudek/gui.py`, `grafy_most.py` | GUI (`AplikaceMost`, karta 0 „Most a zatížení“), grafy mostu do protokolu |
 | `blc/vnitrni_sily.py` | `vnitrni_sily(...)` → `VysledekSil`; `vys_s_vozidlem(vys, Vn=…)` (jiné zatížení dopravou na stejném MKP), `vys_pro_V(vys, V)` (přeškálování q); `Soucinitele`; `StavSil`; `polohy_q` |
 | `blc/schemata_zatizitelnosti.py` | ČSN 73 6222, kap. 7: zatěžovací pruhy, vozidla Vr (`VOZIDLA_VR`), převod Vn ↔ vn, příčná poloha u užšího chodníku, pravidla volby schémat `Vn_ze_schemat`, `Vr_ze_schemat`, chodci `Q_CHODNIKY` |
@@ -118,6 +118,9 @@ z [mm] **od spodního líce** průřezu.
 ### 3.2 Sekce `[blc]` – model mostu a předání zatížení
 
 Výchozí hodnoty jsou v `blc_posudek/vypocet.py: VYCHOZI_BLC` (chybějící klíč = výchozí).
+Neznámý klíč v `[blc]` nebo `[[blc.liniova]]` (překlep) je chyba `ValueError` s návrhem
+správného názvu (`kontrola_klicu_blc`, volá ji `parametry_blc`); volitelné klíče bez výchozí
+hodnoty jsou v `KLICE_BLC_VOLITELNE`.
 
 | Klíč | Výchozí | Jednotka | Význam |
 |---|---|---|---|
@@ -405,8 +408,18 @@ python -m blc_posudek priklady/most_KA67_12.toml -o vystupy/zat --zatizitelnost 
 Výstup: `protokol.html` (+ `obrazky/`), `vysledky.json` (`posudky` jako slovníky,
 `x`, `faze` s P a σ_p), složka `most/` (`vnitrni_sily.json`, `souhrn.csv`, `<N>_stavy.csv`,
 `zatizeni_PB.toml`, grafy). CSV: oddělovač `;`, desetinná čárka. Návratový kód: 0 = vše
-vyhovuje, 1 = něco nevyhovuje, 2 = chyba vstupu. Pro studii s mnoha běhy je CLI pomalé
-(protokol + grafy ~9 s na běh) – používat Python API.
+vyhovuje, 1 = něco nevyhovuje, 2 = chyba vstupu. Protokol + grafy trvají ~9 s na běh.
+
+Více souborů / složka → `DIR/<soubor>/` a `DIR/souhrn.csv` (η MSÚ, MSP, rozhodující posudky,
+u zatížitelnosti Vn, Vr, Ve, evidence, V_aj; chyba souboru = řádek se sloupcem `chyba`):
+
+```bash
+python -m blc_posudek modely_prefa -o vystupy/prefa --bez-protokolu -j 8
+```
+
+`--bez-protokolu` = bez HTML, grafů a sil mostu; `-j N` = N procesů (12 mostů: 1 proces ~31 s,
+8 procesů ~7 s). Pro jemnou mřížku parametrů (stejný most, jiné posudky) je dál rychlejší
+Python API (most jednou, posudky ~0,35 s).
 
 ### 8.2 Python API – rychlá cesta bez protokolu
 
@@ -446,8 +459,9 @@ potřebuje `PYTHONPATH=.` při spuštění z kořene, nebo na začátku
 `sys.path.insert(0, r"C:\Users\OEM\Desktop\BLCxPosudek")`; relativní cesty (`priklady/…`)
 se vztahují k aktuální složce.
 
-- `spocti(d, vys=None, o=None)` (z `vypocet.py`) dělá totéž + kapitolu BLC, polohy
-  vozidla a obrázky do protokolu (~1,1 s navíc); potřebné jen pro `uloz_protokol_most`.
+- `spocti(d, vys=None, o=None)` (z `vypocet.py`) dělá totéž a uloží `model.blc = {vys, o}`;
+  kapitolu BLC, polohy vozidla, referenční soupravy a obrázky doplní až `priprav_protokol`
+  (volá ji `uloz_protokol_most`, ~3,5 s navíc). Polohy samotné: `polohy_modelu(m)`.
 - Protokol pro vybrané případy: `vys, o, m = spocti(d, vys, o); uloz_protokol_most(m, "vystupy/…")`
   (+ `blc.export_pb.uloz_vysledky(vys, slozka, vystup=vys.popisky[o])` pro síly mostu).
 - Zatížitelnost s již spočteným mostem: `res = zatizitelnost(d, vys=vys, o=o, druhy=["Vn"])`
@@ -460,15 +474,15 @@ se vztahují k aktuální složce.
 ### 8.3 Co se musí přepočítat při změně parametru
 
 Most (BLC) je drahý; posudek levný. Most přepočítat, právě když se změní
-`parametry_blc(d)` – stejný klíč jako v GUI: `repr(sorted(parametry_blc(d).items()))`
-(lze použít pro cache).
+`klic_mkp(parametry_blc(d))` – stejný klíč jako v GUI (bez součinitelů; lze použít pro
+cache). Jiné součinitele: `vys_se_soucinitely(vys, parametry_blc(d)["soucinitele"])`.
 
 | Změna | Přepočet mostu (BLC)? | Pozn. |
 |---|---|---|
 | `[blc]` geometrie, uložení, k_v, šikmost, vybavení, `ex` | **ano** | |
 | `[blc] vozidlo`, chodci, `krok` | jen q (q_ch) | `vys_s_vozidlem(vys, …)` – stejný model MKP |
 | `[blc] Vn` / `Vr` / `Ve` (téhož schématu), `dyn` | ne nutně | `vys_pro_V` (lineární přeškálování q) |
-| `[blc] gamma_Q`, `psi*`, `[posouzeni] gamma_G`, `gamma_G_inf`, `xi` | jen kombinace | MKP se nemění; `vys2 = copy.copy(vys); vys2.soucinitele = Soucinitele(...)` (všechna pole, `blc.vnitrni_sily.Soucinitele`), pak `posudek(d, vys2, o)`; posudek bere γ_G a ξ pro g0 z `d["posouzeni"]` – měnit obojí shodně |
+| `[blc] gamma_Q`, `psi*`, `[posouzeni] gamma_G`, `gamma_G_inf`, `xi` | jen kombinace | MKP se nemění; `vys2 = vys_se_soucinitely(vys, parametry_blc(d2)["soucinitele"])`, pak `posudek(d2, vys2, o)`; posudek bere γ_G a ξ pro g0 z `d["posouzeni"]` – měnit obojí shodně (`parametry_blc(d2)` to zajistí) |
 | `[blc] vystup`, `kriterium`, `rezim`, `t_vneseni`, `t_stale` | ne | jen `posudek(...)` |
 | `[nosnik] L0`, `[beton] trida`/`Ecm`/`objemova_tiha`, `[prurez]` (při `prurez_z_posudku`) | **ano** | sdílené vstupy |
 | `[nosnik] L` (délka nosníku) | ne (most používá L0) | **pozor na geometrii kabelů**, kap. 9 |
@@ -480,20 +494,25 @@ Naměřeno na vzorovém příkladu (10 nosníků, L0 = 11,4 m, Windows):
 
 | Krok | Čas |
 |---|---|
-| model mostu, `ex` = 0,125 m, `krok` 0,25 m | ~1,6 s |
+| model mostu, `ex` = 0,125 m, `krok` 0,25 m | ~0,9 s (1 vlákno BLAS; ~1,3 s se všemi) |
 | model mostu, `ex` = 0,0625 m | ~7 s (V_q +1,2 %, M beze změny) |
 | model mostu, `krok` 0,5 m | ~1,5 s (výsledek beze změny) |
 | posudek (`model_ze_slovniku` + `spocitej`) | ~0,35 s |
-| `spocti` se spočteným mostem | ~1,1 s (poprvé +~2,7 s – referenční soupravy do tabulky protokolu) |
+| `spocti` se spočteným mostem | ~0,36 s (protokolové části až v `priprav_protokol`, ~3,5 s) |
 | stav q schématu Vn (2 pruhy) / Vr na hotovém modelu | ~1 s / ~0,7 s |
 | zatížitelnost Ve (27 výpočtů posudku) | ~13 s |
 | zatížitelnost Vn + Vr + Ve | ~36 s |
 | CLI dávka s protokolem a grafy | ~9 s |
+| CLI 12 mostů `modely_prefa/`, `--bez-protokolu` | ~31 s (1 proces), ~7 s (`-j 8`) |
 
 Čas mostu roste s počtem uzlů (N, L0, B, 1/ex²) a počtem poloh (L0/krok). Matice tuhosti
-se faktorizuje jednou (`splu`), polohy vozidla se řeší dávkově. Pro mnoho běhů použít
-`concurrent.futures.ProcessPoolExecutor` (funkce na úrovni modulu, na Windows
-`if __name__ == "__main__":`), každý úkol vrací malý slovník výsledků (ne celé objekty).
+se faktorizuje jednou (`splu`), polohy vozidla se řeší dávkově. Vícevláknové OpenBLAS
+úlohy MKP zpomaluje (KA67/12: 1,34 s → 0,89 s v 1 vlákně): `python -m blc_posudek` nastaví
+`OMP/OPENBLAS/MKL_NUM_THREADS = 1` (`davka.jedno_vlakno`, jen není-li nastaveno); vlastní skript
+musí proměnné nastavit **před** importem numpy. Pro mnoho běhů použít
+`concurrent.futures.ProcessPoolExecutor` (funkce na úrovni modulu – ne v `__main__.py` balíčku,
+na Windows `if __name__ == "__main__":`, `initializer=jedno_vlakno`), každý úkol vrací malý
+slovník výsledků (ne celé objekty); vzor `blc_posudek/davka.py`.
 
 ---
 
@@ -539,6 +558,11 @@ se faktorizuje jednou (`splu`), polohy vozidla se řeší dávkově. Pro mnoho b
     z vlastní frekvence) platí jen při vynechaném `dyn` – ve studii uvádět `vys.dyn`, `vys.dyn_zdroj`.
 14. **Chodci podle normy**: vynechané `q_chodnik` znamená s Vn, Vr 2,5 kN/m², s Ve 0. Starší
     vstupy s `q_chodnik = 3.0` počítají chodce i s Ve (vzor dříve: Ve 217,4 t místo 218,6 t).
+
+15. **Texty jsou pro čtení, ne pro parsování**: popisy (`vys.popis`, `StavSil.popis`,
+    `vys.vozidlo`, `PolohaVozidla.popis`, `PosudekZat.text`) mají desetinnou čárku
+    (`blc.cisla.cz`); čísla brát z atributů (`vys.V`, `vys.dyn`, `poloha.x` …). Polohy vozidla
+    jsou od osy podpory, x posudku je o (L − L0)/2 větší.
 
 ---
 

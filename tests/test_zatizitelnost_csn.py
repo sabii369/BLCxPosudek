@@ -150,7 +150,7 @@ def test_Vn_polohy_odpovidaji_obalce(vn):
 def test_Vn_linearita_a_prepocet(vn):
     v2 = vys_pro_V(vn, 16.0)
     assert v2.stavy["q"].M_max == approx(0.5 * vn.stavy["q"].M_max)
-    assert v2.stavy["qch"] is vn.stavy["qch"] and v2.vozidlo == "Vn 16.0 t"
+    assert v2.stavy["qch"] is vn.stavy["qch"] and v2.vozidlo == "Vn 16,0 t"
     assert polohy_q(v2, 2)["M"].hodnota == approx(0.5 * polohy_q(vn, 2)["M"].hodnota)
     ve = vys_s_vozidlem(vn, Ve=60.0)
     prima = vnitrni_sily(**NOSNIKY, vybaveni=VYB, Ve=60.0)

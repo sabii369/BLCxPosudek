@@ -32,6 +32,7 @@ zaokrouhlená na celé tuny dolů (čl. 13.2).  Posuzovaný nosník je pro každ
 """
 
 from __future__ import annotations
+from blc.cisla import cz
 import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
@@ -78,14 +79,14 @@ class PosudekZat:
     @property
     def text(self) -> str:
         if self.stav == "V":
-            return f"{self.V:.1f}"
+            return f"{cz(self.V, 1)}"
         if self.stav == "bez_vozidla":
             return "0 (" + STAVY_TEXT[self.stav] + ")"
         return STAVY_TEXT[self.stav]
 
     @property
     def kratky(self) -> str:
-        return f"{self.V:.1f}" if self.stav == "V" else KRATKE[self.stav]
+        return f"{cz(self.V, 1)}" if self.stav == "V" else KRATKE[self.stav]
 
 
 @dataclass
@@ -182,7 +183,7 @@ class ZatizitelnostDruhu:
 
     @property
     def text(self) -> str:
-        return f"{self.druh} > {self.V_max:.0f} t" if self.V is None else f"{self.druh} = {self.V:.1f} t"
+        return f"{self.druh} > {self.V_max:.0f} t" if self.V is None else f"{self.druh} = {cz(self.V, 1)} t"
 
 
 @dataclass
@@ -293,7 +294,7 @@ def _hledej(d: dict, vys: VysledekSil, o: int, schema: str, tol: float, max_kol:
             m.spocitej()
             body[V] = {klic_posudku(p): float(p.vyuziti) for p in m.protokol.posudky}
             if prubeh:
-                prubeh(f"Zatížitelnost {nazev}: výpočet {len(body)} ({nazev} = {V:.1f} t)")
+                prubeh(f"Zatížitelnost {nazev}: výpočet {len(body)} ({nazev} = {cz(V, 1)} t)")
         return body[V]
 
     e0, er = eta(0.0), eta(Vr)
@@ -466,13 +467,11 @@ def protokol_druhu(res: VysledekZatizitelnosti, druh: str = "souhrn", prubeh=Non
         return res.modely[druh]
     z = res.druhy[druh]
     if prubeh:
-        prubeh(f"Zatížitelnost: posudek při {druh} = {z.vys_V().V:.1f} t (protokol {druh})")
+        prubeh(f"Zatížitelnost: posudek při {druh} = {cz(z.vys_V().V, 1)} t (protokol {druh})")
     vk, o, model = spocti(res.d, z.vys_V(), z.o)
     pohled = VysledekZatizitelnosti({druh: z}, druh, vk, o, model, list(z.poznamky), d=res.d,
                                     celek=res, jen_druh=True)
-    model.zatizitelnost = pohled
-    kapitola_zatizitelnost(model, pohled)
-    dopln_kapitolu_blc(model, pohled)
+    model.zatizitelnost = pohled            # kapitoly doplní vypocet.priprav_protokol
     res.modely[druh] = model
     return model
 
@@ -540,14 +539,12 @@ def zatizitelnost(d: dict, vys: Optional[VysledekSil] = None, o: Optional[int] =
     # ---- posudek při zatížitelnosti hlavního druhu (souhrnný protokol, grafy) --
     h = res.hlavni
     if prubeh:
-        prubeh(f"Zatížitelnost: posudek při {h.druh} = {h.vys_V().V:.1f} t")
+        prubeh(f"Zatížitelnost: posudek při {h.druh} = {cz(h.vys_V().V, 1)} t")
     vk, o_p, model = spocti(d, h.vys_V(), h.o)
     res.vys, res.o, res.model = vk, o_p, model
     res.modely["souhrn"] = model
     res.poznamky = list(dict.fromkeys(t for z in res.druhy.values() for t in z.poznamky))
-    model.zatizitelnost = res
-    kapitola_zatizitelnost(model, res)
-    dopln_kapitolu_blc(model, res)
+    model.zatizitelnost = res               # kapitoly doplní vypocet.priprav_protokol
     return res
 
 
@@ -565,7 +562,7 @@ def dopln_kapitolu_blc(model, res: VysledekZatizitelnosti) -> None:
     if kap is None:
         return
     vyst = "pás" if res.vys.deska else "nosník"
-    ref = ", ".join(f"{d} = {z.V_ref:g} t" for d, z in res.druhy.items())
+    ref = ", ".join(f"{d} = {cz(z.V_ref)} t" for d, z in res.druhy.items())
     nove = [("text", f"Referenční soupravy zatížitelnosti ({ref}) – schémata zatížení: půdorys "
                      "v poloze pro max M ve středu rozpětí a max V u podpory a příčný řez s příčnou "
                      "polohou zatížení. Obálky vnitřních sil od referenčních souprav (vč. δ) jsou "
@@ -575,11 +572,11 @@ def dopln_kapitolu_blc(model, res: VysledekZatizitelnosti) -> None:
         v = z.vys_ref()
         sch = POPIS_SCHEMAT[v.schema_q or ""].split(" (")[0]
         nove += [("obrazek", Obrazek(f"blc_zat_{druh}",
-                                     f"Referenční {druh} = {v.V:g} t ({sch}) – zatížení na mostě "
+                                     f"Referenční {druh} = {cz(v.V)} t ({sch}) – zatížení na mostě "
                                      "v poloze pro max M ve středu rozpětí a max V u podpory, "
                                      f"posuzovaný {vyst} {v.popisky[z.o]}")),
                  ("obrazek", Obrazek(f"blc_pricny_{druh}",
-                                     f"Referenční {druh} = {v.V:g} t – příčná poloha zatížení "
+                                     f"Referenční {druh} = {cz(v.V)} t – příčná poloha zatížení "
                                      f"dopravou, {v.poloha_q}; kóty [m]"))]
     i = None
     for j in range(len(kap.polozky) - 1, -1, -1):        # poslední obrázek zatížení q
@@ -655,7 +652,7 @@ def kapitola_zatizitelnost(model, res: VysledekZatizitelnosti) -> None:
             ms, naz, faze, komb = p.klic
             rows.append([ms, naz, faze, komb or "–", p.text,
                          POPIS_SCHEMAT[p.schema].split(" (")[0] if p.stav == "V" else "–",
-                         f"{p.eta_ref * 100:.1f} %", f"{p.eta_0 * 100:.1f} %"])
+                         f"{cz(p.eta_ref * 100, 1)} %", f"{cz(p.eta_0 * 100, 1)} %"])
         K.tabulka(["MS", "Posudek", "Fáze", "Kombinace", f"{druh} [t]", "Schéma",
                    f"η při {druh} = {fmt(z.V_ref)} t", "η bez vozidla"], rows,
                   f"Zatížitelnost {druh} po mezních stavech (seřazeno)")

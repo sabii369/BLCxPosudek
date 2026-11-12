@@ -366,6 +366,21 @@ Spuštění: `spustit_posudek.bat` (dvojklik, nebo přetažení souboru .toml), 
 (dávkově – vytvoří `protokol.html`, `vysledky.json` posudku a ve složce `most/` vnitřní síly
 mostu a grafy).
 
+Více souborů najednou: `python -m blc_posudek a.toml b.toml … -o vystup` nebo celá složka
+`python -m blc_posudek modely_prefa -o vystup` (všechny `*.toml`, `*.json`). Výstup každého
+souboru je v `vystup/<soubor>/`, přehled všech v `vystup/souhrn.csv` (pro Excel: oddělovač `;`,
+desetinná čárka) – nosník, vozidlo, nejvyšší η MSÚ a MSP s rozhodujícím posudkem, počet
+nevyhovujících posudků a upozornění, u zatížitelnosti Vn, Vr, Ve, evidence a V_aj; chyba
+jednoho souboru dávku nezastaví (sloupec *chyba*). Volby:
+
+- `--bez-protokolu` – jen výpočet a výpis / souhrn, bez HTML protokolu, grafů a vnitřních sil
+  mostu (most + posudek ~1–6 s na soubor místo ~10 s s protokolem),
+- `-j N` – N souběžných procesů (12 mostů z `modely_prefa/` bez protokolu: 1 proces ~31 s,
+  4 procesy ~10 s, 8 procesů ~7 s).
+
+Program počítá s numpy / OpenBLAS v jednom vlákně (malé úlohy MKP jsou tak rychlejší); jiné
+nastavení lze vynutit proměnnou prostředí `OPENBLAS_NUM_THREADS`.
+
 ### 8.1 Postup
 
 1. **Karta 0 – Most a zatížení (BLC):** rozpětí L0, délka L, beton (stejná pole jako na
@@ -388,8 +403,11 @@ mostu a grafy).
    (7.3.4): bez trhlin při σ_ct ≤ f_ctm, jinak průřez s trhlinou; s_r,max podle (7.11) jen se
    zadaným Ø betonářské výztuže (karta 4, sloupec Ø), jinak 1,3·(h − x). Prázdné = bez kategorie.
 4. **F5** – spočítá model mostu (jen pokud se změnily jeho vstupy) a posudek; tlačítko
-   *Vnitřní síly mostu* na kartě 0 spočítá jen most (tabulka nosníků, grafy).
-5. *HTML protokol* – protokol posudku s kapitolou „Zatížení z modelu mostu (BLC)“.
+   *Vnitřní síly mostu* na kartě 0 spočítá jen most (tabulka nosníků, grafy). Změna dílčích
+   součinitelů γ, ψ, ξ (karta 5) model mostu nepřepočítává – jen se znovu složí kombinace.
+5. *HTML protokol* – protokol posudku s kapitolou „Zatížení z modelu mostu (BLC)“. Části jen
+   pro protokol (polohy vozidla, referenční soupravy Vn, Vr, Ve, obrázky) se počítají až
+   při jeho vytvoření, F5 je proto rychlejší.
 
 ### 8.2 Převzetí zatížení
 
@@ -401,7 +419,7 @@ mostu a grafy).
   z karty 5, sekce Dílčí součinitele zatížení (výchozí ψ0 = ψ1 = 0,75 podle ČSN 73 6222, čl. 10;
   pro MLC ověřit); kombinace MSÚ (6.10a/b nebo 6.10) z karty 6.
 - Změní-li se vstup ovlivňující model mostu (i průřez nebo rozpětí), karta 0 a 5 to
-  hlásí a F5 most přepočítá.
+  hlásí a F5 most přepočítá; samotné součinitele γ, ψ, ξ přepočet mostu nevyžadují.
 
 ### 8.3 Grafy zatížení mostu a napětí v řezech (protokol, karta 7)
 
@@ -571,6 +589,8 @@ a průhyb se počítají s lineárním dotvarováním (nelineární jen od před
 
 ### 8.9 Soubor
 
-Vstup Posudku PB rozšířený o sekci `[blc]` (popis klíčů v `blc_posudek/vypocet.py`).
+Vstup Posudku PB rozšířený o sekci `[blc]` (popis klíčů v `blc_posudek/vypocet.py`). Neznámý
+klíč v `[blc]` (překlep) výpočet zastaví s chybou a návrhem správného názvu – jinak by se tiše
+použila výchozí hodnota.
 Uložený soubor obsahuje i sekci `[zatizeni]` z posledního výpočtu mostu, takže jde otevřít
 i v samostatném Posudku PB.

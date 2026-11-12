@@ -35,6 +35,7 @@ Sekce [blc]:
 """
 
 from __future__ import annotations
+from blc.cisla import cz
 import copy
 import tomllib
 from dataclasses import fields
@@ -64,6 +65,28 @@ VYCHOZI_BLC = {
     "zatizitelnost": False, "zatizitelnost_druhy": "vse",
     "protokol_zatizitelnosti": "souhrn",
 }
+
+
+#: klíče [blc] bez výchozí hodnoty (volitelné)
+KLICE_BLC_VOLITELNE = {"h", "A_nosniku", "Iy", "b_s", "Iy_s", "beton_s", "k_rot", "liniova", "dist",
+                       "y_vozidla", "t_vneseni", "t_stale"}
+#: klíče položek [[blc.liniova]]
+KLICE_LINIOVA = {"nazev", "g", "y", "sirka"}
+
+
+def kontrola_klicu_blc(b: dict) -> None:
+    """Neznámý klíč v [blc] (překlep) je chyba – jinak by se tiše použila výchozí hodnota."""
+    import difflib
+    zname = set(VYCHOZI_BLC) | KLICE_BLC_VOLITELNE
+
+    def chyba(k, mozne, kde):
+        tip = difflib.get_close_matches(k, sorted(mozne), n=1)
+        return f"Neznámý klíč '{k}' v {kde}" + (f" – myšleno '{tip[0]}'?" if tip else ".")
+    chyby = [chyba(k, zname, "[blc]") for k in b if k not in zname]
+    for i, l in enumerate(b.get("liniova") or []):
+        chyby += [chyba(k, KLICE_LINIOVA, f"[[blc.liniova]] č. {i + 1}") for k in l if k not in KLICE_LINIOVA]
+    if chyby:
+        raise ValueError(" ".join(chyby))
 
 
 def nacti(cesta: str) -> dict:
@@ -96,6 +119,7 @@ def _f(v) -> Optional[float]:
 
 def parametry_blc(d: dict) -> dict:
     """Argumenty funkce blc.vnitrni_sily ze spojených vstupních dat."""
+    kontrola_klicu_blc(d.get("blc", {}))
     b = {**VYCHOZI_BLC, **d.get("blc", {})}
     n = d.get("nosnik", {})
     if "L" not in n:
@@ -160,6 +184,22 @@ def parametry_blc(d: dict) -> dict:
                                     gamma_Qch=float(b["gamma_Qch"]), psi0_ch=float(b["psi0_ch"]),
                                     psi1_ch=float(b["psi1_ch"]), psi2_ch=float(b["psi2_ch"]))
     return kw
+
+
+def vys_se_soucinitely(vys: VysledekSil, soucinitele: Soucinitele) -> VysledekSil:
+    """Výsledek mostu s jinými součiniteli γ, ψ, ξ – MKP a stavy se nepřepočítávají (kombinace
+    se skládají až při použití); sdílí model, stavy i vys.cache."""
+    if vys.soucinitele == soucinitele:
+        return vys
+    out = copy.copy(vys)
+    out.soucinitele = soucinitele
+    return out
+
+
+def klic_mkp(kw: dict) -> str:
+    """Klíč vstupů výpočtu mostu (parametry_blc) bez součinitelů – shodný klíč = stejný model
+    MKP a stavy, jiné součinitele stačí dosadit vys_se_soucinitely."""
+    return repr(sorted((k, v) for k, v in kw.items() if k != "soucinitele"))
 
 
 def vyber_nosnik(vys: VysledekSil, d: dict) -> int:
@@ -240,10 +280,14 @@ def kapitola_blc(model, vys: VysledekSil, o: int) -> None:
                "středu rozpětí a s největší posouvající silou u podpory (polohy z výpočtu obálky; "
                "u schématu Vn nápravy v pruzích a rovnoměrné zatížení – světle – v nepříznivých "
                "částech plochy vlivu).")
-        for p in b["polohy"].values():
+        dx = (float(model.L) - float(model.L0)) / 2
+        K.text("Polohy vozidla jsou vztaženy k ose podpory (ložiska), řezy posudku k čelu nosníku: "
+               f"x posudku = x od osy podpory + (L − L0)/2 = x + {fmt(dx)} m.")
+        pol = polohy_modelu(model)
+        for p in pol.values():
             K.text(p.popis + ".")
         for k, nazev in GRAFY_ZATIZENI.items():
-            if k not in GRAFY_Q or b["polohy"]:
+            if k not in GRAFY_Q or pol:
                 K.obrazek(k, nazev)
     # součinitele
     s = vys.soucinitele
@@ -278,8 +322,8 @@ def kapitola_blc(model, vys: VysledekSil, o: int) -> None:
                     [fmt(dd["M_" + k]) for k in stavy] + [fmt(float(t.M_max.max())) for t in tq] +
                     [fmt(dd["V_" + k]) for k in stavy] + [fmt(float(t.V_abs.max())) for t in tq])
     kr = {"g0": "g0", "g-g0": "g − g0", "qch": "chodci"}
-    nq = [f"{d} {V:g} t" for d, V in REFERENCNI_SOUPRAVY.items()]
-    sch = ", ".join(f"{d} {r.V:g} t – {POPIS_SCHEMAT[r.schema_q or '']}"
+    nq = [f"{d} {cz(V)} t" for d, V in REFERENCNI_SOUPRAVY.items()]
+    sch = ", ".join(f"{d} {cz(r.V)} t – {POPIS_SCHEMAT[r.schema_q or '']}"
                     for d, r in ref.items() if d != "Ve")
     K.tabulka([vyst.capitalize(), "y [m]"] + [f"max M {kr[k]} [{jm}]" for k in stavy] +
               [f"max M {n} [{jm}]" for n in nq] + [f"max |V| {kr[k]} [{jv}]" for k in stavy] +
@@ -306,18 +350,44 @@ def kapitola_blc(model, vys: VysledekSil, o: int) -> None:
 
 
 def spocti(d: dict, vys: Optional[VysledekSil] = None, o: Optional[int] = None):
-    """Celý výpočet: BLC (není-li dodán vys) → posudek PB.  Vrací (vys, o, model)."""
+    """Celý výpočet: BLC (není-li dodán vys) → posudek PB.  Vrací (vys, o, model).
+    Části jen pro protokol (polohy vozidla, referenční soupravy, kapitoly BLC a zatížitelnosti,
+    obrázky v kapitolách) se připraví až v priprav_protokol – volá ji uloz_protokol_most."""
     from pb_posudek.vstup import model_ze_slovniku
     if vys is None:
         vys = vnitrni_sily(**parametry_blc(d))
     o = vyber_nosnik(vys, d) if o is None else o
     model = model_ze_slovniku(data_pro_posudek(vys, d, o))
     model.spocitej()
-    model.blc = dict(vys=vys, o=o, polohy=polohy_q(vys, o))
-    kapitola_blc(model, vys, o)
-    from .grafy_most import vloz_do_protokolu
-    vloz_do_protokolu(model)
+    model.blc = dict(vys=vys, o=o)
     return vys, o, model
+
+
+def polohy_modelu(model) -> dict:
+    """Rozhodující polohy vozidla (max M ve středu, max V v řezu d) posuzovaného nosníku –
+    spočtou se při prvním použití (~0,8 s) a uloží do model.blc["polohy"]."""
+    b = model.blc
+    if "polohy" not in b:
+        b["polohy"] = polohy_q(b["vys"], b["o"])
+    return b["polohy"]
+
+
+def priprav_protokol(model) -> None:
+    """Doplní do protokolu posudku kapitolu BLC (referenční soupravy, polohy vozidla),
+    obrázky napětí v řezech a u zatížitelnosti její kapitolu (model.zatizitelnost).
+    Provede se jen jednou; volá ji uloz_protokol_most."""
+    b = getattr(model, "blc", None)
+    if not b or b.get("protokol_pripraven"):
+        return
+    from .grafy_most import vloz_do_protokolu
+    kapitola_blc(model, b["vys"], b["o"])
+    vloz_do_protokolu(model)
+    res = getattr(model, "zatizitelnost", None)
+    if res is not None:
+        from .zatizitelnost import kapitola_zatizitelnost, dopln_kapitolu_blc
+        kapitola_zatizitelnost(model, res)
+        dopln_kapitolu_blc(model, res)
+    b["protokol_pripraven"] = True
 
 
 def uloz_protokol_most(model, adresar="vystup", embed: bool = True):
@@ -332,6 +402,7 @@ def uloz_protokol_most(model, adresar="vystup", embed: bool = True):
     adr_obr = adr / "obrazky"
     if not model.protokol.posudky:
         model.spocitej()
+    priprav_protokol(model)
     obr = vykresli_vse(model, adr_obr)
     if getattr(model, "blc", None):
         obr.update(vykresli_most(model, adr_obr))
@@ -341,7 +412,7 @@ def uloz_protokol_most(model, adresar="vystup", embed: bool = True):
         projekt=model.projekt,
         posudky=[v.as_dict() for v in model.protokol.posudky],
         x=model.x.tolist(),
-        faze=[dict(nazev=f.nazev, t=f.t, P_kN=(-model._sily_predpeti(f.sigma)[0]).tolist(),
+        faze=[dict(nazev=f.nazev, t=f.t, P_kN=(-model._sily_predpeti(f.sigma, f.k_Ap)[0]).tolist(),
                    sigma_p=[s.tolist() for s in f.sigma]) for f in model.faze],
     )
     (adr / "vysledky.json").write_text(json.dumps(vys, ensure_ascii=False, indent=1, default=float),

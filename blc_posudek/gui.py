@@ -18,6 +18,7 @@ z nastavení posouzení.  F5 spočítá most (je-li třeba) i posudek.
 """
 
 from __future__ import annotations
+from blc.cisla import cz
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
@@ -30,8 +31,8 @@ from blc.vnitrni_sily import vnitrni_sily, VysledekSil
 from pb_posudek import gui as pbgui
 from pb_posudek.gui import Aplikace, Formular, Graf, Tabulka, TRIDY_BETONU
 
-from .vypocet import (VYCHOZI_BLC, parametry_blc, spocti, vyber_nosnik, vlastnosti_prurezu,
-                      zatizeni_z_blc)
+from .vypocet import (VYCHOZI_BLC, klic_mkp, parametry_blc, spocti, vyber_nosnik,
+                      vlastnosti_prurezu, vys_se_soucinitely, zatizeni_z_blc)
 
 KOREN = Path(__file__).resolve().parents[1]
 PRIKLAD_MOST = KOREN / "priklady" / "most_KA67_12.toml"
@@ -379,16 +380,22 @@ class AplikaceMost(Aplikace):
 
     @staticmethod
     def _klic(kw: dict) -> str:
-        return repr(sorted(kw.items()))
+        return klic_mkp(kw)          # bez součinitelů – ty MKP nemění
+
+    def _vys_pro(self, kw: dict, klic: str) -> VysledekSil | None:
+        """Spočtený most pro vstupy kw; jiné γ, ψ, ξ se jen dosadí (MKP se nepřepočítává)."""
+        if self._blc_vys is None or klic != self._blc_klic:
+            return None
+        self._blc_vys = vys_se_soucinitely(self._blc_vys, kw["soucinitele"])
+        return self._blc_vys
 
     def _aktualni_blc(self, d: dict) -> VysledekSil | None:
-        """Spočtený most, odpovídá-li aktuálním vstupům, jinak None."""
-        if self._blc_vys is None:
-            return None
+        """Spočtený most, odpovídá-li aktuálním vstupům (až na součinitele), jinak None."""
         try:
-            return self._blc_vys if self._klic(parametry_blc(d)) == self._blc_klic else None
+            kw = parametry_blc(d)
         except Exception:  # noqa: BLE001
             return None
+        return self._vys_pro(kw, self._klic(kw))
 
     # =====================================================================
     # Výpočet
@@ -418,7 +425,7 @@ class AplikaceMost(Aplikace):
         except Exception as e:  # noqa: BLE001
             messagebox.showerror("Neplatná vstupní data", str(e))
             return
-        vys0 = self._blc_vys if klic == self._blc_klic else None
+        vys0 = self._vys_pro(kw, klic)
         zat = bool(d["blc"].get("zatizitelnost"))
         if zat and d["blc"].get("vozidlo", "Ve") not in ("Vn", "Vr", "Ve"):
             messagebox.showerror("Zatížitelnost", "Výpočet zatížitelnosti je pro vozidla ČSN 73 6222 – "
@@ -522,7 +529,7 @@ class AplikaceMost(Aplikace):
             casti = []
             for d, z in res.druhy.items():
                 mm = z.minimum(ms)
-                casti.append(f"{d} > {z.V_max:.0f}" if mm is None else f"{d} {mm.V:.1f}")
+                casti.append(f"{d} > {z.V_max:.0f}" if mm is None else f"{d} {cz(mm.V, 1)}")
             v.configure(text=" · ".join(casti) + " t", foreground="#1a1a1a",
                         font=("Segoe UI", 20 if len(druhy) == 1 else 13, "bold"))
             mm = res.minimum(ms)
@@ -531,20 +538,20 @@ class AplikaceMost(Aplikace):
         v, det = self.karty["Celkem"]
         v.master.configure(text="Zatížitelnost (ČSN 73 6222)")
         nok = len(res.nevyhovuji_nezavisle)
-        txt = " · ".join(f"{d} {z.V:.1f}" if z.V is not None else f"{d} > {z.V_max:.0f}"
+        txt = " · ".join(f"{d} {cz(z.V, 1)}" if z.V is not None else f"{d} > {z.V_max:.0f}"
                          for d, z in res.druhy.items()) + " t"
         v.configure(text=txt, foreground="#0a7d0a" if not nok else "#8a5a00",
                     font=("Segoe UI", 20 if len(druhy) == 1 else 13, "bold"))
         upoz = model.protokol.upozorneni
         Vaj = res.Vaj
         det.configure(text=(f"{res.n_vypoctu} výpočtů posudku" +
-                            (f"; V_aj = {Vaj:.1f} t" if Vaj is not None else "") +
+                            (f"; V_aj = {cz(Vaj, 1)} t" if Vaj is not None else "") +
                             (f"; {nok} posudků nevyhovuje nezávisle na zatížení" if nok else "") +
                             (f"; upozornění {len(upoz)}" if upoz else "")))
         self.lbl_souhrn.configure(text="Zatížitelnost " + txt,
                                   foreground="#0a7d0a" if not nok else "#8a5a00")
         self.stav.set(f"Zatížitelnost: {txt}; protokol a grafy pro {res.druh} = "
-                      f"{res.vys.V:.1f} t" + (f"; upozornění {len(upoz)} (karta Výsledky)." if upoz
+                      f"{cz(res.vys.V, 1)} t" + (f"; upozornění {len(upoz)} (karta Výsledky)." if upoz
                                               else "."))
 
     def protokol(self):
@@ -602,7 +609,7 @@ class AplikaceMost(Aplikace):
                     and d["blc"].get("typ_konstrukce", "nosniky") == "nosniky":
                 A, Iy = vlastnosti_prurezu(d)
                 self.lbl_prurez_blc.configure(
-                    text=f"Z průřezu posudku: A = {A:.4f} m², Iy = {Iy:.5f} m⁴, "
+                    text=f"Z průřezu posudku: A = {cz(A, 4)} m², Iy = {cz(Iy, 5)} m⁴, "
                          f"g0 = {A * float(d.get('beton', {}).get('objemova_tiha', 25.0)):.2f} kN/m")
             else:
                 self.lbl_prurez_blc.configure(text="")
@@ -625,29 +632,29 @@ class AplikaceMost(Aplikace):
         o = vyber_nosnik(vys, d)
         pop = vys.popisky[o]
         txt = (f"✔ {vys.popis}\nVozidlo: {vys.vozidlo}, {vys.poloha_q}; chodci "
-               f"{vys.q_ch:g} kN/m²; posuzovaný {'pás' if vys.deska else 'nosník'}: {pop}")
+               f"{cz(vys.q_ch)} kN/m²; posuzovaný {'pás' if vys.deska else 'nosník'}: {pop}")
         if vys.varovani:
             txt += "\n! " + "\n! ".join(vys.varovani)
         self.lbl_blc.configure(text=txt, foreground="#0a7d0a")
         self.f_pred.widgety["vystup"].configure(values=["auto"] + vys.popisky)
         zat = d["zatizeni"]
         self.lbl_zat.configure(
-            text=(f"Posuzovaný {'pás' if vys.deska else 'nosník'} {pop} (y = {float(vys.vyst.y[o]):.2f} m), "
-                  f"vozidlo {vys.vozidlo}, δ = {vys.dyn:.3g} ({vys.dyn_zdroj}); chodci "
-                  f"{vys.q_ch:g} kN/m²" + (f" ({vys.q_ch_zdroj})" if vys.q_ch_zdroj else "") + "; "
+            text=(f"Posuzovaný {'pás' if vys.deska else 'nosník'} {pop} (y = {cz(float(vys.vyst.y[o]), 2)} m), "
+                  f"vozidlo {vys.vozidlo}, δ = {cz(vys.dyn, 3, g=True)} ({vys.dyn_zdroj}); chodci "
+                  f"{cz(vys.q_ch)} kN/m²" + (f" ({vys.q_ch_zdroj})" if vys.q_ch_zdroj else "") + "; "
                   f"předání: {zat.get('zpusob')}. "
-                  f"Vlastní tíhu nosníku g0 počítá posudek z průřezu (model mostu: g0 = {vys.g0:.2f} "
+                  f"Vlastní tíhu nosníku g0 počítá posudek z průřezu (model mostu: g0 = {cz(vys.g0, 2)} "
                   f"{'kN/m²' if vys.deska else 'kN/m'})" +
-                  (f"; dobetonávka {vys.g_dobetonavky:.2f} kN/m (½ na sousední nosníky) se předává "
+                  (f"; dobetonávka {cz(vys.g_dobetonavky, 2)} kN/m (½ na sousední nosníky) se předává "
                    "se stálým g − g0" if vys.g_dobetonavky else "") + "."), foreground="#0a7d0a")
         if jen_stav and self.t_blc.get_children():
             self._oznac_posuzovany(o)
         else:
             self.t_blc.delete(*self.t_blc.get_children())
             for i, s in enumerate(vys.souhrn()):
-                g = lambda k: f"{s.get(k, 0.0):.1f}"  # noqa: E731
+                g = lambda k: f"{cz(s.get(k, 0.0), 1)}"  # noqa: E731
                 self.t_blc.insert("", "end", iid=str(i), values=(
-                    s["vystup"], f"{s['y']:.2f}", g("M_g0"), g("M_g-g0"), g("M_qch"), g("M_q"),
+                    s["vystup"], f"{cz(s['y'], 2)}", g("M_g0"), g("M_g-g0"), g("M_qch"), g("M_q"),
                     g("V_g0"), g("V_g-g0"), g("V_qch"), g("V_q"), g("M_Ed"), g("V_Ed")))
             self._oznac_posuzovany(o)
             self.t_blc.selection_set(str(o))

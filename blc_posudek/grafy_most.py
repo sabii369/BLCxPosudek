@@ -22,6 +22,7 @@ Kapitola napětí v betonu (pod graf „Napětí v krajních vláknech po délce
 """
 
 from __future__ import annotations
+from blc.cisla import cz
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -44,9 +45,9 @@ GRAF_SILY = ("blc_sily", "Vnitřní síly na nosnících od jednotlivých zatě�
 def rezy_posudku(m) -> dict:
     """{"stred": (index řezu posudku, x lokální), "podpora": (…)}; x lokální od osy ložiska,
     podpora = řez posudku nejbližší vzdálenosti d (rozhodující řez V v modelu mostu)."""
+    from blc.vnitrni_sily import x_uzlu
     b = getattr(m, "blc", None) or {}
-    pol = b.get("polohy", {})
-    x_V = pol["V"].x if "V" in pol else (b["vys"].K.d if "vys" in b else 0.0)
+    x_V = x_uzlu(b["vys"], b["o"], b["vys"].K.d) if "vys" in b else 0.0   # řez V jako v polohy_q
     iV = int(np.argmin(np.abs(m.x - (m.xa + x_V))))
     if iV == m.ia and len(m.x) > m.ia + 1:
         iV = m.ia + 1                               # ne přímo v ose ložiska
@@ -68,7 +69,9 @@ def graf_zatizeni(m, klic: str):
     b = getattr(m, "blc", None)
     if not b:
         return None
-    vys, o, pol = b["vys"], b["o"], b["polohy"]
+    from .vypocet import polohy_modelu
+    vys, o = b["vys"], b["o"]
+    pol = polohy_modelu(m) if klic == "blc_zat_q" else {}
     if klic == "blc_zat_pricny":
         return plot_pricny_rez(vys, o, show=False) if "q" in vys.stavy else None
     rz = rezy_posudku(m)
@@ -124,13 +127,13 @@ def graf_sil(m):
     if s_ch:
         v = next(iter(s_ch.values()))
         bez = [d for d in res.druhy if d not in s_ch]
-        nazev = (f"zatížení chodců q_ch = {v.q_ch:g} kN/m² (s {', '.join(s_ch)}"
+        nazev = (f"zatížení chodců q_ch = {cz(v.q_ch)} kN/m² (s {', '.join(s_ch)}"
                  + (f"; s {', '.join(bez)} chodci nejsou" if bez else "") + ")")
         vys.stavy[nazev] = v.stavy["qch"]
     for druh, z in res.druhy.items():
         v = z.vys_ref()
         sch = POPIS_SCHEMAT[v.schema_q or ""].split(" (")[0].split(" v pruzích")[0]
-        nazev = f"{druh} = {v.V:g} t ({sch}, bez δ), posuzovaný {v.popisky[z.o]}"
+        nazev = f"{druh} = {cz(v.V)} t ({sch}, bez δ), posuzovaný {v.popisky[z.o]}"
         vys.stavy[nazev] = q_bez_dyn(v)
         o_stavu[nazev] = z.o
     return plot_stavy_pudorys(vys, b["o"], list(vys.stavy), show=False, o_stavu=o_stavu)
@@ -191,7 +194,7 @@ def graf_napeti_rezu(m, idx: int):
             vmin = min(float(a[j]) for a, _ in krajni)
             vmax = max(float(b_[j]) for _, b_ in krajni)
             for v, ha, dx in ((vmin, "right", -3), (vmax, "left", 3)):
-                ax.annotate(f"{v:.2f}", (v, zz), xytext=(dx, dy), textcoords="offset points",
+                ax.annotate(f"{cz(v, 2)}", (v, zz), xytext=(dx, dy), textcoords="offset points",
                             fontsize=8, ha=ha, va=va, color=grafy.INK)
                 ax.plot([v], [zz], "o", color=grafy.INK, ms=3)
         ax.axvline(-k_tl * fck, color=grafy.BAD, ls="--", lw=1.2)
@@ -205,7 +208,7 @@ def graf_napeti_rezu(m, idx: int):
         ax.text(ft, z[-1] * 0.5, " mez tahu", rotation=90, va="center", fontsize=8, color=grafy.BAD)
         ax.axvline(0, color=grafy.INK2, lw=0.8)
         ax.set_ylim(0, z[-1])
-        ax.set(title=f"{nazev} – x = {m.x[i]:.2f} m", xlabel="σ_c [MPa] (tah +, tlak −)")
+        ax.set(title=f"{nazev} – x = {cz(m.x[i], 2)} m", xlabel="σ_c [MPa] (tah +, tlak −)")
     axs[0].set_ylabel("z [mm] (od spodního okraje)")
     axs[0].legend(fontsize=8, loc="lower left")
     fig.suptitle(f"Napětí v řezech – {f.nazev} (t = {f.t:.0f} d), obálka P_sup/P_inf", fontsize=10,
@@ -272,12 +275,18 @@ def fn_zatizitelnost(druh: str, typ: str):
     return fn
 
 
+def ma_q(m) -> bool:
+    """Má posuzovaný most pohyblivé zatížení q s polohami (bez výpočtu poloh)."""
+    v = m.blc["vys"]
+    return "q" in v.stavy and v.q_nastaveni is not None and v.model is not None
+
+
 def seznam_grafu(m) -> dict:
     """{název grafu v GUI: fn} – zatížení mostu a napětí v řezech všech fází."""
     out = {}
     if getattr(m, "blc", None):
         for k, nazev in GRAFY_ZATIZENI.items():
-            if k not in GRAFY_Q or m.blc["polohy"]:
+            if k not in GRAFY_Q or ma_q(m):
                 out[nazev.replace("Zatížení na mostě – ", "Zatížení mostu – ")] = FUNKCE_ZATIZENI[k]
         out["Zatížení mostu – vnitřní síly na nosnících"] = fn_sily
     for druh in druhy_zatizitelnosti(m):

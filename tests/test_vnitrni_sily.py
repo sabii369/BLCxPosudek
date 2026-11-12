@@ -228,7 +228,7 @@ def test_q_dynamicky_soucinitel():
     a = vnitrni_sily(**NOSNIKY, Ve=60.0, krok=0.5, tisk=False)
     b = vnitrni_sily(**NOSNIKY, Ve=60.0, krok=0.5, dyn=1.2, tisk=False)
     c = vnitrni_sily(**NOSNIKY, Ve=60.0, krok=0.5, dyn=1.0, tisk=False)
-    assert a.dyn == 1.05 and "čl. 8.4" in a.dyn_zdroj and "δ = 1.05" in a.stavy["q"].popis
+    assert a.dyn == 1.05 and "čl. 8.4" in a.dyn_zdroj and "δ = 1,05" in a.stavy["q"].popis
     assert b.dyn == 1.2 and b.dyn_zdroj == "zadáno"
     M = {k: v.tabulka(2, "q").M_max.max() for k, v in (("a", a), ("b", b), ("c", c))}
     assert M["a"] == approx(1.05 * M["c"]) and M["b"] == approx(1.2 * M["c"])

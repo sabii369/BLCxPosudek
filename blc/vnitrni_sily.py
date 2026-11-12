@@ -38,6 +38,7 @@ Jednotky: kN, m (deska: hodnoty na pás 1 m → kNm/m, kN/m).
 """
 
 from __future__ import annotations
+from .cisla import cz
 import copy
 import math
 from dataclasses import dataclass, field
@@ -486,8 +487,8 @@ def _chodniky(model, vyst: Vystupy, K: Konstrukce, vyb: Vybaveni, q: float,
     useky = [u for y0, y1 in _pasy_chodniku(K, vyb) for u in _useky_pasu(K, y0, y1, q, krok)]
     acc = _soucty_useku(model, vyst, useky, davka)
     dx = K.Ltot / max(1, int(math.ceil(K.Ltot / krok - 1e-9)))
-    popis = (f"chodníky {vyb.chodnik_L:g} + {vyb.chodnik_P:g} m, q = {q:g} kN/m² v nepříznivých "
-             f"částech plochy vlivu (úseky {dx:.2f} m), δ = {DELTA_CHODNIKY:g} ({NORMA}, čl. 8.5 b)")
+    popis = (f"chodníky {cz(vyb.chodnik_L)} + {cz(vyb.chodnik_P)} m, q = {cz(q)} kN/m² v nepříznivých "
+             f"částech plochy vlivu (úseky {cz(dx, 2)} m), δ = {cz(DELTA_CHODNIKY)} ({NORMA}, čl. 8.5 b)")
     return _stav("qch", popis, acc, len(useky))
 
 
@@ -611,18 +612,18 @@ def _schema_Vn(model, vyst, K: Konstrukce, vyb: Vybaveni, Vn: float, schema: str
     dxu = K.Ltot / max(1, int(math.ceil(K.Ltot / krok_useky - 1e-9)))
 
     def popis(V):
-        return (f"normální zatížitelnost Vn = {V:.4g} t (vn = {sz.vn_z_Vn(V):.4g} kN/m², "
+        return (f"normální zatížitelnost Vn = {cz(V, 4, g=True)} t (vn = {cz(sz.vn_z_Vn(V), 4, g=True)} kN/m², "
                 f"{sz.POPIS_SCHEMAT[schema]}, obr. 7.1), {n} {'pruh' if n == 1 else 'pruhy'} "
-                f"{wl:g} m {pp.popis}" + (f", zbývající plocha {zbytek[1] - zbytek[0]:.2f} m"
+                f"{cz(wl)} m {pp.popis}" + (f", zbývající plocha {cz(zbytek[1] - zbytek[0], 2)} m"
                                           if zbytek else "") +
-                f"; nápravy v pruzích nezávisle (pojezd, krok {krok:g} m), rovnoměrné zatížení "
-                f"v nepříznivých částech plochy vlivu (úseky {dxu:.2f} m); δ podle počtu "
-                f"zatížených pruhů – {dzdroj}; ploška kola {bw:g} × {bw:g} m (jako LM1), "
-                f"roznos {roz:.2f} m")
+                f"; nápravy v pruzích nezávisle (pojezd, krok {cz(krok)} m), rovnoměrné zatížení "
+                f"v nepříznivých částech plochy vlivu (úseky {cz(dxu, 2)} m); δ podle počtu "
+                f"zatížených pruhů – {dzdroj}; ploška kola {cz(bw)} × {cz(bw)} m (jako LM1), "
+                f"roznos {cz(roz, 2)} m")
 
     varovani = []
     if pp.w < sz.SIRKA_PRUHU - 1e-9:
-        varovani.append(f"Vozovka ({pp.w:.2f} m) je užší než zatěžovací pruh 3 m – pruh přesahuje "
+        varovani.append(f"Vozovka ({cz(pp.w, 2)} m) je užší než zatěžovací pruh 3 m – pruh přesahuje "
                         "na chodník.")
     return dict(stav=_stav("q", popis(Vn), kom, n_st), popis=popis,
                 vozidlo=lambda t: f"Vn {t} t", y=pruhy[0].y_c, poloha=pp.popis,
@@ -647,13 +648,13 @@ def _schema_Vr(model, vyst, K: Konstrukce, vyb: Vybaveni, Vr: float, schema: str
     ob, n_p = _obalka_poloh(model, gen())
 
     def popis(V):
-        return (f"výhradní zatížitelnost Vr = {V:.4g} t – {v.nazev} ({v.obrazek}), vnějším okrajem "
-                f"{pp.popis}, osa y = {yc:.2f} m; δ = {d:.3g} ({dzdroj}); roznos {roz:.2f} m, "
-                f"krok {krok:g} m")
+        return (f"výhradní zatížitelnost Vr = {cz(V, 4, g=True)} t – {v.nazev} ({v.obrazek}), vnějším okrajem "
+                f"{pp.popis}, osa y = {cz(yc, 2)} m; δ = {cz(d, 3, g=True)} ({dzdroj}); roznos {cz(roz, 2)} m, "
+                f"krok {cz(krok)} m")
 
     varovani = []
     if v.sirka > pp.w + 1e-9:
-        varovani.append(f"Vozidlo Vr (šířka {v.sirka:g} m) je širší než vozovka ({pp.w:.2f} m).")
+        varovani.append(f"Vozidlo Vr (šířka {cz(v.sirka)} m) je širší než vozovka ({cz(pp.w, 2)} m).")
     stopy = sorted({(y, b) for y in (y1, y2) for b in {a.sirka for a in v.napravy}})
     obrys = [(min(pp.y_kraj, pp.y_kraj + pp.smer * v.sirka), max(pp.y_kraj, pp.y_kraj + pp.smer * v.sirka))]
     return dict(stav=_stav("q", popis(Vr), ob, n_p), popis=popis, obrys=obrys,
@@ -800,7 +801,7 @@ def vnitrni_sily(
     if K.je_deska:
         g0_ = float(g0) if g0 is not None else K.h * gamma_beton           # kN/m²
         M, Vm, Vp, F, R = _staly_MKP(model, vyst, platky_plosne(g0_, x_od, x_do, 0.0, B))
-        s_g0 = StavSil.staly("g0", f"vlastní tíha desky {g0_:.3g} kN/m² (MKP)", M, Vm, Vp)
+        s_g0 = StavSil.staly("g0", f"vlastní tíha desky {cz(g0_, 3, g=True)} kN/m² (MKP)", M, Vm, Vp)
         kontrola.update(g0_F=F, g0_R=R)
         jedn = None
     else:
@@ -815,7 +816,7 @@ def vnitrni_sily(
         M = np.zeros(shp); Vm = np.zeros(shp); Vp = np.zeros(shp)
         for o in range(nv):
             M[o], Vm[o], Vp[o] = _prenes_1D(model.xs, vyst, o, K.Ltot, *jedn, nx)
-        s_g0 = StavSil.staly("g0", f"vlastní tíha nosníku {g0_:.3g} kN/m "
+        s_g0 = StavSil.staly("g0", f"vlastní tíha nosníku {cz(g0_, 3, g=True)} kN/m "
                              "(každý nosník samostatně, bez spolupůsobení)",
                              g0_ * M, g0_ * Vm, g0_ * Vp)
         jedn = (M, Vm, Vp)
@@ -830,11 +831,11 @@ def vnitrni_sily(
         g_dob = float(A_dobetonavky) * gamma_beton
         Mj, Vmj, Vpj = jedn
         c = _podil_mezer(nv)
-        s_dob = StavSil.staly("g0", f"dobetonávka mezi nosníky A = {float(A_dobetonavky):g} m², "
-                              f"{g_dob:.3g} kN/m (samostatně, ½ na sousední nosníky)",
+        s_dob = StavSil.staly("g0", f"dobetonávka mezi nosníky A = {cz(float(A_dobetonavky))} m², "
+                              f"{cz(g_dob, 3, g=True)} kN/m (samostatně, ½ na sousední nosníky)",
                               g_dob * c * Mj, g_dob * c * Vmj, g_dob * c * Vpj)
         s_g0 = s_g0 + s_dob
-        s_g0.popis += (f"; dobetonávka {g_dob:.3g} kN/m (A = {float(A_dobetonavky):g} m², "
+        s_g0.popis += (f"; dobetonávka {cz(g_dob, 3, g=True)} kN/m (A = {cz(float(A_dobetonavky))} m², "
                        "samostatně, ½ na sousední nosníky – krajní nosník ½ dobetonávky)")
 
     # ---- g − g0 -----------------------------------------------------------
@@ -851,7 +852,7 @@ def vnitrni_sily(
         s_sp = StavSil.staly("g-g0", "", g_spary * c * Mj, g_spary * c * Vmj,
                              g_spary * c * Vpj)
         s_g = s_g + s_sp
-        s_g.popis += f"; výplň spáry {g_spary:g} kN/m (samostatně, ½ na sousední nosníky)"
+        s_g.popis += f"; výplň spáry {cz(g_spary)} kN/m (samostatně, ½ na sousední nosníky)"
     elif g_spary and not K.spara:
         varovani.append("Tíha spáry je zadána, ale konstrukce spáru nemá – ignorováno.")
 
@@ -872,7 +873,7 @@ def vnitrni_sily(
     if K.sikmy and not K.je_deska:
         varovani.append("Šikmý most: x výstupu se měří od osy podpory daného nosníku.")
     popis = (f"{'deska' if K.je_deska else f'{K.N} nosníků'}, {K.popis()}, "
-             f"uložení: {K.popis_ulozeni()}; 2D MKP prvek ≈ {model.a_ref:.3f} m")
+             f"uložení: {K.popis_ulozeni()}; 2D MKP prvek ≈ {cz(model.a_ref, 3)} m")
 
     vys = VysledekSil(K=K, vybaveni=vyb, xs=model.xs.copy(), vyst=vyst, stavy=stavy,
                       g0=g0_, g_spary=g_spary if K.spara else 0.0,
@@ -934,11 +935,11 @@ def _promenne(model, vyst: Vystupy, K: Konstrukce, vyb: Vybaveni, n: dict, cache
         dyn, dyn_zdroj = dynamicky_soucinitel(druh, dyn_zad)
         if druh == "MLC" and dyn_zad is None:
             varovani.append(f"Dynamický součinitel pro vozidla MLC {NORMA} neuvádí – uvažováno "
-                            f"δ = {dyn:g}; zadejte ho, je-li známý.")
+                            f"δ = {cz(dyn)}; zadejte ho, je-li známý.")
         nos = Nosnik1D(K)
         n_ob = _n_ob(K, krok)
         if druh == "Ve":
-            voz_popis = f"Ve {Ve:g} t"
+            voz_popis = f"Ve {cz(Ve)} t"
 
             def novy_gen():
                 return nos.stavy_Ve(Ve, n_ob, roz, extra=True)
@@ -952,13 +953,13 @@ def _promenne(model, vyst: Vystupy, K: Konstrukce, vyb: Vybaveni, n: dict, cache
             if dist is not None and dist <= 0:
                 dist = None
             voz_popis = (f"{MLC} {'kolové' if t == 'k' else 'pásové'}" +
-                         (f", kolona po {dist:g} m" if dist else ""))
+                         (f", kolona po {cz(dist)} m" if dist else ""))
 
             def novy_gen(t=t, dist=dist):
                 return nos.stavy_MLC(t, MLC, n_ob, dist, roz, extra=True)
         pul = 0.5 * (rozvor + b_k)
         if y_c - pul < vyb.chodnik_L - 1e-9 or y_c + pul > B - vyb.chodnik_P + 1e-9:
-            varovani.append(f"Vozidlo {voz_popis} (šířka {2 * pul:.2f} m, osa y = {y_c:.2f} m) "
+            varovani.append(f"Vozidlo {voz_popis} (šířka {cz(2 * pul, 2)} m, osa y = {cz(y_c, 2)} m) "
                             "přesahuje vozovku.")
         dx = K.x0(y_c)
         y1, y2 = y_c - 0.5 * rozvor, y_c + 0.5 * rozvor
@@ -973,15 +974,15 @@ def _promenne(model, vyst: Vystupy, K: Konstrukce, vyb: Vybaveni, n: dict, cache
 
         def popis(V, t):
             vp = f"Ve {t} t" if druh == "Ve" else voz_popis
-            return (f"vozidlo {vp}, osa y = {y_c:.2f} m, δ = {dyn:g} ({dyn_zdroj}), "
-                    f"roznos {roz:.2f} m, krok {krok:g} m")
+            return (f"vozidlo {vp}, osa y = {cz(y_c, 2)} m, δ = {cz(dyn)} ({dyn_zdroj}), "
+                    f"roznos {cz(roz, 2)} m, krok {cz(krok)} m")
 
         ob = obalky_2D(model, stavy_q(), y1, y2, b_k, roz, dx)
-        stavy["q"] = StavSil("q", popis(Ve, f"{Ve:g}" if Ve else ""), ob.M_max, ob.M_min,
+        stavy["q"] = StavSil("q", popis(Ve, f"{cz(Ve)}" if Ve else ""), ob.M_max, ob.M_min,
                              ob.Vm_max, ob.Vm_min, ob.Vp_max, ob.Vp_min, ob.Vs_max, ob.Vs_min,
                              pohyblivy=True, n_stavu=ob.n_stavu)
         attrs.update(V=float(Ve or 0.0), dyn=dyn, dyn_zdroj=dyn_zdroj, vozidlo=voz_popis,
-                     rozvor=rozvor, b_k=b_k, poloha_q=f"osa y = {y_c:.2f} m",
+                     rozvor=rozvor, b_k=b_k, poloha_q=f"osa y = {cz(y_c, 2)} m",
                      stopy_q=[(y1, b_k), (y2, b_k)],
                      obrys_q=[(y_c - 1.5, y_c + 1.5)] if druh == "Ve" else [(y_c - pul, y_c + pul)],
                      q_nastaveni=dict(typ="pojezd", polohy=polohy, meritko=1.0, popis=popis,
@@ -1000,7 +1001,7 @@ def _promenne(model, vyst: Vystupy, K: Konstrukce, vyb: Vybaveni, n: dict, cache
         stavy["q"] = r["stav"]
         varovani += r["varovani"]
         attrs.update(V=V, schema_q=sch, dyn=r["dyn"], dyn_zdroj=r["dyn_zdroj"],
-                     vozidlo=r["vozidlo"](f"{V:g}"), y_Ve=r["y"], poloha_q=r["poloha"],
+                     vozidlo=r["vozidlo"](f"{cz(V)}"), y_Ve=r["y"], poloha_q=r["poloha"],
                      stopy_q=r["stopy"], pruhy_q=r["pruhy"], obrys_q=r.get("obrys", []),
                      q_nastaveni=dict(r["q_nastaveni"], popis=lambda VV, t: r["popis"](VV),
                                       vozidlo=r["vozidlo"]))
@@ -1065,7 +1066,7 @@ def vys_pro_V(vys: VysledekSil, V: float) -> VysledekSil:
     k = V / vys.V
     q = vys.stavy["q"]
     qn = vys.q_nastaveni or {}
-    t = f"{V:.1f}"
+    t = f"{cz(V, 1)}"
     pole = [getattr(q, a) * k for a in ("M_max", "M_min", "Vm_max", "Vm_min", "Vp_max", "Vp_min",
                                          "Vs_max", "Vs_min")]
     popis = qn["popis"](V, t) if "popis" in qn else q.popis
@@ -1097,6 +1098,13 @@ class PolohaVozidla:
 
 def _skaluj(platky: list, k: float) -> list:
     return [(F * k, x0, x1, y0, y1) for F, x0, x1, y0, y1 in platky]
+
+
+def x_uzlu(vys: VysledekSil, o: int, x: float) -> float:
+    """Lokální x uzlu výstupu o nejbližšího k x (řezy, ve kterých polohy_q hledá maxima)."""
+    xl = vys.x_lokalni(o)
+    kk = np.arange(int(vys.vyst.i0[o]), int(vys.vyst.i1[o]) + 1)
+    return float(xl[kk[np.argmin(np.abs(xl[kk] - x))]])
 
 
 def polohy_q(vys: VysledekSil, o: int, x_M: Optional[float] = None,
@@ -1193,7 +1201,7 @@ def polohy_q(vys: VysledekSil, o: int, x_M: Optional[float] = None,
             plosne = [(x0, x1, y0, y1, q * d) for c in casti for x0, x1, y0, y1, q in c[key][3]]
             volba[key] = (kola, useky, plosne,
                           f"zatížen{'y pruhy 1–' + str(k) if k > 1 else ' pruh 1'}, "
-                          f"δ = {delty[min(k, 3)]:.3g}")
+                          f"δ = {cz(delty[min(k, 3)], 3, g=True)}")
     else:
         pol = list(qn["polohy"]())
         vM, vV, ok = vyhodnot(pol)
@@ -1214,12 +1222,12 @@ def polohy_q(vys: VysledekSil, o: int, x_M: Optional[float] = None,
         txt = f" ({txt})" if txt else ""
         if key == "M":
             h = float(st.M_max[o, k])
-            st.popis = (f"{vys.vozidlo} – poloha pro max M v řezu x = {xl[k]:.2f} m{txt}: "
-                        f"M = {h:.1f} {jm}")
+            st.popis = (f"{vys.vozidlo} – poloha pro max M v řezu x = {cz(xl[k], 2)} m od osy podpory{txt}: "
+                        f"M = {cz(h, 1)} {jm}")
         else:
             h = float(st.Vp_max[o, k]) if k == i0 else float(st.Vs_max[o, k])
-            st.popis = (f"{vys.vozidlo} – poloha pro max V v řezu x = {xl[k]:.2f} m od podpory"
-                        f"{txt}: V = {h:.1f} {jv}")
+            st.popis = (f"{vys.vozidlo} – poloha pro max V v řezu x = {cz(xl[k], 2)} m od osy podpory"
+                        f"{txt}: V = {cz(h, 1)} {jv}")
         out[key] = PolohaVozidla(key, float(xl[k]), h, [], kola, st, st.popis, plosne)
     return out
 
@@ -1254,7 +1262,7 @@ def vypis(v: VysledekSil) -> None:
         r += f"{d['M_Ed']:>10.1f}{d['V_Ed']:>10.1f}"
         print(r + ("   ◄ rozhoduje" if o == gov else ""))
     print(f"\n  M_Ed, V_Ed: kombinace 6.10 (γ_G = {v.soucinitele.gamma_G:g}, "
-          f"γ_Q = {v.soucinitele.gamma_Q:g}) včetně g0.")
+          f"γ_Q = {cz(v.soucinitele.gamma_Q)}) včetně g0.")
     for t in v.varovani:
         print(f"  ! {t}")
     print("=" * 86)

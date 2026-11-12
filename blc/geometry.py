@@ -62,6 +62,7 @@ Posuzuje se jen hodnota V v řezu x_k ± d (maximum přes všechny polohy).
 """
 
 from __future__ import annotations
+from .cisla import cz
 import math
 from dataclasses import dataclass
 from typing import List, Optional
@@ -163,7 +164,7 @@ class Konstrukce:
         for i, Li in enumerate(self.L):
             if 2 * self.d >= Li - EPS:
                 raise ValueError(
-                    f"Pole {i + 1}: 2·d = {2 * self.d:g} m není menší než rozpětí {Li:g} m.")
+                    f"Pole {i + 1}: 2·d = {cz(2 * self.d)} m není menší než rozpětí {cz(Li)} m.")
 
     # ---- odvozené veličiny ------------------------------------------------
     @property
@@ -210,9 +211,9 @@ class Konstrukce:
     def popis_ulozeni(self) -> str:
         t = ULOZENI[self.uloz]
         if self.vetknuti:
-            t += (f", pružné k_rot = {self.k_rot / 1000:g} MNm/rad/m" if self.k_rot
+            t += (f", pružné k_rot = {cz(self.k_rot / 1000)} MNm/rad/m" if self.k_rot
                   else ", dokonalé")
-        t += (f"; svisle pružné k_v = {self.k_pod / 1000:g} MN/m/m" if self.pruzna
+        t += (f"; svisle pružné k_v = {cz(self.k_pod / 1000)} MN/m/m" if self.pruzna
               else "; svisle tuhé")
         if self.pruzna and self.tvrde:
             t += ("; β_s = 0 (zjednodušeně)" if self.beta_s_pevne else "; β_s = ∂w/∂s")
@@ -306,11 +307,11 @@ class Konstrukce:
         return out
 
     def popis(self) -> str:
-        pol = " + ".join(f"{v:g}" for v in self.L)
+        pol = " + ".join(f"{cz(v)}" for v in self.L)
         slovo = "pole" if self.n_poli < 5 else "polí"
         txt = f"{self.n_poli} {slovo}: {pol} m"
         if self.sikmy:
-            txt += f", šikmost {self.alfa:g}° {'pravá' if self.sikmost == 'prava' else 'levá'}"
+            txt += f", šikmost {cz(self.alfa)}° {'pravá' if self.sikmost == 'prava' else 'levá'}"
         return txt
 
 

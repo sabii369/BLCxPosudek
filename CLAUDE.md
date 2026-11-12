@@ -23,6 +23,7 @@ git subtree pull --prefix=pb_posudek <tmp> pb_split -m "Aktualizace pb_posudek"
 ```bash
 python -m blc_posudek                 # spojený program (GUI s priklady/most_KA67_12.toml)
 python -m blc_posudek priklady/most_KA67_12.toml -o vystup   # dávka: most → posudek → protokol
+python -m blc_posudek modely_prefa -o vystup --bez-protokolu -j 8   # více souborů → vystup/souhrn.csv
 python -m pytest                      # všechny testy (~2 min 15 s; z toho zatížitelnost Vn, Vr, Ve ~1 min)
 python -m pytest tests/test_vnitrni_sily.py
 python -m blc --sily priklady/sily_KA67_12.toml [--pb "../Posudek PB/examples/nosnik_KA67_12.toml"]
@@ -48,9 +49,12 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
     `zatizeni_pb_dict`, `vloz_do_vstupu_pb`,
   - `vstup_sily.py` – vstupní TOML (`priklady/sily_KA67_12.toml`), `plotting_sily.py` – grafy.
 - `blc_posudek/`: `vypocet.py` (`parametry_blc` – L0, beton, A/Iy z průřezu, γ z [posouzeni]; `zatizeni_z_blc`,
-  `spocti` → `model.blc = {vys, o, polohy}`, `kapitola_blc` + `grafy_most.vloz_do_protokolu` (obrázky do kapitol), `uloz_protokol_most` = protokol posudku
+  `spocti` → jen most + posudek, `model.blc = {vys, o}`; protokolové části líně: `polohy_modelu`, `priprav_protokol` (`kapitola_blc` +
+  `grafy_most.vloz_do_protokolu` + kapitoly zatížitelnosti, jednou), `uloz_protokol_most` = protokol posudku
   + grafy mostu), `grafy_most.py` (půdorysy se zatížením do kapitoly zatížení, napětí v řezech střed/podpora pod graf každé fáze z `msp_napeti`; tvar `fn(model, adr)` jako
-  `pb_posudek.grafy`), `gui.py` (`AplikaceMost`), `__main__.py`; vzor `priklady/most_KA67_12.toml`.
+  `pb_posudek.grafy`), `gui.py` (`AplikaceMost`; klíč mostu `klic_mkp` bez součinitelů, jiné γ/ψ → `vys_se_soucinitely`),
+  `__main__.py` + `davka.py` (`vypocet_souboru`, více souborů / složka → `souhrn.csv`, `--bez-protokolu`, `-j N`;
+  `jedno_vlakno` = OpenBLAS v 1 vlákně, rychlejší); vzor `priklady/most_KA67_12.toml`.
 - **Grafy vnitřních sil = charakteristické hodnoty bez součinitelů** (γ, ψ, δ; zadání uživatele – kontrola
   s jinými výpočty): `vnitrni_sily.vys_charakteristicky` (q bez δ, u Vn přepočet s dyn = 1) v `plot_sily`,
   `plot_stavy_pudorys`, `plot_pricne` (bez M_Ed), `grafy_most.graf_sil`; posudky a kombinace se součiniteli.

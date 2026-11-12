@@ -13,8 +13,8 @@ from pytest import approx
 
 from blc.beam_1d import Nosnik1D
 from blc.geometry import Konstrukce
-from blc_posudek.vypocet import (nacti, parametry_blc, spocti, vlastnosti_prurezu, vyber_nosnik,
-                                 zatizeni_z_blc)
+from blc_posudek.vypocet import (nacti, parametry_blc, polohy_modelu, priprav_protokol, spocti,
+                                 vlastnosti_prurezu, vyber_nosnik, zatizeni_z_blc)
 
 KOREN = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PRIKLAD = os.path.join(KOREN, "priklady", "most_KA67_12.toml")
@@ -82,8 +82,6 @@ def test_spocti_posudek(d, vysledek):
     assert vys.popisky[o] == "N6"
     assert vys.dyn == 1.05 and "čl. 8.4" in vys.dyn_zdroj      # δ podle ČSN 73 6222 (Ve)
     assert model.protokol.posudky
-    assert [k.nazev for k in model.protokol.kapitoly].index("Zatížení z modelu mostu (BLC)") < \
-        [k.nazev for k in model.protokol.kapitoly].index("Zatížení a časová osa")
     zat = zatizeni_z_blc(vys, d, o)
     assert [k["druh"] for k in zat["kombinace"]] == ["6.10a", "6.10b", "char", "casta", "kvazistala"]
     assert zat["kombinace"][0]["x"][-1] == approx(d["nosnik"]["L"])
@@ -94,6 +92,20 @@ def test_spocti_posudek(d, vysledek):
     upoz = model.protokol.upozorneni
     assert upoz and all("mez lineárního dotvarování" in t for t in upoz)
     assert any(t.startswith("Uvedení do provozu") for t in upoz)
+
+
+def test_protokol_az_pri_ulozeni(d):
+    """spocti počítá jen most a posudek; polohy vozidla a kapitoly BLC až priprav_protokol."""
+    vys, o, model = spocti(copy.deepcopy(d))
+    nazvy = [k.nazev for k in model.protokol.kapitoly]
+    assert "Zatížení z modelu mostu (BLC)" not in nazvy and "polohy" not in model.blc
+    assert not any(k[0] == "ref_souprava_bez_dyn" for k in vys.cache)
+    priprav_protokol(model)
+    priprav_protokol(model)                                   # podruhé nic nepřidá
+    nazvy = [k.nazev for k in model.protokol.kapitoly]
+    assert nazvy.count("Zatížení z modelu mostu (BLC)") == 1
+    assert nazvy.index("Zatížení z modelu mostu (BLC)") < nazvy.index("Zatížení a časová osa")
+    assert set(model.blc["polohy"]) == {"M", "V"}
 
 
 def test_zadany_nosnik_a_rezim(d, vysledek):
@@ -157,6 +169,7 @@ def test_grafy_most(vysledek):
 
 def test_obrazky_v_kapitolach(vysledek):
     model = vysledek[2]
+    priprav_protokol(model)
     kap = {k.nazev: [o.soubor for t, o in k.polozky if t == "obrazek"] for k in model.protokol.kapitoly}
     assert kap["Zatížení z modelu mostu (BLC)"] == ["blc_zat_stale", "blc_zat_q", "blc_zat_pricny",
                                                     "blc_sily"]
@@ -183,7 +196,8 @@ def test_davka(tmp_path):
     assert (tmp_path / "most" / "vnitrni_sily.json").exists()
     html = (tmp_path / "protokol.html").read_text(encoding="utf-8")
     assert "Zatížení z modelu mostu (BLC)" in html
-    assert "δ = 1.05 (ČSN 73 6222, čl. 8.4, výjimečná zatížitelnost)" in html
+    assert "δ = 1,05 (ČSN 73 6222, čl. 8.4, výjimečná zatížitelnost)" in html     # desetinná čárka
+    assert "x posudku = x od osy podpory + (L − L0)/2" in html
     for naz in ("charakteristická", "častá", "kvazistálá", "MSÚ 6.10a", "MSÚ 6.10b", "MSÚ 6.10"):
         assert f"Kombinace {naz} – vnitřní síly po nosnících" in html
     # tabulka maxim po nosnících: místo zadané dopravy referenční soupravy Vn, Vr, Ve
@@ -197,6 +211,52 @@ def test_davka(tmp_path):
     for k in ("blc_zat_stale", "blc_zat_q", "blc_rez_0", "blc_rez_3"):
         assert (tmp_path / "obrazky" / f"{k}.png").exists()
     assert '<div class="upoz"><b>Upozornění</b>' in html          # souhrn upozornění
+    # vysledky.json: předpínací síla jako v protokolu posudku (s oslabením korozí k_Ap)
+    import json
+    vj = json.loads((tmp_path / "vysledky.json").read_text(encoding="utf-8"))
+    assert all(len(f["P_kN"]) == len(vj["x"]) for f in vj["faze"])
+
+
+def test_soucinitele_bez_prepoctu_mkp(vysledek):
+    from blc_posudek.vypocet import klic_mkp, vys_se_soucinitely
+    from blc.vnitrni_sily import Soucinitele
+    vys = vysledek[0]
+    s2 = Soucinitele(gamma_G=1.35, gamma_Q=1.5)
+    v2 = vys_se_soucinitely(vys, s2)
+    assert v2 is not vys and v2.model is vys.model and v2.stavy is vys.stavy
+    assert vys_se_soucinitely(vys, vys.soucinitele) is vys
+    assert vys.soucinitele.gamma_Q == 1.35                          # původní beze změny
+    i = vysledek[1]
+    assert v2.souhrn()[i]["M_Ed"] > vys.souhrn()[i]["M_Ed"]
+    kw = {"L": 11.4, "N": 10, "soucinitele": vys.soucinitele}
+    assert klic_mkp(kw) == klic_mkp({**kw, "soucinitele": s2})
+    assert klic_mkp(kw) != klic_mkp({**kw, "N": 12})
+
+
+def test_nezname_klice_blc(d):
+    d2 = copy.deepcopy(d)
+    d2["blc"]["gama_Q"] = 1.5
+    with pytest.raises(ValueError, match="gama_Q.*gamma_Q"):
+        parametry_blc(d2)
+    d2 = copy.deepcopy(d)
+    d2["blc"]["liniova"] = [{"nazev": "římsa", "g": 3.0, "y": 0.3, "sirak": 0.4}]
+    with pytest.raises(ValueError, match="sirak.*sirka"):
+        parametry_blc(d2)
+
+
+def test_vysledky_json_oslabeni(d, tmp_path):
+    """Předpínací síla ve vysledky.json zahrnuje oslabení korozí (Faze.k_Ap)."""
+    import json
+    from blc_posudek.vypocet import uloz_protokol_most
+    d2 = copy.deepcopy(d)
+    d2["degradace"] = {"oslabeni_predpinaci": 20.0}      # [%]
+    vys, o, m = spocti(d2)
+    uloz_protokol_most(m, tmp_path)
+    vj = json.loads((tmp_path / "vysledky.json").read_text(encoding="utf-8"))
+    f = m.faze[-1]
+    assert f.k_Ap == approx(0.8)
+    P = -m._sily_predpeti(f.sigma, f.k_Ap)[0]
+    assert vj["faze"][-1]["P_kN"] == approx(P.tolist())
 
 
 def _tk() -> bool:
@@ -235,7 +295,15 @@ def test_gui(tmp_path):
         assert app.var_graf.get() == "Napětí v řezech – Konec životnosti"
         d = app.ziskej_data()
         assert d["zatizeni"]["zpusob"] == "kombinace" and len(d["zatizeni"]["kombinace"]) == 5
-        assert "dyn" not in d["blc"] and "δ = 1.05 (ČSN 73 6222" in app.lbl_zat.cget("text")
+        assert "dyn" not in d["blc"] and "δ = 1,05 (ČSN 73 6222" in app.lbl_zat.cget("text")
+        # jiné součinitele γ, ψ: stejný model MKP, jen se přeskládají kombinace
+        vys0 = app._blc_vys
+        app.f_souc_doprava.prom["gamma_Q"].set("1.5")
+        v2 = app._aktualni_blc(app.ziskej_data())
+        assert v2 is not None and v2.model is vys0.model and v2.soucinitele.gamma_Q == 1.5
+        i6 = v2.popisky.index("N6")
+        assert v2.souhrn()[i6]["M_Ed"] > vys0.souhrn()[i6]["M_Ed"]
+        app.f_souc_doprava.prom["gamma_Q"].set("1.35")
         app.f_voz.prom["dyn"].set("1.2")
         assert app.ziskej_data()["blc"]["dyn"] == 1.2
         app.f_voz.prom["vozidlo"].set("MLC kolové")
@@ -268,8 +336,9 @@ def test_posouzeni_Vn_Vr(d, vysledek):
     assert [(p["y0"], p["y1"]) for p in vys.pruhy_q] == [(6.25, 9.25), (3.25, 6.25), (1.5, 3.25)]
     assert [p["nazev"] for p in vys.pruhy_q] == ["pruh 1", "pruh 2", "zbývající plocha"]
     _, o, m = spocti(d2, vys)
-    pol = m.blc["polohy"]
+    pol = polohy_modelu(m)
     assert pol["M"].plosne and len(pol["M"].platky) == 8           # 2 dvounápravy × 4 kola
+    priprav_protokol(m)
     kap = next(k for k in m.protokol.kapitoly if k.nazev == "Zatížení z modelu mostu (BLC)")
     tab = [x for t, x in kap.polozky if t == "tabulka"]
     assert "chodci" in " ".join(tab[1].hlavicka)
@@ -295,7 +364,7 @@ def test_vys_pro_Ve(vysledek):
     v2 = vys_pro_Ve(vys, 2.5 * vys.Ve)
     assert v2.stavy["q"].M_max == approx(2.5 * vys.stavy["q"].M_max)
     assert v2.stavy["g-g0"] is vys.stavy["g-g0"] and vys.Ve == 80.0     # originál beze změny
-    assert v2.vozidlo == "Ve 200.0 t"
+    assert v2.vozidlo == "Ve 200,0 t"
 
 
 def test_zatizitelnost(zat):
@@ -321,6 +390,7 @@ def test_zatizitelnost(zat):
     assert zat.Vaj == approx(max(3 / 8 * zat.Vn, zat.Vr / 6))
     assert zat.druhy["Ve"].prvni.vys.q_ch == 0.0                    # Ve: chodci vyloučeni
     assert zat.druhy["Vn"].prvni.vys.q_ch == 2.5
+    priprav_protokol(zat.model)
     kap = zat.model.protokol.kapitoly[0]
     assert kap.nazev == "Zatížitelnost podle ČSN 73 6222"
     assert not [o for typ, o in kap.polozky if typ == "obrazek"]     # schémata jsou v kap. 2.4
@@ -341,7 +411,7 @@ def test_grafy_zatizitelnosti(zat):
         fig = s["Zatížení mostu – vnitřní síly na nosnících"](zat.model, None)
         tit = [a.get_title() for a in fig.axes[::2]]      # g0, g − g0, chodci, Vn, Vr, Ve (bez q)
         assert len(tit) == 6 and tit[4].startswith("Vr = 60 t (šestinápravové")
-        assert tit[2].startswith("zatížení chodců q_ch = 2.5 kN/m² (s Vn, Vr; s Ve chodci nejsou)")
+        assert tit[2].startswith("zatížení chodců q_ch = 2,5 kN/m² (s Vn, Vr; s Ve chodci nejsou)")
         assert "bez δ" in tit[4]
         from blc_posudek.grafy_most import q_bez_dyn
         for dr in ("Vn", "Vr", "Ve"):                    # δ1 = 1,25 (Vn: 1 nebo 2 pruhy), Ve 1,05
@@ -377,6 +447,7 @@ def test_protokol_jednoho_druhu(zat):
     assert m.blc["vys"].druh_q == "Vr" and m.blc["vys"].V == approx(zat.Vr)
     eta = {klic_posudku(p): p.vyuziti for p in m.protokol.posudky}
     assert eta[zat.druhy["Vr"].minimum().klic] == approx(1.0, abs=2e-3)   # posudky při Vr
+    priprav_protokol(m)
     kap = m.protokol.kapitoly[0]
     assert kap.nazev == "Zatížitelnost Vr – výhradní (ČSN 73 6222)"
     tab = [o.popisek for typ, o in kap.polozky if typ == "tabulka"]
@@ -422,6 +493,31 @@ def test_davka_zatizitelnost(tmp_path):
     html = (tmp_path / "Ve" / "protokol.html").read_text(encoding="utf-8")   # jen Ve
     assert "Zatížitelnost Ve – výjimečná (ČSN 73 6222)" in html
     assert "Referenční Ve = 80 t – příčná poloha zatížení dopravou" in html
+
+
+def test_davka_vice_souboru(tmp_path):
+    """Více souborů (složka) → souhrn.csv; chyba jednoho souboru dávku nezastaví; -j 2."""
+    import csv
+    from blc_posudek.__main__ import main
+    vstupy = tmp_path / "vstupy"
+    vstupy.mkdir()
+    text = open(PRIKLAD, encoding="utf-8").read()
+    (vstupy / "a.toml").write_text(text, encoding="utf-8")
+    (vstupy / "b.toml").write_text(text.replace("[blc]\n", "[blc]\ngama_Q = 1.5\n", 1),
+                                   encoding="utf-8")
+    out = tmp_path / "vystup"
+    assert main([str(vstupy), "-o", str(out), "--bez-protokolu", "-j", "2"]) == 2   # b: chyba
+    with open(out / "souhrn.csv", encoding="utf-8-sig") as f:
+        radky = list(csv.DictReader(f, delimiter=";"))
+    assert [r["soubor"] for r in radky] == ["a.toml", "b.toml"]
+    a, b = radky
+    assert a["nosnik"] == "N6" and a["vysledek"] == "NEVYHOVUJE" and a["chyba"] == ""
+    assert a["eta_MSU [%]"].startswith("90,") and a["eta_MSP [%]"].startswith("111,")  # čárka
+    assert b["vysledek"] == "CHYBA" and "gama_Q" in b["chyba"]
+    assert not (out / "a" / "protokol.html").exists()                      # bez protokolu
+    # jeden soubor bez protokolu: jen výpis
+    assert main([str(vstupy / "a.toml"), "-o", str(tmp_path / "jeden"), "--bez-protokolu"]) == 1
+    assert not (tmp_path / "jeden").exists()
 
 
 def test_aktualni_stari_a_koroze(d, vysledek):

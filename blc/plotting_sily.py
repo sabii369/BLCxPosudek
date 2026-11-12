@@ -15,6 +15,7 @@ Grafy vnitřních sil pro posudek (vnitrni_sily.VysledekSil):
 """
 
 from __future__ import annotations
+from .cisla import cz
 import textwrap
 from typing import Optional, Sequence
 
@@ -81,9 +82,9 @@ def kresli_most(ax, vys: VysledekSil, o: int, stav: str, poloha: Optional[Poloha
                     y0, y1 = y0 - 0.04, y0 + 0.04
                 ax.add_patch(Rectangle((min(K.x0(y0), K.x0(y1)), y0), L, y1 - y0,
                                        fc=BARVY["g0"], alpha=0.8, ec="none", lw=0))
-        txt = (f"g0 = {vys.g0:.2f} {jm}" +
+        txt = (f"g0 = {cz(vys.g0, 2)} {jm}" +
                ("" if vys.deska else " – každý nosník samostatně (bez spolupůsobení)") +
-               (f"\n+ dobetonávka {vys.g_dobetonavky:.2f} kN/m (½ na sousední nosníky)"
+               (f"\n+ dobetonávka {cz(vys.g_dobetonavky, 2)} kN/m (½ na sousední nosníky)"
                 if vys.g_dobetonavky else ""))
         ax.text(K.x0(0.5 * B) + 0.5 * L, 0.5 * B, txt, ha="center", va="center", fontsize=9,
                 bbox=dict(fc="white", ec="#888888", alpha=0.9))
@@ -92,15 +93,15 @@ def kresli_most(ax, vys: VysledekSil, o: int, stav: str, poloha: Optional[Poloha
             voz = "vozovka" in nazev
             _pas(ax, vys, y0, y1, fc="#555555" if voz else "#bbbbbb", alpha=0.45, ec="none")
             ym = 0.5 * (y0 + y1)
-            ax.text(K.x0(ym) + 0.72 * L, ym, f"{nazev} {g:g} kN/m²", ha="center", va="center",
+            ax.text(K.x0(ym) + 0.72 * L, ym, f"{nazev} {cz(g)} kN/m²", ha="center", va="center",
                     fontsize=7, color="w" if voz else "k")
         for l in vyb.liniova_vse(B):
             _pas(ax, vys, max(0.0, l.y - 0.5 * l.sirka), min(B, l.y + 0.5 * l.sirka),
                  fc=BARVY["g-g0"], alpha=0.85, ec="none")
-            ax.text(K.x0(l.y) + 0.03 * L, l.y, f"{l.nazev} {l.g:g} kN/m", fontsize=6.5, va="center",
+            ax.text(K.x0(l.y) + 0.03 * L, l.y, f"{l.nazev} {cz(l.g)} kN/m", fontsize=6.5, va="center",
                     color=BARVY["g-g0"], bbox=dict(fc="white", ec="none", alpha=0.75, pad=1))
         if vys.g_spary:
-            ax.text(K.x0(0.0) + L, -0.08 * B, f"výplň spáry {vys.g_spary:g} kN/m (samostatně)",
+            ax.text(K.x0(0.0) + L, -0.08 * B, f"výplň spáry {cz(vys.g_spary)} kN/m (samostatně)",
                     ha="right", va="top", fontsize=7)
     elif stav == "q" and poloha is not None:
         for x0, x1, y0, y1, q in getattr(poloha, "plosne", []):     # rovnoměrné (schéma Vn)
@@ -255,7 +256,7 @@ def plot_sily(vys: VysledekSil, o: int, show: bool = True):
     aV.set_xlabel("x od osy první podpory [m]")
     aM.legend(fontsize=8, loc="lower right")
     aM.set_title(f"Vnitřní síly – {'pás' if vys.deska else 'nosník'} {vys.popisky[o]} "
-                 f"(y = {float(vys.vyst.y[o]):.2f} m) – charakteristické hodnoty bez součinitelů")
+                 f"(y = {cz(float(vys.vyst.y[o]), 2)} m) – charakteristické hodnoty bez součinitelů")
     fig.tight_layout()
     if show:
         plt.show()
@@ -303,7 +304,7 @@ def _kota(ax, y0: float, y1: float, z: float, barva: str = "#333333"):
     """Kóta mezi y0 a y1 ve výšce z (popis = vzdálenost [m])."""
     ax.annotate("", (y0, z), (y1, z), arrowprops=dict(arrowstyle="<->", color=barva, lw=0.7,
                                                       shrinkA=0, shrinkB=0))
-    ax.text(0.5 * (y0 + y1), z + 0.03, f"{y1 - y0:.2f}", ha="center", va="bottom", fontsize=6.5,
+    ax.text(0.5 * (y0 + y1), z + 0.03, f"{cz(y1 - y0, 2)}", ha="center", va="bottom", fontsize=6.5,
             color=barva)
 
 
@@ -326,9 +327,9 @@ def popis_vozidla(vys: VysledekSil) -> str:
         F = [a.podil * 10.0 * V for a in v.napravy]
         nap = (f"{len(F)} × {F[0]:.0f}" if max(F) - min(F) < 1e-9 else
                " + ".join(f"{f:.0f}" for f in F))
-        return f"Vr = {V:.1f} t – {v.nazev} ({v.obrazek})\nnápravy {nap} kN, šířka {v.sirka:g} m"
+        return f"Vr = {cz(V, 1)} t – {v.nazev} ({v.obrazek})\nnápravy {nap} kN, šířka {cz(v.sirka)} m"
     if vys.druh_q == "Ve":
-        return f"Ve = {V:.1f} t – souprava (obr. 7.5)\nnápravy 9 × {10.0 * V / 9.0:.0f} kN, šířka 3 m"
+        return f"Ve = {cz(V, 1)} t – souprava (obr. 7.5)\nnápravy 9 × {10.0 * V / 9.0:.0f} kN, šířka 3 m"
     return vys.vozidlo
 
 
@@ -338,7 +339,7 @@ def _popis_pruhu(p: dict, vn: float) -> str:
         F = 2.0 * p["F_kola"] * vn                                  # tíha nápravy [kN]
         txt += "\n" + ("2 × " if p["naprava"] == "dvojnaprava" else "") + f"{F:.0f} kN"
     q = p["q"]
-    return txt + f"\n{q:g}·vn = {q * vn:.2f} kN/m²"
+    return txt + f"\n{cz(q)}·vn = {cz(q * vn, 2)} kN/m²"
 
 
 def kresli_pricny_rez(ax, vys: VysledekSil, o: Optional[int] = None, rovne: bool = True):
@@ -369,7 +370,7 @@ def kresli_pricny_rez(ax, vys: VysledekSil, o: Optional[int] = None, rovne: bool
                            (B - vyb.chodnik_P, vyb.chodnik_P, "chodník P")):
         if sir > 0:
             ax.add_patch(Rectangle((y0, 0.0), sir, t_ch, fc="#cccccc", ec="#888888", lw=0.5))
-            ax.text(y0 + 0.5 * sir, 0.5 * t_ch, f"{nazev} {sir:g} m", ha="center", va="center",
+            ax.text(y0 + 0.5 * sir, 0.5 * t_ch, f"{nazev} {cz(sir)} m", ha="center", va="center",
                     fontsize=5.5)
     ax.add_patch(Rectangle((vyb.chodnik_L, 0.0), w, t_v, fc="#555555", ec="none"))
     for l in vyb.liniova_vse(B):
@@ -409,7 +410,7 @@ def kresli_pricny_rez(ax, vys: VysledekSil, o: Optional[int] = None, rovne: bool
                     ha="right" if pp.strana == "P" else "left", va="bottom", fontsize=6.5, color=ct)
         else:
             ax.plot([vys.y_Ve] * 2, [t_v, zt + 0.2], color=cq, lw=0.8, ls="-.")
-            ax.text(vys.y_Ve, zt + 0.25, f"osa vozidla y = {vys.y_Ve:.2f} m", ha="center",
+            ax.text(vys.y_Ve, zt + 0.25, f"osa vozidla y = {cz(vys.y_Ve, 2)} m", ha="center",
                     va="bottom", fontsize=6.5, color=ct)
     _retez_kot(ax, body, zt)
     # posuzovaný výstup
@@ -434,10 +435,10 @@ def nadpis_pricneho_rezu(vys: VysledekSil) -> str:
     if vys.poloha_q:
         nad += f", {vys.poloha_q}"
     if "q" in vys.stavy:
-        nad += f"; δ = {vys.dyn:.3g}" + (" (1 pruh; δ2, δ3 při více pruzích)"
+        nad += f"; δ = {cz(vys.dyn, 3, g=True)}" + (" (1 pruh; δ2, δ3 při více pruzích)"
                                         if vys.druh_q == "Vn" else "")
     if vys.q_ch:
-        nad += f"; chodci {vys.q_ch:g} kN/m²"
+        nad += f"; chodci {cz(vys.q_ch)} kN/m²"
     return nad
 
 

@@ -21,6 +21,7 @@ pokud není zadán.
 """
 
 from __future__ import annotations
+from .cisla import cz
 import math
 from typing import Dict, Optional, Tuple
 
@@ -64,8 +65,8 @@ def delty_zatizitelnosti(K, dyn: Optional[float] = None) -> Tuple[Dict[int, floa
     Ld, tab = nahradni_delka(K)
     f = vlastni_frekvence(Ld)
     d = {i: delta_i(i, f) for i in (1, 2, 3)}
-    return d, (f"{NORMA}, čl. 8.6, obr. 8.1: L_d = {Ld:.2f} m ({tab}), f = 90,6·L_d^−0,923 = "
-               f"{f:.2f} Hz → δ1 = {d[1]:.3g}, δ2 = {d[2]:.3g}, δ3 = {d[3]:.3g}")
+    return d, (f"{NORMA}, čl. 8.6, obr. 8.1: L_d = {cz(Ld, 2)} m ({tab}), f = 90,6·L_d^−0,923 = "
+               f"{cz(f, 2)} Hz → δ1 = {cz(d[1], 3, g=True)}, δ2 = {cz(d[2], 3, g=True)}, δ3 = {cz(d[3], 3, g=True)}")
 
 
 def dynamicky_soucinitel(vozidlo: str, dyn: Optional[float] = None, K=None) -> Tuple[float, str]:
@@ -92,8 +93,8 @@ def dynamicky_soucinitel(vozidlo: str, dyn: Optional[float] = None, K=None) -> T
             raise ValueError("Pro δ výhradní zatížitelnosti je nutná konstrukce K.")
         Ld, tab = nahradni_delka(K)
         f = vlastni_frekvence(Ld)
-        return delta_i(1, f), (f"{NORMA}, čl. 8.3.1 b), obr. 8.1: δ = δ1, L_d = {Ld:.2f} m ({tab}), "
-                               f"f = {f:.2f} Hz")
+        return delta_i(1, f), (f"{NORMA}, čl. 8.3.1 b), obr. 8.1: δ = δ1, L_d = {cz(Ld, 2)} m ({tab}), "
+                               f"f = {cz(f, 2)} Hz")
     if vozidlo == "MLC":
         return 1.0, f"pro MLC {NORMA} dynamický součinitel neuvádí"
     raise ValueError(f"Neznámé vozidlo '{vozidlo}' (Ve, Vr, MLC).")
