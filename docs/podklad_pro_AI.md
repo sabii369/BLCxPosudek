@@ -152,7 +152,7 @@ hodnoty jsou v `KLICE_BLC_VOLITELNE`.
 | `krok` | 0.25 | m | krok poloh vozidla pro obálku |
 | `ex` | 0.125 | m | velikost prvku MKP (viz kap. 9) |
 | `vystup` | "auto" | – | posuzovaný nosník: "auto" = nejzatíženější, jinak popisek "N1" … |
-| `kriterium` | "M" | – | výběr nejzatíženějšího: "M" \| "M-" \| "V" (MSÚ 6.10 vč. g0) |
+| `kriterium` | "M" | – | výběr nejzatíženějšího: "M" \| "M-" \| "V" (posouzení: MSÚ 6.10 vč. g0; zatížitelnost: samotné q druhu) |
 | `rezim` | "kombinace" | – | předání: "kombinace" \| "zatezovaci_stavy" |
 | `gamma_Q`, `psi0`, `psi1`, `psi2` | 1.35, 0.75, 0.75, 0.0 | – | doprava q (hodnoty TS – **pro Ve neověřeno**, je to vstup) |
 | `gamma_Qch`, `psi0_ch`, `psi1_ch`, `psi2_ch` | 1.35, 0.75, 0.75, 0.0 | – | chodci |
@@ -232,7 +232,11 @@ Pozor: výběr podle M nemusí dát nosník rozhodující pro smyk (kap. 9).
 - `vys.tabulka(o, "q")` → `TabulkaSil(x, M_max, M_min, V_max, V_min)` (x od osy 1. podpory nosníku).
 - `vys.kombinace(o, "6.10a", vcetne_g0=False)` → obálka kombinace.
 - `vys.souhrn()` → po nosnících `M_<stav>`, `Mmin_<stav>`, `V_<stav>` (max |V|), `M_Ed`, `Mmin_Ed`, `V_Ed`.
-- `vys.extremy_kombinace(druh)` → po nosnících max/min M (s x), max/min V.
+- `vys.extremy_kombinace(druh)` → po nosnících max/min M (s x), max/min V (v protokolu dvě
+  tabulky max M a max |V| se sloupci = kombinace, MSÚ podle `kombinace_msu` – `druhy_kombinaci`).
+- Hlavička protokolu: `Protokol.hlavicka` [(údaj, hodnota)] (pb_posudek) – spojený program ji plní
+  v `priprav_protokol` (`hlavicka_protokolu`: most, doprava, chodci, nosník + `popis_vyberu`,
+  zatížitelnost); celkový výsledek doplní `pb_posudek.report` sám.
 - `polohy_q(vys, o)` → rozhodující polohy vozidla (max M ve středu, max V v řezu d).
 
 ---
@@ -357,7 +361,11 @@ zatížitelnosti Vr (rozhodující posudek 100 %), kapitola zatížitelnosti jen
    (`vys_s_vozidlem`) s referenční tíhou (`[blc] Vn`, `Vr`, `Ve`); účinky jsou v tíze lineární →
    pro jinou tíhu se q přeškáluje (`vys_pro_V`), polohy se nemění. δ je v q; g0, g − g0 a q_ch
    (podle druhu: Vn, Vr 2,5 kN/m², Ve 0) se nemění. **Posuzovaný nosník je pro každý druh pevný**
-   (zadaný `o` / `vystup`, jinak nejzatíženější při referenční tíze prvního schématu).
+   (zadaný `o` / `vystup`, jinak nejzatíženější **samotným stavem q daného druhu** při referenční
+   tíze prvního schématu podle `[blc] kriterium` – `vys.rozhodujici_stav("q", kriterium)`, bez g0,
+   g − g0 a chodců; text výběru `ZatizitelnostDruhu.vyber`). Posouzení pro zvolené vozidlo
+   (`vyber_nosnik`) vybírá dál podle MSÚ 6.10 vč. g0 – u Vr se mohou lišit (vzor: Vr 60 t →
+   N9 od samotného Vr, N10 podle M_Ed kvůli g − g0 krajního nosníku; Vr 181,5 t místo 181,7 t).
 2. Pro každou zkoušenou tíhu se spočte celý posudek (jeden výpočet dá η všech posudků).
 3. Rozsah: od reference se zvětšuje (odhad z lineárního průběhu, nejvýše 4× za krok, max
    64·reference), dokud všechny rostoucí posudky nedosáhnou η ≥ 1.
@@ -534,7 +542,8 @@ slovník výsledků (ne celé objekty); vzor `blc_posudek/davka.py`.
    jiném nosníku (ve vzoru rozhoduje N6 pro M i V, η smyku po nosnících 0,18–0,29).
    Pro jistotu ve studii posoudit všechny nosníky
    (`for o in range(vys.n_vyst)`, ~0,35 s / nosník) nebo porovnat kritéria "M" a "V".
-   Zatížitelnost drží nosník vybraný při referenčním Ve.
+   Zatížitelnost drží pro každý druh nosník nejzatíženější samotným zatížením druhu
+   (kap. 7, `rozhodujici_stav`).
 6. **Příčná poloha zatížení** je jedna – Vn a Vr u kraje vozovky u užšího chodníku, Ve a MLC
    v ose vozovky / `y_vozidla`; nejnepříznivější se nehledá. Při změně chodníků se mění kraj
    i osa vozovky, a tím i rozhodující nosník (u shodných chodníků se zatěžuje od levého kraje).

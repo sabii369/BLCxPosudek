@@ -113,6 +113,7 @@ class ZatizitelnostDruhu:
     schemata: Dict[str, VysledekSchematu]
     o: int                               # posuzovaný výstup
     poznamky: List[str] = field(default_factory=list)
+    vyber: str = ""                      # jak byl posuzovaný výstup vybrán (text do protokolu)
     _cache: dict = field(default_factory=dict, repr=False)
 
     def minimum(self, ms: Optional[str] = None) -> Optional[PosudekZat]:
@@ -421,6 +422,9 @@ def _vys_druhu(vys: VysledekSil, druh: str, V: float, schema: str = "") -> Vysle
     return vys_s_vozidlem(vys, **{druh: V}, **({"schema": schema} if schema else {}))
 
 
+#: popis kritéria výběru nosníku od zatížení druhu
+POPIS_KRITERIA = {"M": "max M", "M-": "max záporný M", "V": "max |V|"}
+
 PROTOKOLY = ("souhrn",) + DRUHY        # protokol zatížitelnosti: souhrn | jen jeden druh
 
 
@@ -469,6 +473,7 @@ def protokol_druhu(res: VysledekZatizitelnosti, druh: str = "souhrn", prubeh=Non
     if prubeh:
         prubeh(f"Zatížitelnost: posudek při {druh} = {cz(z.vys_V().V, 1)} t (protokol {druh})")
     vk, o, model = spocti(res.d, z.vys_V(), z.o)
+    model.blc["vyber"] = z.vyber
     pohled = VysledekZatizitelnosti({druh: z}, druh, vk, o, model, list(z.poznamky), d=res.d,
                                     celek=res, jen_druh=True)
     model.zatizitelnost = pohled            # kapitoly doplní vypocet.priprav_protokol
@@ -501,8 +506,11 @@ def zatizitelnost(d: dict, vys: Optional[VysledekSil] = None, o: Optional[int] =
     for k in druhy:
         if V_ref[k] <= 0:
             raise ValueError(f"Zatížitelnost: zadejte referenční {k} > 0.")
+    # posuzovaný nosník: zadaný (o, [blc] vystup), jinak pro každý druh nejzatíženější samotným
+    # zatížením tohoto druhu při referenční tíze (podle [blc] kriterium; bez g0, g − g0, chodců)
     pevny = o if o is not None else (vyber_nosnik(vys, d) if str(b.get("vystup") or "auto") != "auto"
                                       else None)
+    krit = b.get("kriterium", "M")
     kw = dict(tol=tol, max_kol=max_kol, nasobek_max=nasobek_max, prubeh=prubeh)
     res = VysledekZatizitelnosti({}, voz if voz in druhy else druhy[0], d=copy.deepcopy(d))
 
@@ -510,13 +518,16 @@ def zatizitelnost(d: dict, vys: Optional[VysledekSil] = None, o: Optional[int] =
         poradi = {"Vn": ["dvojnaprava"], "Vr": ["6"], "Ve": [""]}[druh]
         sch: Dict[str, VysledekSchematu] = {}
         o_d = pevny
+        vyber = "zadaný" if pevny is not None else ""
         while poradi:
             s = poradi.pop(0)
             if prubeh:
                 prubeh(f"Zatížitelnost {druh}: {POPIS_SCHEMAT[s]}")
             v_s = _vys_druhu(vys, druh, V_ref[druh], s)
             if o_d is None:
-                o_d = vyber_nosnik(v_s, d)
+                o_d = v_s.rozhodujici_stav("q", krit)
+                vyber = (f"nejzatíženější od zatížení {druh} = {cz(V_ref[druh])} t "
+                         f"({POPIS_SCHEMAT[s].split(' (')[0]}) – {POPIS_KRITERIA[krit]}")
             r = sch[s] = _hledej(d, v_s, o_d, s, nazev=druh, **kw)
             Vs = [p.V for p in r.posudky.values() if p.stav in ("V", "bez_vozidla")]
             if druh == "Vn" and s == "dvojnaprava" and any(v < sz.VN_MEZ for v in Vs):
@@ -529,7 +540,7 @@ def zatizitelnost(d: dict, vys: Optional[VysledekSil] = None, o: Optional[int] =
                 if any(_V(v6.get(k)) is not None and v6[k].V <= sz.VR_MEZ_6 and
                        (p.V is None or p.V > sz.VR_MEZ_2) for k, p in r.posudky.items()):
                     poradi.append("3")
-        z = ZatizitelnostDruhu(druh, _slouc(druh, sch), sch, o_d)
+        z = ZatizitelnostDruhu(druh, _slouc(druh, sch), sch, o_d, vyber=vyber)
         if z.nevyhovuji_nezavisle:
             z.poznamky.append(f"{len(z.nevyhovuji_nezavisle)} posudků nevyhovuje nezávisle na "
                               "zatížení dopravou (předpětí, výstavba) – zatížitelnost neomezují, "
@@ -541,6 +552,7 @@ def zatizitelnost(d: dict, vys: Optional[VysledekSil] = None, o: Optional[int] =
     if prubeh:
         prubeh(f"Zatížitelnost: posudek při {h.druh} = {cz(h.vys_V().V, 1)} t")
     vk, o_p, model = spocti(d, h.vys_V(), h.o)
+    model.blc["vyber"] = h.vyber
     res.vys, res.o, res.model = vk, o_p, model
     res.modely["souhrn"] = model
     res.poznamky = list(dict.fromkeys(t for z in res.druhy.values() for t in z.poznamky))
@@ -644,7 +656,8 @@ def kapitola_zatizitelnost(model, res: VysledekZatizitelnosti) -> None:
                        f"výpočtů posudku, zkoušeno do {fmt(r.V_max)} t")
         K.text(f"{druh} – {NAZVY_DRUHU[druh]} zatížitelnost: {r0.vys.stavy['q'].popis}. "
                f"Chodci: {fmt(r0.vys.q_ch, 2)} kN/m² ({r0.vys.q_ch_zdroj or 'bez chodníků'}). "
-               f"Posuzovaný {vyst} {r0.vys.popisky[z.o]}. Schémata: " + "; ".join(txt) + ".")
+               f"Posuzovaný {vyst} {r0.vys.popisky[z.o]}" + (f" ({z.vyber})" if z.vyber else "") +
+               ". Schémata: " + "; ".join(txt) + ".")
         for t in z.poznamky:
             K.text("Upozornění: " + t)
         rows = []

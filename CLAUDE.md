@@ -77,6 +77,8 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
   stálá `f_souc_stale` (γ_G, γ_G,inf, ξ → `[posouzeni]`, ne na kartě 6), doprava / chodci `f_souc_doprava`,
   `f_souc_chodci` (→ `[blc]`, ne na kartě 0), teplota `f_teplota_souc`; kombinace MSÚ a γ_P zůstávají na kartě 6.
 - Zatížitelnost: `blc_posudek/zatizitelnost.py` – `zatizitelnost(d, vys, druhy=…)` → `VysledekZatizitelnosti`
+  (posuzovaný nosník každého druhu = nejzatíženější samotným q druhu při referenční tíze podle `kriterium`,
+  `VysledekSil.rozhodujici_stav` – zadání uživatele 12. 11. 2026; posouzení pro vozidlo dál podle M_Ed 6.10)
   (`druhy` Vn, Vr, Ve → `ZatizitelnostDruhu`; tíha pro η = 1 každého posudku po schématech – `_hledej`, Illinois se
   sdílenými výpočty, q přeškálované `vys_pro_V`; schémata po posudcích `_slouc`: Vn dvounáprava / náhradní náprava
   < 16 t, Vr 6 / 2 / 3nápravové; stavy nezávisí / neomezuje / klesá; `Vaj`, `V_evidence`); protokol pro zvolené

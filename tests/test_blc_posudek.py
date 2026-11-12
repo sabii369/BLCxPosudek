@@ -175,13 +175,19 @@ def test_obrazky_v_kapitolach(vysledek):
                                                     "blc_sily"]
     tab = [o for t, o in next(k for k in model.protokol.kapitoly
                               if k.nazev == "Zatížení z modelu mostu (BLC)").polozky if t == "tabulka"]
-    assert len(tab) == 2 + 6                               # součinitele, stavy, 6 kombinací
-    # součinitele podle zadání: char, častá, kvazi, 6.10a, 6.10b, 6.10 × (G, doprava);
-    # s Ve chodci nejsou (ČSN 73 6222, čl. 3.1.4)
+    assert len(tab) == 2 + 2                               # součinitele, stavy, kombinace M a V
+    # součinitele podle zadání: char, častá, kvazi, 6.10a, 6.10b (kombinace_msu = 6.10ab)
+    # × (G, doprava); s Ve chodci nejsou (ČSN 73 6222, čl. 3.1.4)
     assert [r[1:] for r in tab[0].radky] == [
         ["1,00"] * 4, ["1,00", "1,00", "1,00", "0,75"], ["1,00", "1,00", "1,00", "0,00"],
-        ["1,35", "1,00", "1,35", "0,75"], ["1,35", "0,85", "1,35", "1,00"],
-        ["1,35", "1,00", "1,35", "1,00"]]
+        ["1,35", "1,00", "1,35", "0,75"], ["1,35", "0,85", "1,35", "1,00"]]
+    # kombinace po nosnících: sloupce = kombinace, řádky = nosníky
+    assert tab[2].hlavicka == ["Nosník", "charakteristická", "častá", "kvazistálá", "MSÚ 6.10a",
+                               "MSÚ 6.10b"] and len(tab[2].radky) == 10
+    assert tab[2].radky[5][0] == "N6 ◄" and tab[3].popisek.startswith("Kombinace po nosnících – max |V|")
+    from pb_posudek.protokol import fmt
+    m_ed = vysledek[0].extremy_kombinace("6.10b")[5]["M_max"]
+    assert tab[2].radky[5][-1] == fmt(m_ed)
     assert "chodci" not in " ".join(tab[1].hlavicka)
     for idx, f in enumerate(model.faze):
         obr = kap[f"Napětí v betonu – {f.nazev_t}"]
@@ -198,8 +204,11 @@ def test_davka(tmp_path):
     assert "Zatížení z modelu mostu (BLC)" in html
     assert "δ = 1,05 (ČSN 73 6222, čl. 8.4, výjimečná zatížitelnost)" in html     # desetinná čárka
     assert "x posudku = x od osy podpory + (L − L0)/2" in html
-    for naz in ("charakteristická", "častá", "kvazistálá", "MSÚ 6.10a", "MSÚ 6.10b", "MSÚ 6.10"):
-        assert f"Kombinace {naz} – vnitřní síly po nosnících" in html
+    assert "Kombinace po nosnících – max M [kNm]" in html and "Kombinace po nosnících – max |V| [kN]" in html
+    hlav = html[html.index("<h1>"):html.index('<h2 id="souhrn">')]           # hlavička protokolu
+    assert "<dt>Most</dt><dd>10 nosníků, 1 pole: 11,4 m" in hlav
+    assert "<dt>Posuzovaný nosník</dt><dd>N6 (y = 5,50 m) – nejzatíženější podle M_Ed" in hlav
+    assert "Ve 80 t" in hlav and "Celkový výsledek:" in hlav
     # tabulka maxim po nosnících: místo zadané dopravy referenční soupravy Vn, Vr, Ve
     for n in ("Vn 32 t", "Vr 60 t", "Ve 80 t"):
         assert f"max M {n} [kNm]" in html and f"max |V| {n} [kN]" in html
@@ -389,6 +398,13 @@ def test_zatizitelnost(zat):
     assert zat.Vn < zat.Vr                                          # pruhy + chodci vs. 1 vozidlo
     assert zat.Vaj == approx(max(3 / 8 * zat.Vn, zat.Vr / 6))
     assert zat.druhy["Ve"].prvni.vys.q_ch == 0.0                    # Ve: chodci vyloučeni
+    # posuzovaný nosník každého druhu = nejzatíženější samotným zatížením druhu (max M od q)
+    for dr, z in zat.druhy.items():
+        v = z.prvni.vys
+        Mq = [float(v.tabulka(i, "q").M_max.max()) for i in range(v.n_vyst)]
+        assert z.o == Mq.index(max(Mq)) == v.rozhodujici_stav("q", "M"), dr
+        assert z.vyber.startswith(f"nejzatíženější od zatížení {dr} = ")
+    assert [zat.druhy[dr].prvni.vys.popisky[zat.druhy[dr].o] for dr in ("Vn", "Vr", "Ve")] ==         ["N7", "N9", "N6"]                                         # Vr: N9 (podle M_Ed by byl N10)
     assert zat.druhy["Vn"].prvni.vys.q_ch == 2.5
     priprav_protokol(zat.model)
     kap = zat.model.protokol.kapitoly[0]

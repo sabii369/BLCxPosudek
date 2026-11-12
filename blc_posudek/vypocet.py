@@ -249,6 +249,47 @@ def sily_referencnich_souprav(vys: VysledekSil) -> dict:
     return out
 
 
+def druhy_kombinaci(model) -> list:
+    """[(druh, název)] kombinací do protokolu: char, častá, kvazistálá a MSÚ podle
+    [posouzeni] kombinace_msu (6.10a + 6.10b, nebo 6.10)."""
+    msu = [("6.10", "MSÚ 6.10")] if getattr(model.n, "kombinace_msu", "6.10ab") == "6.10" else \
+        [("6.10a", "MSÚ 6.10a"), ("6.10b", "MSÚ 6.10b")]
+    return [("char", "charakteristická"), ("casta", "častá"), ("kvazistala", "kvazistálá")] + msu
+
+
+def popis_vyberu(d: dict) -> str:
+    """Jak byl posuzovaný nosník vybrán ([blc] vystup, kriterium)."""
+    b = {**VYCHOZI_BLC, **d.get("blc", {})}
+    if str(b.get("vystup") or "auto") != "auto":
+        return "zadaný"
+    return {"M": "nejzatíženější podle M_Ed (MSÚ 6.10 vč. g0)", "M-": "nejzatíženější podle záporného "
+            "M_Ed (MSÚ 6.10)", "V": "nejzatíženější podle V_Ed (MSÚ 6.10)"}.get(
+        b.get("kriterium", "M"), "nejzatíženější")
+
+
+def hlavicka_protokolu(model) -> list:
+    """Údaje mostu do hlavičky protokolu: most, zatížení dopravou, chodci, posuzovaný nosník
+    (u zatížitelnosti i výsledné tíhy)."""
+    b = model.blc
+    vys, o = b["vys"], b["o"]
+    vyst = "pás" if vys.deska else "nosník"
+    out = [("Most", vys.popis)]
+    if "q" in vys.stavy:
+        out.append(("Zatížení dopravou", f"{vys.vozidlo}, {vys.poloha_q}; δ = {cz(vys.dyn, 3, g=True)} "
+                                         f"({vys.dyn_zdroj})"))
+    out.append(("Chodci", f"{cz(vys.q_ch)} kN/m²" + (f" ({vys.q_ch_zdroj})" if vys.q_ch_zdroj else "")))
+    out.append((f"Posuzovaný {vyst}", f"{vys.popisky[o]} (y = {cz(float(vys.vyst.y[o]), 2)} m)"
+                                      + (f" – {b['vyber']}" if b.get("vyber") else "")))
+    res = getattr(model, "zatizitelnost", None)
+    if res is not None:
+        celek = res.celek or res
+        out.append(("Zatížitelnost (ČSN 73 6222)", " · ".join(
+            f"{dr} {cz(z.V, 1)} t (evidence {z.V_evidence} t)" if z.V is not None else f"{dr} > {z.V_max:.0f} t"
+            for dr, z in celek.druhy.items())))
+        out.append(("Posudky v protokolu", f"pro {res.druh} = {cz(vys.V, 1)} t (rozhodující posudek 100 %)"))
+    return out
+
+
 def kapitola_blc(model, vys: VysledekSil, o: int) -> None:
     """Vloží do protokolu posudku kapitolu zatížení a vnitřních sil z modelu mostu
     (před kapitolu Zatížení a časová osa): popis stavů, zatížení na mostě, součinitele,
@@ -289,10 +330,9 @@ def kapitola_blc(model, vys: VysledekSil, o: int) -> None:
         for k, nazev in GRAFY_ZATIZENI.items():
             if k not in GRAFY_Q or pol:
                 K.obrazek(k, nazev)
-    # součinitele
+    # součinitele (MSÚ jen kombinace použité v posudku – [posouzeni] kombinace_msu)
     s = vys.soucinitele
-    druhy = [("char", "charakteristická"), ("casta", "častá"), ("kvazistala", "kvazistálá"),
-             ("6.10a", "MSÚ 6.10a"), ("6.10b", "MSÚ 6.10b"), ("6.10", "MSÚ 6.10")]
+    druhy = druhy_kombinaci(model)
     skup = ["G"] + [k for k in ("qch", "q") if k in vys.stavy]
     nazvy_skup = {"G": "g0 + (g − g0)", "qch": "q – chodci", "q": "q – doprava"}
     rows = []
@@ -333,17 +373,23 @@ def kapitola_blc(model, vys: VysledekSil, o: int) -> None:
               f"součinitele δ; {sch}; Vn a Vr u kraje vozovky u užšího chodníku, Ve "
               f"{'v ose vozovky' if ref['Ve'].nastaveni_q.get('y_Ve') is None else 'v zadané poloze'}"
               "); ◄ = posuzovaný")
-    # kombinace po nosnících
+    # kombinace po nosnících – jedna tabulka M a jedna V (sloupce = kombinace)
     K.text("Vnitřní síly kombinací po nosnících – extrémy po délce nosníku; kombinace obsahují "
            "vlastní tíhu g0 z modelu mostu, ostatní stálé g − g0 a proměnná zatížení podle tabulky "
            "součinitelů.")
-    for druh, naz in druhy:
-        rows = []
-        for i, dd in enumerate(vys.extremy_kombinace(druh, vcetne_g0=True)):
-            rows.append([dd["vystup"] + (" ◄" if i == o else ""), fmt(dd["M_max"]),
-                         fmt(dd["x_M_max"], 2), fmt(dd["M_min"]), fmt(dd["V_max"]), fmt(dd["V_min"])])
-        K.tabulka([vyst.capitalize(), f"max M [{jm}]", "x (max M) [m]", f"min M [{jm}]",
-                   f"max V [{jv}]", f"min V [{jv}]"], rows, f"Kombinace {naz} – vnitřní síly po nosnících")
+    ext = {druh: vys.extremy_kombinace(druh, vcetne_g0=True) for druh, _ in druhy}
+    min_M = min(dd["M_min"] for e in ext.values() for dd in e)
+    rows_M, rows_V = [], []
+    for i, pop in enumerate(vys.popisky):
+        pop = pop + (" ◄" if i == o else "")
+        rows_M.append([pop] + [fmt(ext[druh][i]["M_max"]) for druh, _ in druhy])
+        rows_V.append([pop] + [fmt(max(ext[druh][i]["V_max"], -ext[druh][i]["V_min"])) for druh, _ in druhy])
+    xm = ext[druhy[-1][0]][o]["x_M_max"]
+    K.tabulka([vyst.capitalize()] + [naz for _, naz in druhy], rows_M,
+              f"Kombinace po nosnících – max M [{jm}] (posuzovaný ◄: max M v x = {fmt(xm, 2)} m od osy "
+              f"podpory; nejmenší M všech nosníků a kombinací {fmt(min_M)} {jm})")
+    K.tabulka([vyst.capitalize()] + [naz for _, naz in druhy], rows_V,
+              f"Kombinace po nosnících – max |V| [{jv}] (◄ = posuzovaný)")
     kap = model.protokol.kapitoly
     i = next((j for j, k in enumerate(kap) if k.nazev.startswith("Zatížení")), len(kap))
     kap.insert(i, K)
@@ -359,7 +405,7 @@ def spocti(d: dict, vys: Optional[VysledekSil] = None, o: Optional[int] = None):
     o = vyber_nosnik(vys, d) if o is None else o
     model = model_ze_slovniku(data_pro_posudek(vys, d, o))
     model.spocitej()
-    model.blc = dict(vys=vys, o=o)
+    model.blc = dict(vys=vys, o=o, vyber=popis_vyberu(d))
     return vys, o, model
 
 
@@ -380,6 +426,7 @@ def priprav_protokol(model) -> None:
     if not b or b.get("protokol_pripraven"):
         return
     from .grafy_most import vloz_do_protokolu
+    model.protokol.hlavicka = hlavicka_protokolu(model) + list(getattr(model.protokol, "hlavicka", []))
     kapitola_blc(model, b["vys"], b["o"])
     vloz_do_protokolu(model)
     res = getattr(model, "zatizitelnost", None)

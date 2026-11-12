@@ -423,8 +423,17 @@ nastavení lze vynutit proměnnou prostředí `OPENBLAS_NUM_THREADS`.
 
 ### 8.3 Grafy zatížení mostu a napětí v řezech (protokol, karta 7)
 
+**Hlavička protokolu** – pod nadpisem most, zatížení dopravou (vozidlo, poloha, δ), chodci,
+posuzovaný nosník a způsob jeho výběru (u zatížitelnosti i Vn, Vr, Ve a tíha, pro kterou jsou
+posudky) a **celkový výsledek** (vyhovuje / nevyhovuje, počet nevyhovujících posudků, nejvyšší
+využití, počet upozornění). V grafu „Souhrn využití“ jsou posudky jednotlivých kabelů
+(napínací napětí, napětí po zakotvení) sloučeny do jednoho řádku s rozhodujícím kabelem;
+všechny posudky jsou v tabulce *Všechny posudky*. Obrázky se ukládají jako PNG s paletou
+(protokol vzoru ~1,4 MB). Výškové překrytí kanálků je v kap. Předpínací výztuž jedna tabulka.
+
 **Kapitola zatížení** („Zatížení z modelu mostu (BLC)“) – půdorys mostu se zatížením
-(nosníky, spáry, osy podpor, posuzovaný nosník oranžově, řezy „střed“ a „podpora“ červeně):
+(nosníky, spáry, osy podpor, posuzovaný nosník oranžově, řezy „střed“ a „podpora“ červeně;
+osa y nahoru jako u půdorysu vnitřních sil a sítě MKP):
 
 - vlastní tíha g0 | ostatní stálé g − g0 (chodníky, vozovka, zábradlí, svodidla),
 - vozidlo v poloze pro max M ve středu rozpětí | pro max V u podpory (řez d od osy ložiska);
@@ -456,8 +465,8 @@ součinitele obsahují (γ, ψ, ξ, δ).
 
 Kapitola „Zatížení z modelu mostu (BLC)“ obsahuje postupně: popis stavů, zatížení na mostě,
 **tabulku dílčích součinitelů γ a součinitelů kombinace ψ** pro skupiny g0 + (g − g0),
-q – chodci a q – doprava (char., častá, kvazistálá, 6.10a, 6.10b, 6.10; u stálých v 6.10b
-ψ = ξ), **graf vnitřních sil M, V na nosnících** od jednotlivých stavů ve formátu obálek BLC
+q – chodci a q – doprava (char., častá, kvazistálá a MSÚ podle karty 6 – 6.10a a 6.10b,
+nebo 6.10; u stálých v 6.10b ψ = ξ), **graf vnitřních sil M, V na nosnících** od jednotlivých stavů ve formátu obálek BLC
 (půdorys, průběh vynesen od osy každého nosníku, řádek = zatěžovací stav, vlevo M, vpravo V,
 posuzovaný nosník zvýrazněn, u proměnných max červeně / min modře; zatížení dopravou
 se kreslí **bez dynamického součinitele δ** – u Vn přepočtené s δ = 1 pro
@@ -465,7 +474,8 @@ všechny počty pruhů), tabulku maxim po nosnících od stavů g0, g − g0 (a 
 zadaného zatížení dopravou max M a max |V| od **referenčních souprav Vn 32 t, Vr 60 t a Ve 80 t**
 (nezávisle na zvoleném vozidle; charakteristické hodnoty bez δ, schéma podle tíhy, poloha jako
 v kap. 7 – Vn, Vr u kraje vozovky u užšího chodníku, Ve v ose vozovky),
-a **šest tabulek kombinací** – po nosnících max/min M (s polohou max M) a max/min V.
+a **dvě tabulky kombinací po nosnících** – max M a max |V|, sloupce = kombinace (v popisku
+poloha max M posuzovaného nosníku a nejmenší M všech nosníků a kombinací).
 
 Účinek kombinace = Σ γ·ψ·E (proměnná zatížení chodci a doprava působí současně);
 příznivé stálé γ_G,inf. Kombinace v tabulkách obsahují g0 z modelu mostu. γ_G, ξ i γ a ψ
@@ -490,8 +500,11 @@ Zvolené vozidlo musí být Vn, Vr nebo Ve – pro ně se počítá protokol.
   vyjde-li ≤ 50 t, spočte se dvounápravové, a vyjde-li nad 16 t, i třínápravové:
   Vr = max(V_2, V_3) ≤ 50 t (čl. 7.2.2).
 - Chodci podle normy: s Vn a Vr 2,5 kN/m², s Ve 0 (lze zadat jinak). g0, g − g0 se nemění.
-- Posuzovaný nosník je pro každý druh pevný – zadaný, nebo nejzatíženější (MSÚ 6.10) při
-  referenční tíze; u Vn a Vr jím bývá nosník u kraje s užším chodníkem.
+- Posuzovaný nosník je pro každý druh pevný – zadaný, nebo **nejzatíženější samotným zatížením
+  daného druhu** (Vn, Vr, Ve při referenční tíze, prvním schématu; bez g0, g − g0 a chodců) podle
+  kritéria *Nejzatíženější podle* (max M, max záporný M, max |V|); u Vn a Vr jím bývá nosník
+  u kraje s užším chodníkem. Výběr je uveden v kapitole zatížitelnosti a v hlavičce protokolu.
+  (Při posouzení pro zvolené vozidlo se nosník vybírá podle MSÚ 6.10 včetně g0.)
 - Výsledkem posudku je tíha [t]; dále „nezávisí na zatížení dopravou – vyhovuje /
   NEVYHOVUJE“ (napínání, minimální výztuž …), „neomezuje“ (η do zkoušené tíhy nedosáhne
   100 %), „η klesá se zatížením“ (např. křehký lom – nevyhovuje jen bez vozidla).

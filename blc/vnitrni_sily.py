@@ -346,6 +346,22 @@ class VysledekSil:
             out.append(d)
         return out
 
+    def rozhodujici_stav(self, stav: str = "q", kriterium: str = "M") -> int:
+        """Index (0-based) výstupu nejzatíženějšího samotným stavem `stav` (charakteristicky,
+        bez ostatních zatížení): "M" = max kladný M, "M-" = max záporný M, "V" = max |V|."""
+        vals = []
+        for o in range(self.n_vyst):
+            t = self.tabulka(o, stav)
+            if kriterium == "M":
+                vals.append(float(t.M_max.max()))
+            elif kriterium == "M-":
+                vals.append(-float(t.M_min.min()))
+            elif kriterium == "V":
+                vals.append(float(t.V_abs.max()))
+            else:
+                raise ValueError("Kritérium musí být 'M', 'M-' nebo 'V'.")
+        return int(np.argmax(vals))
+
     def rozhodujici(self, kriterium: str = "M") -> int:
         """Index (0-based) nejzatíženějšího výstupu podle MSÚ (6.10, včetně g0):
         "M" = max kladný moment, "M-" = max záporný moment, "V" = max |V|."""

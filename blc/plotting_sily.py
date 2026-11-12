@@ -142,7 +142,7 @@ def kresli_most(ax, vys: VysledekSil, o: int, stav: str, poloha: Optional[Poloha
                 bbox=dict(fc="white", ec="none", alpha=0.8, pad=1))
     sx = abs(0.5 * B * K.cot)
     ax.set_xlim(-sx - 0.06 * L, L + sx + 0.03 * L)
-    ax.set_ylim(B + 0.12 * B + 0.3, -0.12 * B - 0.3)      # y dolů = pohled shora po směru x
+    ax.set_ylim(-0.12 * B - 0.3, B + 0.12 * B + 0.3)      # y nahoru – jako půdorys sil a síť BLC
     ax.set_aspect("equal")
     ax.set_xlabel("x [m] – podél mostu")
     ax.set_ylabel("y [m]")
