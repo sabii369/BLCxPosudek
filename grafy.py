@@ -1,6 +1,7 @@
 """Grafické výstupy posudku (matplotlib → PNG)."""
 from __future__ import annotations
 
+import io
 import threading
 from contextlib import contextmanager
 from pathlib import Path
@@ -50,9 +51,24 @@ def _uloz(fig, adr: Path, nazev: str):
     if getattr(_stav, "vracet", False):
         return fig
     p = adr / f"{nazev}.png"
-    fig.savefig(p, dpi=130)
+    _uloz_png(fig, p)
     plt.close(fig)
     return p.name
+
+
+def _uloz_png(fig, p: Path, dpi: int = 130) -> None:
+    """PNG s paletou 256 barev – vzhledově shodné, asi třetinová velikost (vložené obrázky
+    tvoří většinu HTML protokolu); bez Pillow obyčejné PNG."""
+    try:
+        from PIL import Image
+    except ImportError:
+        fig.savefig(p, dpi=dpi)
+        return
+    b = io.BytesIO()
+    fig.savefig(b, format="png", dpi=dpi)
+    b.seek(0)
+    with Image.open(b) as im:
+        im.convert("RGB").quantize(colors=256, method=Image.Quantize.MEDIANCUT).save(p, optimize=True)
 
 
 def _limit(ax, y, text, x=None, color=LIMIT):
@@ -428,16 +444,36 @@ def msu_smyk(m, adr):
     return _uloz(fig, adr, "msu_smyk")
 
 
+def _nazev_bez_kabelu(m, nazev: str) -> tuple[str, str | None]:
+    """„Napínací napětí – K2 levý“ → („Napínací napětí“, „K2 levý“); jiné posudky beze změny."""
+    for k in getattr(m, "kabely", []):
+        if nazev.endswith(" – " + k.nazev):
+            return nazev[:-len(k.nazev) - 3], k.nazev
+    return nazev, None
+
+
 def vyuziti(m, adr):
-    # nejvyšší využití pro každé kritérium přes všechny fáze
+    # nejvyšší využití pro každé kritérium přes všechny fáze; posudky jednotlivých kabelů
+    # (napínací napětí, napětí po zakotvení) sloučeny do jednoho řádku s rozhodujícím kabelem
     best: dict[tuple[str, str], object] = {}
+    kabely: dict[tuple[str, str], set] = {}
     for v in m.protokol.posudky:
-        key = (v.mezni_stav, v.nazev)
+        zaklad, kab = _nazev_bez_kabelu(m, v.nazev)
+        key = (v.mezni_stav, zaklad)
+        if kab is not None:
+            kabely.setdefault(key, set()).add(kab)
         if key not in best or v.vyuziti > best[key].vyuziti:
             best[key] = v
-    items = sorted(best.values(), key=lambda v: (v.mezni_stav != "MSÚ", v.skupina, v.nazev))
+    items = sorted(best.items(), key=lambda t: (t[0][0] != "MSÚ", t[1].skupina, t[0][1]))
+
+    def popis(key, v):
+        n = len(kabely.get(key, ()))
+        if n > 1:
+            return f"{key[0]}: {key[1]} ({n} kabelů, max {_nazev_bez_kabelu(m, v.nazev)[1]})"
+        return f"{v.mezni_stav}: {v.nazev}"
+    names = [popis(k, v) for k, v in items]
+    items = [v for _, v in items]
     fig, ax = plt.subplots(figsize=(10, 0.8 + 0.32 * len(items)))
-    names = [f"{v.mezni_stav}: {v.nazev}" for v in items]
     vals = [min(v.vyuziti, 2.0) for v in items]
     cols = [OK if v.vyuziti <= 0.9 else (WARN if v.vyuziti <= 1.0 else BAD) for v in items]
     y = np.arange(len(items))[::-1]

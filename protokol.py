@@ -147,6 +147,7 @@ class Protokol:
     kapitoly: list[Kapitola] = field(default_factory=list)
     posudky: list[VysledekPosudku] = field(default_factory=list)
     upozorneni: list[str] = field(default_factory=list)   # upozornění pro uživatele (nejsou posudky)
+    hlavicka: list[tuple[str, str]] = field(default_factory=list)  # (údaj, hodnota) pod nadpis protokolu
 
     def kapitola(self, nazev: str, uroven: int = 1) -> Kapitola:
         k = Kapitola(nazev, uroven)
