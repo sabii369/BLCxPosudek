@@ -278,6 +278,33 @@ def napeti_profil(m, adr):
     return _uloz(fig, adr, "napeti_profil")
 
 
+def teplota(m, adr):
+    """Nelineární rozdělení teploty a charakteristická primární napětí po výšce průřezu."""
+    v = getattr(m, "vys_teplota", None)
+    if v is None:
+        return None
+    P = m.prurez
+    z = np.unique(np.concatenate([np.linspace(0, P.h, 141)] + [q["z"] for q in v.var.values()]))
+    fig, axs = plt.subplots(1, 2, figsize=(9.5, 4.2), sharey=True)
+    for c, k in zip((C[1], C[0]), v.var):
+        q = v.var[k]
+        axs[0].plot(q["dT"], q["z"], color=c, marker="o", ms=3, label=k)
+        s = v.sigma(z, k)
+        axs[1].plot(s, z, color=c, label=k)
+        for zz in (0.0, P.h):
+            sv = float(v.sigma(zz, k))
+            axs[1].annotate(f"{sv:.2f}", (sv, zz), xytext=(4, -10 if zz > 0 else 4),
+                            textcoords="offset points", fontsize=8, color=c)
+    for ax in axs:
+        ax.axvline(0, color=INK2, lw=0.8)
+        ax.axhline(v.zt, color=GRID, lw=1.0, ls=":")
+    axs[0].set(xlabel="ΔT [°C]", ylabel="z [mm] (od spodního okraje)", title="Rozdělení teploty (tab. B.3)")
+    axs[1].set(xlabel="σ_T [MPa] (tah +, tlak −)", title="Primární napětí (charakteristické)")
+    axs[0].legend(fontsize=8)
+    axs[0].set_ylim(0, P.h)
+    return _uloz(fig, adr, "teplota")
+
+
 def hlavni_napeti(m, adr):
     if not getattr(m, "hlavni", None):
         return None
@@ -431,7 +458,7 @@ def vykresli_vse(m, adr: str | Path) -> dict[str, str]:
     adr.mkdir(parents=True, exist_ok=True)
     out = {}
     for fn in (diagramy_materialu, prurez, kabely, napeti_kabelu, ztraty_rozklad, sila_v_case, vnitrni_sily,
-               napeti_profil, hlavni_napeti, pruhyb, msu_ohyb, msu_pretvoreni, msu_smyk, vyuziti):
+               teplota, napeti_profil, hlavni_napeti, pruhyb, msu_ohyb, msu_pretvoreni, msu_smyk, vyuziti):
         r = fn(m, adr)
         if r:
             out[fn.__name__] = r

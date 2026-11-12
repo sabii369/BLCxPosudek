@@ -17,6 +17,7 @@ from .materialy import Beton, BetonarskaVyztuz, PredpinaciVyztuz
 from .msu import (VrstvaPredpeti, VrstvaVyztuze, ohybova_unosnost, smykova_unosnost)
 from .protokol import Kapitola, Protokol, VysledekPosudku, fmt
 from .prurez import Prurez
+from .teplota import Teplota, VARIANTY as VARIANTY_TEPLOTY
 from .trhliny import Vrstva, sirka_trhliny, xi_predpinaci
 from .zatizeni import (DRUHY_KOMBINACI, NAZVY_KOMBINACI, KombinaceVstup, Obalka, ZatezovaciStav,
                        kombinace)
@@ -146,7 +147,7 @@ class NosnikPB:
                  predem_alpha2: float = 0.19, predem_eta_p2: float = 1.2, kombinace_vstup: list[KombinaceVstup] | None = None,
                  kombinace_vcetne_g0: bool = False, t_vneseni: float | None = None,
                  t_akt: float | None = None, oslabeni_Ap: float = 0.0, oslabeni_As: float = 0.0,
-                 oslabeni_Asw: float = 0.0):
+                 oslabeni_Asw: float = 0.0, teplota: Teplota | None = None):
         self.beton = beton
         self.predp = predpinaci
         self.betonarska = betonarska
@@ -179,6 +180,8 @@ class NosnikPB:
             if not 0.0 <= v_ < 100.0:
                 raise ValueError(f"Oslabení výztuže {k_} korozí musí být 0 až < 100 %.")
         self.n = nastaveni or Nastaveni()
+        self.teplota = teplota          # nerovnoměrná složka teploty (None = neuvažuje se)
+        self.vys_teplota = None
         self.projekt = projekt or {}
         self.n_rezu = n_rezu
         self.charakteristiky = charakteristiky
@@ -216,6 +219,7 @@ class NosnikPB:
         self._prurezy()
         self._kabely()
         self._zatizeni()
+        self._teplota()
         self._ztraty_okamzite()
         self._faze_a_dlouhodobe_ztraty()
         self._prehled_ztrat()
@@ -511,6 +515,67 @@ class NosnikPB:
         if z.tabulka:
             parts.append("vnitřní síly zadané tabulkou")
         return "; ".join(parts)
+
+    # ------------------------------------------------------------------
+    def _teplota(self):
+        """Primární napětí od nerovnoměrné složky teploty (ČSN EN 1991-1-5, příl. B)."""
+        if self.teplota is None:
+            return
+        t = self.teplota
+        v = self.vys_teplota = t.spocitej(self.prurez, self.beton.Ecm)
+        K = self.protokol.kapitola("Nerovnoměrná složka teploty", 2)
+        K.text("Nelineární rozdělení teploty po výšce průřezu podle ČSN EN 1991-1-5, čl. 6.1.4.2 a přílohy B "
+               f"(betonová mostovka, tab. B.3 – {v.popis_svrsku()}, h = {fmt(v.h, 3)} m; mezi řádky tabulky "
+               "lineární interpolace). Ve staticky určitém nosníku vyvolá jen primární (vlastní) napětí, která "
+               "jsou v průřezu v rovnováze (N = 0, M = 0): σ(z) = E·α·(ε̄ + κ̄·(z − z_t) − ΔT(z)), "
+               "ε̄ = ∫ΔT·b dz/A, κ̄ = ∫ΔT·(z − z_t)·b dz/I (integrace po výšce betonového průřezu, tah +).")
+        if v.zadane:
+            K.text("Rozdíly teplot " + " a ".join(v.zadane) + " jsou zadány uživatelem (nepřebírají se z tab. B.3).")
+        K.tabulka(["Varianta", "ΔT1", "ΔT2", "ΔT3", "ΔT4"],
+                  [["oteplení (horní povrch teplejší)"] + [fmt(x, 2) for x in v.dT_ot] + ["–"],
+                   ["ochlazení (horní povrch chladnější)"] + [fmt(x, 2) for x in v.dT_och]],
+                  "Rozdíly teplot [°C] (ČSN EN 1991-1-5, obr. 6.2c, tab. B.3)")
+        for k in VARIANTY_TEPLOTY:
+            zb, dT = v.var[k]["z"], v.var[k]["dT"]
+            K.krok(f"Body rozdělení teploty – {k}", "z [mm]: ΔT [°C]", "",
+                   "; ".join(f"{fmt(z_, 0)}: {fmt(d_, 2)}" for z_, d_ in zip(zb, dT)))
+        K.krok("Modul pružnosti a součinitel teplotní roztažnosti", "E; α", "",
+               f"{fmt(v.E, 0)} MPa; {t.alfa:.1e} 1/K".replace(".", ","))
+        h = self.prurez.h
+        rows = []
+        for k in VARIANTY_TEPLOTY:
+            q = v.var[k]
+            rows.append([k, fmt(q["N"]), fmt(q["M"]), fmt(float(v.sigma(h, k)), 2), fmt(float(v.sigma(v.zt, k)), 2),
+                         fmt(float(v.sigma(0.0, k)), 2)])
+        K.tabulka(["Varianta", "N_T = E·α·∫ΔT dA [kN]", "M_T = E·α·∫ΔT·(z − z_t) dA [kNm]", "σ_h", "σ v těžišti",
+                   "σ_d"], rows, "Charakteristická primární napětí od teploty [MPa] (tah +, tlak −)")
+        rows = [[DRUHY_KOMBINACI.get(d, d), fmt(g), fmt(ps), fmt(g * ps)]
+                for d, (g, ps) in t.soucinitele.items()]
+        K.tabulka(["Kombinace", "γ", "ψ", "γ·ψ"], rows, "Dílčí součinitele teploty v kombinacích")
+        K.text("Primární napětí násobená γ·ψ dané kombinace se přičítají k normálovým napětím v betonu "
+               "v provozních fázích – tlak a tah (charakteristická), mez lineárního dotvarování (kvazistálá), "
+               "dekomprese (častá / kvazistálá podle zadání) a hlavní napětí (charakteristická) – a to jen "
+               "nepříznivě (rozhoduje oteplení, ochlazení, nebo teplota nepůsobí). Šířka trhlin a MSÚ "
+               "(únosnost průřezu) se vlastními napětími nemění.")
+        K.obrazek("teplota", "Nelineární rozdělení teploty a primární napětí po výšce průřezu")
+
+    def _varianty_teploty(self, f: Faze | None = None) -> list:
+        """Varianty teploty pro kombinace ve fázi f: [None] bez teploty, jinak i oteplení a ochlazení."""
+        if self.vys_teplota is None or (f is not None and not f.provoz):
+            return [None]
+        return [None, *VARIANTY_TEPLOTY]
+
+    @staticmethod
+    def _pozn_teplota(out: dict, i: int, fn) -> str:
+        """Poznámka k posudku: rozhodující varianta teploty (fn = min pro tlak, max pro tah)."""
+        klic = fn(out, key=lambda k: fn(out[k][0][i], out[k][1][i]))
+        return f"teplota: {klic[2]}" if len(klic) > 2 else ""
+
+    def _napeti_teplota(self, z, druh: str, varianta: str | None):
+        """γ·ψ·σ_T(z) [MPa] – primární napětí od teploty v kombinaci druh (0 bez teploty)."""
+        if self.vys_teplota is None or varianta is None:
+            return 0.0
+        return self.vys_teplota.navrhove(z, druh, varianta)
 
     # ------------------------------------------------------------------
     def _napeti(self, z, NP, MP, Mg0, ML, r=1.0, idx=None):
@@ -1275,13 +1340,17 @@ class NosnikPB:
             Kf.krok("Mez tahového napětí", "f_{ctm}(t)" if (nn.tah_provoz if f.provoz else nn.tah_predpeti) == "fctm"
                     else "f_{ctk,0,05}(t)", "", lim_t, "MPa")
             res = {}
+            var_T = self._varianty_teploty(f)
             for druh, ob in kombinace_list:
                 out = {}
                 for r_naz, r in (("sup", nn.r_sup), ("inf", nn.r_inf)):
                     for mm, Mx in (("max", ob.M_max), ("min", ob.M_min)):
                         sh = self._napeti(h, NP, MP, Mg0, Mx, r)
                         sd = self._napeti(0.0, NP, MP, Mg0, Mx, r)
-                        out[(r_naz, mm)] = (sh, sd)
+                        # klíč (P, M) bez teploty, (P, M, varianta) s primárním napětím od teploty
+                        for vt in var_T:
+                            out[(r_naz, mm) if vt is None else (r_naz, mm, vt)] = (
+                                sh + self._napeti_teplota(h, druh, vt), sd + self._napeti_teplota(0.0, druh, vt))
                 res[druh] = out
             self.msp_napeti[f.nazev] = res
             # tabulka – charakteristická / stálá, obálka
@@ -1313,6 +1382,13 @@ class NosnikPB:
                             f" + {fmt(Mg0[i])}·10^{{6}}·({fmt(sG[1])} − {fmt(zz)})/{fmt(sG[2])}"
                             f" + {fmt(Mx)}·10^{{6}}·({fmt(sL[1])} − {fmt(zz)})/{fmt(sL[2])}",
                             val, "MPa")
+            if len(var_T) > 1:
+                k_T = self.teplota.faktor("char")
+                for zz, naz in ((h, "horní"), (0.0, "dolní")):
+                    Kf.krok(f"Primární napětí od teploty – {naz} vlákna (charakteristická, γ·ψ = {fmt(k_T)})",
+                            "γ·ψ·σ_{T} (oteplení; ochlazení), přičítá se nepříznivě", "",
+                            "; ".join(fmt(float(self._napeti_teplota(zz, "char", vt)), 2) for vt in var_T[1:]),
+                            "MPa")
             # posudky
             fz = f.nazev
             for druh, out in res.items():
@@ -1324,6 +1400,7 @@ class NosnikPB:
                     self.protokol.pridej_posudek(Kf, VysledekPosudku(
                         "Tlakové napětí v betonu", "MSP", -float(vals_min[i]), lim_c, "MPa",
                         max(-float(vals_min[i]), 0) / lim_c, fz, nazk, float(x[i]),
+                        poznamka=self._pozn_teplota(out, i, min),
                         odkaz="5.10.2.2(5)" if f is self.faze[0] else "7.2(2)", skupina="Napětí v betonu"))
                     i = int(np.argmax(vals_max))
                     if f.provoz and self.kategorie:
@@ -1333,13 +1410,16 @@ class NosnikPB:
                     self.protokol.pridej_posudek(Kf, VysledekPosudku(
                         "Tahové napětí v betonu", "MSP", float(vals_max[i]), lim_t, "MPa",
                         max(float(vals_max[i]), 0) / lim_t if lim_t > 0 else (0 if vals_max[i] <= 0 else math.inf),
-                        fz, nazk, float(x[i]), poznamka="předpoklad neporušeného průřezu",
+                        fz, nazk, float(x[i]), poznamka="; ".join(
+                            p_ for p_ in ("předpoklad neporušeného průřezu", self._pozn_teplota(out, i, max)) if p_),
                         skupina="Napětí v betonu"))
                 if druh == "kvazistala" or (druh == "stala" and f is not self.faze[0]):
                     # 7.2(3): mez lineárního dotvarování – není mezní stav, při překročení upozornění
                     i = int(np.argmin(vals_min))
                     sc = max(-float(vals_min[i]), 0.0)
-                    Kf.krok(f"Tlak vůči mezi lineárního dotvarování – {nazk} (x = {fmt(x[i], 3)} m)",
+                    pt = self._pozn_teplota(out, i, min)
+                    Kf.krok(f"Tlak vůči mezi lineárního dotvarování – {nazk} (x = {fmt(x[i], 3)} m"
+                            + (f", {pt}" if pt else "") + ")",
                             "|σ_{c}|/(k_{2}·f_{ck}(t)) ≤ 1", f"{fmt(sc)}/({fmt(nn.k2)}·{fmt(fck_t)})",
                             sc / lim_qp, "", "7.2(3)")
                     if sc > lim_qp:
@@ -1353,12 +1433,13 @@ class NosnikPB:
             if f.provoz and nn.dekomprese != "zadna":
                 druh = "casta" if nn.dekomprese == "casta" else "kvazistala"
                 ob = d[druh]
-                eta, info = self._dekomprese(NP, MP, Mg0, ob)
+                eta, info = self._dekomprese(NP, MP, Mg0, ob, druh)
                 i = int(np.argmax(eta))
                 self.protokol.pridej_posudek(Kf, VysledekPosudku(
                     "Dekomprese", "MSP", float(info["sE"][i]), float(info["sP"][i]), "MPa", float(eta[i]), fz,
                     NAZVY_KOMBINACI[druh], float(x[i]),
-                    poznamka=f"vlákno z = {fmt(info['z'][i])} mm; E_d = napětí od zatížení, R_d = |tlak od P_inf|",
+                    poznamka=f"vlákno z = {fmt(info['z'][i])} mm; E_d = napětí od zatížení"
+                             + (" vč. teploty" if self.vys_teplota is not None else "") + ", R_d = |tlak od P_inf|",
                     odkaz="7.3.1, tab. 7.1N", skupina="Dekomprese"))
             # šířka trhlin (7.3.4; ČSN 73 6222, tab. 12.4)
             if f.provoz and nn.trhliny != "zadna":
@@ -1476,8 +1557,9 @@ class NosnikPB:
             "Šířka trhlin", "MSP", v.w, nn.w_max, "mm", v.w / nn.w_max, f.nazev, nazk, float(x[i]),
             poznamka=f"{okraj} okraj, P_{r_naz}, s_r,max {v.s_r_vzorec}", odkaz=odkaz, skupina="Trhliny"))
 
-    def _dekomprese(self, NP, MP, Mg0, ob: Obalka):
-        """Využití z hlediska dekomprese: η = σ_od zatížení / |σ_od předpětí| v rozhodujícím vláknu."""
+    def _dekomprese(self, NP, MP, Mg0, ob: Obalka, druh: str | None = None):
+        """Využití z hlediska dekomprese: η = σ_od zatížení / |σ_od předpětí| v rozhodujícím vláknu;
+        druh = kombinace pro primární napětí od teploty (přičítá se nepříznivě, tj. největší tah)."""
         nn = self.n
         h = self.prurez.h
         if nn.dekomprese_rezim == "kabel":
@@ -1495,6 +1577,9 @@ class NosnikPB:
         for z, Mx in ((zd, ob.M_max), (zh, ob.M_min)):
             sP = self._napeti(z, NP, MP, 0.0, 0.0, nn.r_inf)
             sE = self._napeti(z, 0.0, 0.0, Mg0, Mx)
+            if druh is not None and self.vys_teplota is not None:
+                sE = sE + np.max([np.broadcast_to(self._napeti_teplota(z, druh, vt), sE.shape)
+                                  for vt in self._varianty_teploty()], 0)
             # vlákno tlačené předpětím: η = σ_E/|σ_P|; jinak η = 1 + σ/f_ctm (> 1, pokud je vlákno v tahu)
             eta = np.where(sP < 0, np.maximum(sE, 0) / np.where(sP < 0, -sP, 1),
                            np.where(sP + sE > 0, 1.0 + (sP + sE) / self.beton.fctm, 0.0))
@@ -1512,7 +1597,9 @@ class NosnikPB:
         K = self.protokol.kapitola("Hlavní napětí v betonu", 2)
         K.text("Hlavní tahová napětí se ověřují v neporušených oblastech podle ČSN EN 1992-2 (příloha QQ, 12.6.3): "
                "σ_1 ≤ f_ctb = (1 − 0,8·σ_3/f_ck)·f_ctk,0,05. Smyková napětí τ = V·S(z)/(I·b(z)), V zahrnuje "
-               "posouvající sílu od předpětí. Kombinace charakteristická; vyhodnocení ve stojině průřezu.")
+               "posouvající sílu od předpětí. Kombinace charakteristická; vyhodnocení ve stojině průřezu."
+               + (" Normálové napětí σ_x zahrnuje nepříznivě primární napětí od nerovnoměrné složky teploty."
+                  if self.vys_teplota is not None else ""))
         zz = np.linspace(0.02 * P.h, 0.98 * P.h, 49)
         bz = P.sirka(zz)
         zz, bz = zz[bz > 1.0], bz[bz > 1.0]
@@ -1535,6 +1622,7 @@ class NosnikPB:
             NP, MP, VP = self._sily_predpeti(f.sigma, f.k_Ap)
             ob = self.komb[f.nazev]["char"]
             g0V = self.zs_g0.V_max
+            sT = [(vt, self._napeti_teplota(zz, "char", vt)) for vt in self._varianty_teploty(f)]
             best = (0.0, 0, 0, 0.0, 0.0, 0.0)
             prof = None
             eta_x = np.zeros_like(self.x)
@@ -1544,23 +1632,26 @@ class NosnikPB:
                     for Mx, Vx in ((ob.M_max[i], ob.V_max[i]), (ob.M_max[i], ob.V_min[i])):
                         V = Vx + g0V[i] + r * VP[i]
                         tau = V * 1e3 * Sz / (IL * bz)
-                        sx = self._napeti(zz, NP[i], MP[i], Mg0[i], Mx, r, idx=i)
-                        s1 = sx / 2 + np.sqrt((sx / 2) ** 2 + tau ** 2)
-                        s3 = sx / 2 - np.sqrt((sx / 2) ** 2 + tau ** 2)
-                        fctb = np.where(s3 < 0, (1 - 0.8 * np.abs(s3) / b.fck) * b.fctk005, b.fctk005)
-                        eta = np.where(s1 > 0, s1 / fctb, 0)
-                        j = int(np.argmax(eta))
-                        eta_x[i] = max(eta_x[i], eta[j])
-                        if eta[j] > best[0]:
-                            best = (float(eta[j]), i, j, float(s1[j]), float(s3[j]), float(fctb[j]))
-                            prof = (NP[i], MP[i], Mg0[i], Mx, V, r)
+                        sx0 = self._napeti(zz, NP[i], MP[i], Mg0[i], Mx, r, idx=i)
+                        for vt, sTz in sT:
+                            sx = sx0 + sTz
+                            s1 = sx / 2 + np.sqrt((sx / 2) ** 2 + tau ** 2)
+                            s3 = sx / 2 - np.sqrt((sx / 2) ** 2 + tau ** 2)
+                            fctb = np.where(s3 < 0, (1 - 0.8 * np.abs(s3) / b.fck) * b.fctk005, b.fctk005)
+                            eta = np.where(s1 > 0, s1 / fctb, 0)
+                            j = int(np.argmax(eta))
+                            eta_x[i] = max(eta_x[i], eta[j])
+                            if eta[j] > best[0]:
+                                best = (float(eta[j]), i, j, float(s1[j]), float(s3[j]), float(fctb[j]))
+                                prof = (NP[i], MP[i], Mg0[i], Mx, V, r, vt)
             eta, i, j, s1, s3, fctb = best
+            vt_rozh = prof[-1] if prof is not None else None
             # průběh po celé výšce průřezu v rozhodujícím řezu (pro graf; posudek jen ve stojině)
             if prof is not None:
-                NPi, MPi, Mg0i, Mx, V, r = prof
+                NPi, MPi, Mg0i, Mx, V, r, _ = prof
                 bf = P.sirka(zf)
                 tf = np.divide(V * 1e3 * Sf, self.secL[i, 2] * bf, out=np.zeros_like(zf), where=bf > 1.0)
-                sf = self._napeti(zf, NPi, MPi, Mg0i, Mx, r, idx=i)
+                sf = self._napeti(zf, NPi, MPi, Mg0i, Mx, r, idx=i) + self._napeti_teplota(zf, "char", vt_rozh)
                 rf = np.sqrt((sf / 2) ** 2 + tf ** 2)
                 s3f = sf / 2 - rf
                 prof = (sf, tf, sf / 2 + rf, s3f,
@@ -1573,7 +1664,8 @@ class NosnikPB:
                    f"(1 − 0,8·{fmt(abs(min(s3, 0)))}/{fmt(b.fck)})·{fmt(b.fctk005)}", fctb, "MPa", "QQ.101")
             self.protokol.pridej_posudek(K, VysledekPosudku(
                 "Hlavní tahové napětí", "MSP", s1, fctb, "MPa", eta, f.nazev, "charakteristická", float(self.x[i]),
-                poznamka=f"z = {fmt(zz[j])} mm", odkaz="EN 1992-2 QQ", skupina="Hlavní napětí"))
+                poznamka=f"z = {fmt(zz[j])} mm" + (f"; teplota: {vt_rozh}" if vt_rozh else ""),
+                odkaz="EN 1992-2 QQ", skupina="Hlavní napětí"))
         K.obrazek("hlavni_napeti", "Průběh hlavních napětí po výšce průřezu v rozhodujícím řezu")
 
     # ------------------------------------------------------------------
