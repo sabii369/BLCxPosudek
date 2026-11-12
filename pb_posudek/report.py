@@ -39,7 +39,10 @@ main{max-width:1080px;margin:0 auto;padding:24px 16px 64px}
 h1{font-size:26px;margin:0 0 4px}
 h2{font-size:20px;margin:36px 0 10px;padding-bottom:4px;border-bottom:2px solid var(--line)}
 h3{font-size:16px;margin:24px 0 8px}
-.meta{color:var(--ink2);margin-bottom:20px}
+.meta{color:var(--ink2);margin-bottom:12px}
+.hlav{display:grid;grid-template-columns:max-content 1fr;gap:2px 14px;margin:0 0 12px;font-size:13px}
+.hlav dt{color:var(--ink2)}.hlav dd{margin:0}
+.verdikt{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin:0 0 20px;font-size:14px}
 table{border-collapse:collapse;width:100%;margin:8px 0 16px;font-size:13px;font-variant-numeric:tabular-nums}
 th,td{border-bottom:1px solid var(--line);padding:4px 8px;text-align:left;vertical-align:top}
 td.num{text-align:right}
@@ -163,6 +166,25 @@ def _souhrn(model) -> str:
     return cards + tab + tab2
 
 
+def _hlavicka(model) -> str:
+    """Údaje pod nadpisem (Protokol.hlavicka) a celkový výsledek posouzení."""
+    P = model.protokol
+    out = ""
+    if P.hlavicka:
+        out += '<dl class="hlav">' + "".join(
+            f"<dt>{html.escape(k)}</dt><dd>{_mat(html.escape(v))}</dd>" for k, v in P.hlavicka) + "</dl>"
+    pos = P.posudky
+    nok = sum(not v.vyhovuje for v in pos)
+    tag = TAG_OK_ALL if not nok else TAG_BAD_ALL
+    txt = f"{len(pos)} posudků" + (f", nevyhovuje {nok}" if nok else "")
+    mx = max(pos, key=lambda v: v.vyuziti) if pos else None
+    if mx is not None:
+        txt += f"; nejvyšší využití {procenta(mx.vyuziti)} – {mx.nazev} ({mx.faze})"
+    if P.upozorneni:
+        txt += f"; upozornění {len(P.upozorneni)}"
+    return out + f'<div class="verdikt"><b>Celkový výsledek:</b> {tag}<span>{html.escape(txt)}</span></div>'
+
+
 def sestav_html(model, obrazky: dict[str, str], adr_obr: Path, embed: bool = True) -> str:
     P = model.protokol
     parts = []
@@ -226,7 +248,8 @@ def sestav_html(model, obrazky: dict[str, str], adr_obr: Path, embed: bool = Tru
     vyuz = ""
     if "vyuziti" in obrazky:
         vyuz = (f'<figure><img src="{_img(adr_obr / obrazky["vyuziti"], embed)}" alt="Souhrn využití">'
-                "<figcaption>Využití jednotlivých posudků (maximum přes fáze); zelená η ≤ 90 %, žlutá ≤ 100 %, "
+                "<figcaption>Využití jednotlivých posudků (maximum přes fáze; posudky jednotlivých kabelů "
+                "sloučeny – rozhoduje nejvyšší); zelená η ≤ 90 %, žlutá ≤ 100 %, "
                 "červená &gt; 100 %</figcaption></figure>")
     pr = model.projekt
     meta = (f"Vypracoval: {html.escape(pr.get('autor', '') or '–')} · Datum: {dt.date.today():%d. %m. %Y} · "
@@ -235,6 +258,7 @@ def sestav_html(model, obrazky: dict[str, str], adr_obr: Path, embed: bool = Tru
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(P.nazev)}</title><style>{CSS}</style></head><body><main>
 <h1>{html.escape(P.nazev)}</h1><div class="meta">{meta}</div>
+{_hlavicka(model)}
 <h2 id="souhrn">Souhrn posouzení</h2>
 {_souhrn(model)}
 {vyuz}

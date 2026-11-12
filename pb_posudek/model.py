@@ -357,19 +357,27 @@ class NosnikPB:
         K.tabulka(["x [m]"] + [f"z {k.nazev} [mm]" for k in self.kabely] +
                   [f"α {k.nazev} [°]" for k in self.kabely], rows, "Poloha a sklon kabelů v charakteristických řezech")
         K.obrazek("kabely", "Vedení kabelů po délce nosníku")
-        # kontrola výškového překrytí kanálků (kabely jsou zadány v jedné svislé rovině)
+        # kontrola výškového překrytí kanálků (příčná poloha kabelů se nezadává)
         if not self.predem:
+            rows = []
             for a in range(len(self.kabely)):
                 for c in range(a + 1, len(self.kabely)):
                     ka, kc = self.kabely[a], self.kabely[c]
                     mez = 0.5 * (ka.d_kanalku + kc.d_kanalku)
-                    prekryv = np.abs(self.zk[a] - self.zk[c]) < mez
+                    dz = np.abs(self.zk[a] - self.zk[c])
+                    prekryv = dz < mez
                     if mez > 0 and prekryv.any():
                         xs = x[prekryv]
-                        K.text(f"⚠ Kanálky {ka.nazev} a {kc.nazev} se výškově překrývají v úseku x = "
-                               f"{fmt(xs.min(), 3)}–{fmt(xs.max(), 3)} m (svislá vzdálenost os < "
-                               f"{fmt(mez)} mm). V tomto úseku se při stanovení b_w,nom uvažují vedle sebe "
-                               "v téže úrovni; zkontrolujte vedení kabelů (křížení ve stojině).")
+                        rows.append([f"{ka.nazev} + {kc.nazev}", f"{fmt(xs.min(), 3)}–{fmt(xs.max(), 3)}",
+                                     fmt(float(dz[prekryv].min()), 1), fmt(mez, 1)])
+            if rows:
+                K.text("Kanálky některých kabelů se výškově překrývají (svislá vzdálenost os je menší než "
+                       "součet poloměrů kanálků). Příčná poloha kabelů se nezadává – v těchto úsecích se "
+                       "kanálky při stanovení b_w,nom uvažují vedle sebe v téže úrovni. Leží-li kabely "
+                       "vedle sebe (např. v různých stojinách), je to v pořádku; jinak zkontrolujte vedení "
+                       "kabelů (křížení ve stojině).")
+                K.tabulka(["Kabely", "Úsek x [m]", "min. svislá vzdálenost os [mm]",
+                           "součet poloměrů [mm]"], rows, "Výškové překrytí kanálků")
 
         # průřezové charakteristiky po délce (brutto / ideální)
         n = len(x)
