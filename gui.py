@@ -28,6 +28,7 @@ from .materialy import (BETONARSKA_VYZTUZ, DRUHY_PREDPINACI_VYZTUZE, PREDPINACI_
                         BetonarskaVyztuz, PredpinaciVyztuz)
 from .model import Nastaveni
 from .protokol import fmt
+from .teplota import SOUCINITELE_VYCHOZI as SOUCINITELE_TEPLOTY
 from .toml_zapis import dumps as toml_dumps
 from .vstup import _prurez, geometrie_kabelu, model_ze_slovniku, nacti_soubor
 from .zatizeni import DRUHY_KOMBINACI
@@ -1114,17 +1115,27 @@ class Aplikace(tk.Tk):
         horni = ttk.Frame(z)
         horni.pack(fill="x")
         lf = ttk.LabelFrame(horni, text="Prostředí", padding=6)
-        lf.pack(side="left", fill="x", expand=True)
+        lf.pack(side="left", fill="x", expand=True, anchor="n")
         self.f_prostredi = Formular(lf, [("RH", "Relativní vlhkost RH [%]", "float", None),
                                          ("t_s", "Konec ošetřování t_s [dny]", "float", None)])
         self.f_prostredi.pack(fill="x")
         lf = ttk.LabelFrame(horni, text="Časová osa (stáří betonu)", padding=6)
-        lf.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        lf.pack(side="left", fill="x", expand=True, anchor="n", padx=(8, 0))
         self.f_cas = Formular(lf, [("t0", "Napínání / uvolnění t0 [dny]", "float", None),
                                    ("t_provoz", "Uvedení do provozu [dny]", "float", None),
                                    ("t_akt", "Aktuální stáří [dny] (prázdné = neposuzovat)", "optfloat", None),
                                    ("t_konec", "Konec životnosti [dny]", "float", None)])
         self.f_cas.pack(fill="x")
+        lf = ttk.LabelFrame(horni, text="Nerovnoměrná složka teploty (ČSN EN 1991-1-5, příl. B)", padding=6)
+        lf.pack(side="left", fill="x", expand=True, anchor="n", padx=(8, 0))
+        pole = [("uvazovat", "Uvažovat", "bool", False),
+                ("svrsek", "Svršek [m]", "choice", ["bez", "izolace", "0.05", "0.10", "0.15", "0.20"]),
+                ("alfa", "α [1/K]", "optfloat", None), ("E", "E [MPa] (prázdné = E_cm)", "optfloat", None)]
+        zkratky = {"char": "char.", "casta": "častá", "kvazistala": "kvazist."}
+        for k in SOUCINITELE_TEPLOTY:
+            pole += [(f"g_{k}", f"γ {zkratky.get(k, k)}", "optfloat", None), (f"p_{k}", "ψ", "optfloat", None)]
+        self.f_teplota = Formular(lf, pole, sloupcu=2)
+        self.f_teplota.pack(fill="x")
         rf = ttk.Frame(z)
         rf.pack(fill="x", pady=(8, 2))
         ttk.Label(rf, text="Vnější zatížení:", style="Nadpis.TLabel").pack(side="left")
@@ -1285,6 +1296,7 @@ class Aplikace(tk.Tk):
         self.f_degradace.nastav(d.get("degradace", {}))
         self.f_prostredi.nastav(d.get("prostredi", {}))
         self.f_cas.nastav(d.get("casova_osa", {}))
+        self._nastav_teplotu(d.get("teplota"))
         zat = d.get("zatizeni", {})
         self.t_stale.nastav(zat.get("stale", []))
         prom = []
@@ -1321,6 +1333,10 @@ class Aplikace(tk.Tk):
         d["degradace"] = {k: v for k, v in self.f_degradace.ziskej().items() if v}
         d["prostredi"] = self.f_prostredi.ziskej()
         d["casova_osa"] = self.f_cas.ziskej()
+        d.pop("teplota", None)
+        tep = self._teplota_data()
+        if tep:
+            d["teplota"] = tep
         prom = []
         for r in self.t_prom.ziskej():
             sily, roz = r.pop("sily", None), r.pop("rozestupy", None)
@@ -1338,6 +1354,39 @@ class Aplikace(tk.Tk):
         if not d["kabel"]:
             raise ValueError("Zadejte alespoň jeden kabel.")
         return d
+
+    def _nastav_teplotu(self, t: dict | None):
+        t = dict(t or {})
+        hodn = {"uvazovat": bool(t) and t.get("uvazovat", True), "svrsek": str(t.get("svrsek", "bez")),
+                "alfa": t.get("alfa", 1e-5), "E": t.get("E")}
+        souc = {**SOUCINITELE_TEPLOTY, **{k: tuple(v) for k, v in (t.get("soucinitele") or {}).items()}}
+        for k, (g, ps) in souc.items():
+            hodn[f"g_{k}"], hodn[f"p_{k}"] = g, ps
+        self.f_teplota.nastav(hodn)
+
+    def _teplota_data(self) -> dict:
+        """Sekce [teplota] z formuláře (prázdná, není-li teplota zaškrtnuta)."""
+        f = self.f_teplota.ziskej()
+        if not f.get("uvazovat"):
+            return {}
+        out = {k: v for k, v in self.data.get("teplota", {}).items() if k in ("otepleni", "ochlazeni")}
+        sv = str(f.get("svrsek", "bez")).strip()
+        try:
+            out["svrsek"] = float(sv.replace(",", "."))
+        except ValueError:
+            out["svrsek"] = sv or "bez"
+        if f.get("alfa") not in (None, 1e-5):
+            out["alfa"] = f["alfa"]
+        if f.get("E") is not None:
+            out["E"] = f["E"]
+        souc = {}
+        for k, (g0, p0) in SOUCINITELE_TEPLOTY.items():
+            g, ps = f.get(f"g_{k}", g0), f.get(f"p_{k}", p0)
+            if (g, ps) != (g0, p0):
+                souc[k] = [g, ps]
+        if souc:
+            out["soucinitele"] = souc
+        return out
 
     def _prurez_data(self) -> dict:
         r = self.rezim_prurezu.get()
@@ -1714,6 +1763,8 @@ class Aplikace(tk.Tk):
         s = {"Souhrn využití": g.vyuziti, "Průřez": g.prurez, "Vedení kabelů": g.kabely,
              "Napětí v kabelech (ztráty)": g.napeti_kabelu, "Rozklad ztrát": g.ztraty_rozklad,
              "Předpínací síla v čase": g.sila_v_case, "Vnitřní síly": g.vnitrni_sily}
+        if getattr(m, "vys_teplota", None) is not None:
+            s["Teplota – primární napětí"] = g.teplota
         for i, f in enumerate(m.faze):
             s[f"Napětí v betonu – {f.nazev}"] = ("faze", i)
         s.update({"Napětí po výšce průřezu": g.napeti_profil, "Hlavní napětí": g.hlavni_napeti,

@@ -11,6 +11,7 @@ from .materialy import Beton, BetonarskaVyztuz, PredpinaciVyztuz
 from .model import Nastaveni, NosnikPB, SmykovaVyztuz
 from .msu import VrstvaVyztuze
 from .prurez import Prurez
+from .teplota import Teplota
 from .zatizeni import KombinaceVstup, ZatezovaciStav
 
 
@@ -175,6 +176,7 @@ def model_ze_slovniku(d: dict) -> NosnikPB:
         kombinace_vcetne_g0=bool(zat.get("obsahuje_vlastni_tihu", False)), t_vneseni=zat.get("t_vneseni"),
         t_akt=co.get("t_akt"), oslabeni_Ap=deg.get("oslabeni_predpinaci", 0.0),
         oslabeni_As=deg.get("oslabeni_betonarske", 0.0), oslabeni_Asw=deg.get("oslabeni_smykove", 0.0),
+        teplota=Teplota.ze_slovniku(d.get("teplota")),
     )
 
 
