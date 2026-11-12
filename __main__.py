@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .protokol import fmt
+from .protokol import fmt, procenta
 from .report import uloz_protokol
 from .vstup import nacti_model
 
@@ -33,7 +33,7 @@ def main(argv=None) -> int:
     print(f"{'MS':4} {'Posudek':42} {'Fáze':28} {'x [m]':>7} {'η':>7}")
     for v in model.protokol.posudky:
         print(f"{v.mezni_stav:4} {v.nazev[:42]:42} {v.faze[:28]:28} {fmt(v.x, 3) if v.x is not None else '–':>7} "
-              f"{v.vyuziti * 100:6.1f}% {'OK' if v.vyhovuje else 'NEVYHOVUJE'}")
+              f"{procenta(v.vyuziti):>8} {'OK' if v.vyhovuje else 'NEVYHOVUJE'}")
     for t in model.protokol.upozorneni:
         print(f"! Upozornění: {t}")
     ok = all(v.vyhovuje for v in model.protokol.posudky)

@@ -6,6 +6,20 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+#: absolutní hodnoty pod touto mezí se vypisují jako 0 (zaokrouhlovací šum výpočtu)
+NULA = 1e-10
+
+
+def cislo(v: Any) -> str:
+    """Krátký zápis čísla s desetinnou čárkou (formát g), např. 50 → „50“, 0.125 → „0,125“."""
+    return f"{float(v):g}".replace(".", ",")
+
+
+def procenta(eta: float, nd: int = 1) -> str:
+    """Využití η v procentech s desetinnou čárkou, např. 0.315 → „31,5 %“."""
+    return f"{eta * 100:.{nd}f} %".replace(".", ",")
+
+
 def fmt(v: Any, nd: int = 3) -> str:
     """Formátování čísla s desetinnou čárkou a rozumným počtem platných míst."""
     if v is None:
@@ -14,6 +28,8 @@ def fmt(v: Any, nd: int = 3) -> str:
         return v
     if isinstance(v, bool):
         return "ano" if v else "ne"
+    if isinstance(v, int):
+        return f"{v:,d}".replace(",", " ")
     try:
         f = float(v)
     except (TypeError, ValueError):
@@ -23,6 +39,8 @@ def fmt(v: Any, nd: int = 3) -> str:
     if math.isinf(f):
         return "∞"
     a = abs(f)
+    if a < NULA:          # numerický šum (např. sklon přímého kabelu, M v ose podpory)
+        f, a = 0.0, 0.0
     if nd == 0:
         return f"{f:,.0f}".replace(",", " ")
     if a != 0 and (a >= 1e7 or a < 1e-3):

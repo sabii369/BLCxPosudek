@@ -1983,9 +1983,9 @@ class NosnikPB:
             rho_w = (sv_min.Asw_s * f.k_Asw / (r.bw * math.sin(math.radians(sv_min.alpha)))
                      if r.bw > 0 else 0)
             self.protokol.pridej_posudek(K, VysledekPosudku(
-                "Minimální smyková výztuž", "MSÚ", rho_w * 100, r.rho_w_min * 100, "%",
+                "Minimální smyková výztuž", "MSÚ", r.rho_w_min * 100, rho_w * 100, "%",
                 r.rho_w_min / rho_w if rho_w > 0 else math.inf, f.nazev, "", None,
-                poznamka="ρ_w ≥ ρ_w,min = 0,08·√f_ck/f_yk", odkaz="9.2.2(5)", skupina="Smyk"))
+                poznamka="E_d = ρ_w,min = 0,08·√f_ck/f_yk ≤ R_d = navržené ρ_w", odkaz="9.2.2(5)", skupina="Smyk"))
             if np.any(np.isfinite(arr["dF_eta"])):
                 j = int(np.nanargmax(arr["dF_eta"]))
                 self.protokol.pridej_posudek(K, VysledekPosudku(

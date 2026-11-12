@@ -27,7 +27,7 @@ from . import __version__, grafy
 from .materialy import (BETONARSKA_VYZTUZ, DRUHY_PREDPINACI_VYZTUZE, PREDPINACI_VYZTUZ, RELAXACE_RHO1000, Beton,
                         BetonarskaVyztuz, PredpinaciVyztuz)
 from .model import Nastaveni
-from .protokol import fmt
+from .protokol import fmt, procenta
 from .teplota import SOUCINITELE_VYCHOZI as SOUCINITELE_TEPLOTY
 from .toml_zapis import dumps as toml_dumps
 from .vstup import _prurez, geometrie_kabelu, model_ze_slovniku, nacti_soubor
@@ -671,6 +671,12 @@ class Aplikace(tk.Tk):
         self._styl()
         self._menu()
         self._lista()
+        # stavový řádek se zabalí před kartami – jinak ho vysoké karty vytlačí z okna
+        self.stav = tk.StringVar(value="Připraveno")
+        sb = ttk.Frame(self)
+        sb.pack(fill="x", side="bottom")
+        self.progress = ttk.Progressbar(sb, mode="indeterminate", length=160)
+        ttk.Label(sb, textvariable=self.stav, anchor="w").pack(side="left", fill="x", padx=6)
         self.nb = ttk.Notebook(self)
         self.nb.pack(fill="both", expand=True, padx=6, pady=(0, 4))
         self._zalozka_materialy()
@@ -680,11 +686,6 @@ class Aplikace(tk.Tk):
         self._zalozka_zatizeni()
         self._zalozka_nastaveni()
         self._zalozka_vysledky()
-        self.stav = tk.StringVar(value="Připraveno")
-        sb = ttk.Frame(self)
-        sb.pack(fill="x", side="bottom")
-        self.progress = ttk.Progressbar(sb, mode="indeterminate", length=160)
-        ttk.Label(sb, textvariable=self.stav, anchor="w").pack(side="left", fill="x", padx=6)
         self.bind("<F5>", lambda e: self.spocitej())
         self.bind("<Control-s>", lambda e: self.uloz())
         self.bind("<Control-o>", lambda e: self.otevri())
@@ -1749,7 +1750,7 @@ class Aplikace(tk.Tk):
         self._radky = []
         for v in pos:
             tag = "ok" if v.vyuziti <= 0.9 else ("warn" if v.vyhovuje else "bad")
-            vals = (v.mezni_stav, v.nazev, f"{v.vyuziti * 100:.1f} %", v.faze, v.kombinace,
+            vals = (v.mezni_stav, v.nazev, procenta(v.vyuziti), v.faze, v.kombinace,
                     fmt(v.x, 3) if v.x is not None else "–", fmt(v.E_d), fmt(v.R_d), v.jednotka)
             iid = self.t_vys.insert("", "end", values=vals, tags=(tag,))
             self._radky.append((iid, v))
@@ -1758,7 +1759,7 @@ class Aplikace(tk.Tk):
             if p:
                 mx = max(p, key=lambda v: v.vyuziti)
                 lab, det = self.karty[ms]
-                lab.configure(text=f"{mx.vyuziti * 100:.0f} %",
+                lab.configure(text=procenta(mx.vyuziti, 0),
                               foreground="#0a7d0a" if mx.vyhovuje else "#b42323")
                 det.configure(text=f"{mx.nazev} – {mx.faze}")
         ok = all(v.vyhovuje for v in pos)
@@ -1832,7 +1833,7 @@ class Aplikace(tk.Tk):
             return
         v = next(v for iid, v in self._radky if iid == sel[0])
         txt = (f"{v.nazev}  [{v.odkaz}]   E_d = {fmt(v.E_d)} {v.jednotka},  R_d = {fmt(v.R_d)} {v.jednotka},  "
-               f"η = {v.vyuziti * 100:.1f} %   ({'vyhovuje' if v.vyhovuje else 'NEVYHOVUJE'})")
+               f"η = {procenta(v.vyuziti)}   ({'vyhovuje' if v.vyhovuje else 'NEVYHOVUJE'})")
         if v.poznamka:
             txt += f"\n{v.poznamka}"
         self.lbl_detail.configure(text=txt)
