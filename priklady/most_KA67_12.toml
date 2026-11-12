@@ -148,6 +148,12 @@ k2_nap = 1.0
 k7 = 1.0
 k8 = 1.0
 
+# Nerovnoměrná složka teploty (ČSN EN 1991-1-5, příl. B) – odkomentováním se primární napětí
+# (× γ·ψ kombinace) přičtou k napětí v betonu; svršek "bez" | "izolace" | tloušťka [m]
+# [teplota]
+# svrsek = 0.18
+# soucinitele = { char = [1.0, 0.6], casta = [1.0, 0.6], kvazistala = [1.0, 0.5] }
+
 # ---- Most a zatížení (BLC) – karta 0 ----
 # Zatížení nosníku ([zatizeni]) se nezadává: vytvoří se z obálek vnitřních sil
 # nejzatíženějšího nosníku. Rozpětí L0, délka L, beton a průřez (A, Iy) se berou z posudku.

@@ -147,13 +147,22 @@ def fn_sily(m, adr):
 
 def profily_faze(m, idx: int, i: int) -> dict:
     """{kombinace: (z, σ_min(z), σ_max(z))} v řezu i pro fázi idx – obálka variant
-    P_sup/P_inf × M_max/M_min z m.msp_napeti (σ lineární mezi krajními vlákny)."""
+    P_sup/P_inf × M_max/M_min (× teplota) z m.msp_napeti; σ od zatížení a předpětí je lineární
+    mezi krajními vlákny, primární napětí od teploty (klíč s variantou) nelineární."""
     f = m.faze[idx]
     h = m.prurez.h
     z = np.linspace(0.0, h, 41)
+    vt = getattr(m, "vys_teplota", None)
+    if vt is not None:   # body zlomu rozdělení teploty
+        z = np.unique(np.concatenate([z] + [q["z"] for q in vt.var.values()]))
     out = {}
     for druh, var in m.msp_napeti[f.nazev].items():
-        prof = np.array([sd[i] + (sh[i] - sd[i]) * z / h for sh, sd in var.values()])
+        prof = []
+        for klic, (sh, sd) in var.items():
+            t = klic[2] if len(klic) > 2 else None
+            tz, th, td = (m._napeti_teplota(zz, druh, t) for zz in (z, h, 0.0))
+            prof.append(sd[i] - td + (sh[i] - th - sd[i] + td) * z / h + tz)
+        prof = np.array(prof)
         out[druh] = (z, prof.min(0), prof.max(0))
     return out
 

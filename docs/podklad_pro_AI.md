@@ -110,6 +110,7 @@ Jeden slovník `d` (TOML/JSON) = vstup Posudku PB + sekce `[blc]`. Sekce `[zatiz
 | `[predem]` | `eta_p1`, `alpha1`, `alpha2` … (jen předem předpjaté) | posudek |
 | `[posouzeni]` | pole `Nastaveni` (`pb_posudek/model.py`): `gamma_G` 1,35, `gamma_G_inf` 1,0, `xi` 0,85, `kombinace_msu` "6.10ab"/"6.10", `k1_nap`, `k2_nap`, `k7`, `k8`, `k1`, `k2`, `k5`, `tah_predpeti`, `tah_provoz`, `dekomprese`, **`zbytkova_zivotnost`** ("" / "50" / "15-30" / "10" → kategorie B–E podle ČSN 73 6222, tab. 12.3, přepíše `dekomprese`, `trhliny`, `w_max` podle tab. 12.4), `trhliny` (char/casta/kvazistala/zadna), `w_max`, `xi_p`, `pruhyb_limit`, `hlavni_napeti` … | posudek; **γ_G, γ_G,inf, ξ i BLC** (kombinace) |
 | `[degradace]` | `oslabeni_predpinaci`, `oslabeni_betonarske`, `oslabeni_smykove` [%] (0 až < 100) | posudek |
+| `[teplota]` | nerovnoměrná složka teploty (ČSN EN 1991-1-5, příl. B; chybí = neuvažuje se, `uvazovat = false`): `svrsek` ("bez" / "izolace" / tloušťka [m]), `alfa` (1e-5), `E` [MPa] (výchozí E_cm), `otepleni = [ΔT1..3]`, `ochlazeni = [ΔT1..4]` (místo tab. B.3), `soucinitele = { char = [γ, ψ], casta, kvazistala, "6.10a", "6.10b", "6.10" }` (výchozí 1,0/0,6; 1,0/0,6; 1,0/0,5; 1,5/0,6) | posudek |
 
 Souřadnice posudku: x [m] od **levého konce nosníku** (ložiska v (L − L0)/2 od konců),
 z [mm] **od spodního líce** průřezu.
@@ -279,6 +280,13 @@ fázích platí `taznost_oslabena`: mezní přetvoření předpínací výztuže
 nedosáhne k·f_pd a M_Rd klesne, jakmile rozhoduje výztuž. Pozor: samotné snížení `taznost`
 dává strmější zpevnění a vyšší M_Rd – pro vliv koroze použít `taznost_oslabena`.
 Je-li ε_ud,red ≤ počátečnímu přetvoření výztuže ε_p0, výpočet skončí chybou (ValueError).
+
+Teplota `[teplota]` (`pb_posudek/teplota.py`, `model.vys_teplota`): primární napětí
+σ_T(z) = E·α·(ε̄ + κ̄·(z − z_t) − ΔT(z)) pro oteplení a ochlazení (přesná integrace po výšce
+průřezu; `vys_teplota.sigma(z_mm, "oteplení")`). V provozních fázích se γ·ψ·σ_T přičte nepříznivě
+k tlaku a tahu (char), mezi dotvarování (kvazistálá), dekompresi a hlavním napětím; šířka trhlin
+a MSÚ beze změny. `model.msp_napeti[faze][druh]` má pak klíče `(P, M)` bez teploty a
+`(P, M, "oteplení"|"ochlazení")` s teplotou (napětí v krajních vláknech už vč. γ·ψ·σ_T).
 
 ### 6.2 Výsledky – `model.protokol.posudky`
 
@@ -464,7 +472,7 @@ Most (BLC) je drahý; posudek levný. Most přepočítat, právě když se změn
 | `[blc] vystup`, `kriterium`, `rezim`, `t_vneseni`, `t_stale` | ne | jen `posudek(...)` |
 | `[nosnik] L0`, `[beton] trida`/`Ecm`/`objemova_tiha`, `[prurez]` (při `prurez_z_posudku`) | **ano** | sdílené vstupy |
 | `[nosnik] L` (délka nosníku) | ne (most používá L0) | **pozor na geometrii kabelů**, kap. 9 |
-| kabely, výztuž, materiály výztuže, `[prostredi]`, `[casova_osa]`, `[degradace]`, ostatní `[posouzeni]` | ne | jen `posudek(...)` |
+| kabely, výztuž, materiály výztuže, `[prostredi]`, `[casova_osa]`, `[degradace]`, `[teplota]`, ostatní `[posouzeni]` | ne | jen `posudek(...)` |
 
 ### 8.4 Výkon a paralelizace
 

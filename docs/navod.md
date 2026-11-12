@@ -520,7 +520,39 @@ Zvolené vozidlo musí být Vn, Vr nebo Ve – pro ně se počítá protokol.
   (méně tažnou) výztuž se strmějším zpevněním – M_Rd tím roste, pro korozi se nehodí.
 - Úprava je v balíčku posudku (`pb_posudek`, repo Posudek PB, větev `aktualni-stari-koroze`).
 
-### 8.7 Upozornění (mez lineárního dotvarování)
+### 8.7 Nerovnoměrná složka teploty (ČSN EN 1991-1-5, příloha B)
+
+Karta 5 → rámeček „Nerovnoměrná složka teploty“ (`[teplota]` ve vstupu; sekce chybí nebo
+není zaškrtnuto „Uvažovat“ = teplota se neuvažuje):
+
+- **Rozdělení teploty** po výšce průřezu h = výška nosníku z karty 2 podle obr. 6.2c a tab. B.3
+  (betonová mostovka) pro **oteplení** (ΔT1, ΔT2, ΔT3) i **ochlazení** (ΔT1 … ΔT4) – podle
+  svršku: `svrsek = "bez"`, `"izolace"` (vodotěsná izolace) nebo tloušťka svršku [m]
+  (např. 0.18); mezi řádky tabulky lineární interpolace (h i tloušťka svršku), stejně jako
+  tabulkový výpočet teploty (Excel). Výšky h1, h2, h3 (h4) podle obr. 6.2c, u oteplení
+  h3 ≤ 0,1 m + tloušťka svršku. Rozdíly lze zadat i ručně: `otepleni = [ΔT1, ΔT2, ΔT3]`,
+  `ochlazeni = [ΔT1, ΔT2, ΔT3, ΔT4]` (jen v souboru).
+- **Primární (vlastní) napětí** – nosník je staticky určitý, takže nelineární rozdělení vyvolá
+  jen napětí v rovnováze v průřezu: σ(z) = E·α·(ε̄ + κ̄·(z − z_t) − ΔT(z)), ε̄ = ∫ΔT·b dz / A,
+  κ̄ = ∫ΔT·(z − z_t)·b dz / I; E = E_cm betonu (lze zadat `E`), α = 1·10⁻⁵ 1/K (`alfa`).
+  Integruje se přesně po výšce skutečného betonového průřezu. Excel místo toho násobí
+  průměrné přetvoření oblasti její plochou a těžiště bere z teplotního obrazce bez vlivu
+  šířky – u obdélníku je to shodné, u průřezu s pásnicemi (KA) se napětí liší o ≈ 0,1 MPa
+  (KA-73/15: horní vlákna při oteplení −1,05 místo −1,19 MPa).
+- **Dílčí součinitele** γ, ψ pro kombinace (výchozí): charakteristická 1,0 / 0,6, častá
+  1,0 / 0,6, kvazistálá 1,0 / 0,5, MSÚ 6.10a, 6.10b, 6.10 1,5 / 0,6
+  (`soucinitele = { char = [1.0, 0.6], … }`). Primární napětí × γ·ψ se v **provozních
+  fázích** přičte k napětí v betonu **jen nepříznivě** (rozhoduje oteplení, ochlazení, nebo
+  teplota nepůsobí): tlak a tah (charakteristická), mez lineárního dotvarování (kvazistálá),
+  dekomprese (častá / kvazistálá) a hlavní napětí (charakteristická). Šířka trhlin a MSÚ se
+  nemění (vlastní napětí neovlivní únosnost průřezu) – součinitele MSÚ jsou jen v tabulce.
+- Protokol: kapitola „Nerovnoměrná složka teploty“ (ΔT, body rozdělení, N_T, M_T, napětí
+  v horních / dolních vláknech a v těžišti, součinitele) s grafem; u posudku napětí poznámka
+  „teplota: oteplení / ochlazení“, rozhoduje-li teplota; graf napětí v řezech má nelineární
+  průběh. Platí i pro výpočet zatížitelnosti (teplota působí stále, q se škáluje).
+- Úprava je v balíčku posudku (`pb_posudek/teplota.py`, repo Posudek PB).
+
+### 8.8 Upozornění (mez lineárního dotvarování)
 
 Tlak v betonu vůči mezi lineárního dotvarování k2·f_ck(t) (k2 = 0,45; ČSN EN 1992-1-1, 7.2(3))
 **není mezní stav** – nevstupuje do využití, výsledku VYHOVUJE / NEVYHOVUJE ani do zatížitelnosti.
@@ -530,7 +562,7 @@ třeba uvažovat nelineární dotvarování: v souhrnu protokolu a u příslušn
 souhrnnými kartami, počet ve stavovém řádku) a ve výpisu dávky (`! Upozornění: …`). Ztráty předpětí
 a průhyb se počítají s lineárním dotvarováním (nelineární jen od předpětí při vnesení, k_σ > 0,45).
 
-### 8.8 Soubor
+### 8.9 Soubor
 
 Vstup Posudku PB rozšířený o sekci `[blc]` (popis klíčů v `blc_posudek/vypocet.py`).
 Uložený soubor obsahuje i sekci `[zatizeni]` z posledního výpočtu mostu, takže jde otevřít

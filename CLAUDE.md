@@ -65,6 +65,10 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
   `taznost` (neoslabená, sklon zpevnění) a `taznost_oslabena` (koroze) → `Faze.eps_ud_p` ve stejných fázích,
   `ohybova_unosnost(eps_ud_p=…)` – diagram se jen zkrátí na 0,9·ε_uk,red; GUI karta 1. Mez lineárního dotvarování (7.2(3))
   není posudek: krok výpočtu + při překročení `Protokol.upozorneni` (souhrn HTML, GUI `lbl_upozorneni`, výpis dávky).
+  Teplota `[teplota]` (`pb_posudek/teplota.py`, ČSN EN 1991-1-5 příl. B, tab. B.3 jako x-514-Teplota.xlsx): primární
+  napětí (přesná integrace po průřezu, Excel zjednodušuje) × γ·ψ kombinace nepříznivě k napětí v betonu v provozu
+  (tlak/tah char, dotvarování, dekomprese, hlavní napětí; ne trhliny, ne MSÚ); `msp_napeti` klíče `(P, M, varianta)`,
+  `grafy_most.profily_faze` nelineární průběh; GUI karta 5.
 - Zatížitelnost: `blc_posudek/zatizitelnost.py` – `zatizitelnost(d, vys, druhy=…)` → `VysledekZatizitelnosti`
   (`druhy` Vn, Vr, Ve → `ZatizitelnostDruhu`; tíha pro η = 1 každého posudku po schématech – `_hledej`, Illinois se
   sdílenými výpočty, q přeškálované `vys_pro_V`; schémata po posudcích `_slouc`: Vn dvounáprava / náhradní náprava

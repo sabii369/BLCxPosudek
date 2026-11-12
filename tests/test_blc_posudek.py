@@ -108,10 +108,21 @@ def test_zadany_nosnik_a_rezim(d, vysledek):
     assert len(zat["promenne"]) == 1 and "Ve 80 t" in zat["promenne"][0]["nazev"]
 
 
-def test_napeti_v_rezech(vysledek):
+@pytest.fixture(scope="module")
+def vysledek_teplota(d):
+    d2 = copy.deepcopy(d)
+    d2["teplota"] = {"svrsek": 0.18}
+    return spocti(d2)
+
+
+@pytest.mark.parametrize("fixt", ["vysledek", "vysledek_teplota"])
+def test_napeti_v_rezech(fixt, request):
     import numpy as np
     from blc_posudek.grafy_most import profily_faze, rezy_posudku
-    vys, o, model = vysledek
+    vys, o, model = request.getfixturevalue(fixt)
+    if fixt == "vysledek_teplota":   # provozní fáze mají varianty s teplotou (nelineární průběh)
+        assert model.vys_teplota is not None
+        assert any(len(k) == 3 for k in model.msp_napeti[model.faze[-1].nazev]["char"])
     rz = rezy_posudku(model)
     i, x = rz["podpora"]
     assert 0.0 < x < 1.5 and i != model.ia
