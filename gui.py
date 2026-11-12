@@ -77,6 +77,8 @@ POPISKY_NASTAVENI = {
     "pruhyb_limit": "Mezní průhyb L/…", "relaxace_t_max_h": "Relaxace – max. čas [h]",
     "hlavni_napeti": "Posoudit hlavní napětí",
 }
+# dílčí součinitele stálých zatížení – zadávají se na kartě 5 (sekce „Dílčí součinitele zatížení“)
+SOUCINITELE_STALE = ("gamma_G", "gamma_G_inf", "xi")
 VOLBY_NASTAVENI = {
     "tah_predpeti": ["fctm", "fctk005", "0"], "tah_provoz": ["fctm", "fctk005", "0"],
     "dekomprese": ["casta", "kvazistala", "zadna"], "dekomprese_rezim": ["krajni", "kabel"],
@@ -912,6 +914,7 @@ class Aplikace(tk.Tk):
         self.f_prostredi.doplnit(self.VYCH_PROSTREDI)
         self.f_cas.doplnit(self.VYCH_CAS)
         self.f_nastaveni.doplnit(self._vych_nastaveni())
+        self.f_souc_stale.doplnit(self._vych_nastaveni())
         for t in (self.t_kabely, self.t_smyk, self.t_stale, self.t_prom):
             t.nastav(t.ziskej_surove())
 
@@ -1128,15 +1131,30 @@ class Aplikace(tk.Tk):
         self.f_cas.pack(fill="x")
         lf = ttk.LabelFrame(horni, text="Nerovnoměrná složka teploty (ČSN EN 1991-1-5, příl. B)", padding=6)
         lf.pack(side="left", fill="x", expand=True, anchor="n", padx=(8, 0))
-        pole = [("uvazovat", "Uvažovat", "bool", False),
-                ("svrsek", "Svršek [m]", "choice", ["bez", "izolace", "0.05", "0.10", "0.15", "0.20"]),
-                ("alfa", "α [1/K]", "optfloat", None), ("E", "E [MPa] (prázdné = E_cm)", "optfloat", None)]
-        zkratky = {"char": "char.", "casta": "častá", "kvazistala": "kvazist."}
-        for k in SOUCINITELE_TEPLOTY:
-            pole += [(f"g_{k}", f"γ {zkratky.get(k, k)}", "optfloat", None), (f"p_{k}", "ψ", "optfloat", None)]
-        self.f_teplota = Formular(lf, pole, sloupcu=2)
+        self.f_teplota = Formular(lf, [
+            ("uvazovat", "Uvažovat", "bool", False),
+            ("svrsek", "Svršek: bez | izolace | tloušťka [m]", "choice",
+             ["bez", "izolace", "0.05", "0.10", "0.15", "0.20"]),
+            ("alfa", "α [1/K]", "optfloat", None), ("E", "E [MPa] (prázdné = E_cm)", "optfloat", None)])
         self.f_teplota.pack(fill="x")
-        rf = ttk.Frame(z)
+        # dílčí součinitele všech zatížení na jednom místě
+        lf = ttk.LabelFrame(z, text="Dílčí součinitele zatížení (ČSN EN 1990)", padding=6)
+        lf.pack(fill="x", pady=(8, 0))
+        self.ram_soucinitele = ttk.Frame(lf)
+        self.ram_soucinitele.pack(fill="x")
+        sf = ttk.LabelFrame(self.ram_soucinitele, text="Stálá zatížení", padding=4)
+        sf.pack(side="left", fill="x", expand=True, anchor="n")
+        self.f_souc_stale = Formular(sf, [(k, POPISKY_NASTAVENI[k], "optfloat", None) for k in SOUCINITELE_STALE])
+        self.f_souc_stale.pack(fill="x")
+        self.lf_souc_teplota = sf = ttk.LabelFrame(self.ram_soucinitele, text="Teplota (γ, ψ v kombinaci)",
+                                                   padding=4)
+        sf.pack(side="left", fill="x", expand=True, anchor="n", padx=(8, 0))
+        pole = []
+        for k in SOUCINITELE_TEPLOTY:
+            pole += [(f"g_{k}", f"{DRUHY_KOMBINACI[k]}:  γ", "optfloat", None), (f"p_{k}", "ψ", "optfloat", None)]
+        self.f_teplota_souc = Formular(sf, pole, sloupcu=2)
+        self.f_teplota_souc.pack(fill="x")
+        rf = self.ram_zpusob = ttk.Frame(z)
         rf.pack(fill="x", pady=(8, 2))
         ttk.Label(rf, text="Vnější zatížení:", style="Nadpis.TLabel").pack(side="left")
         self.zpusob_zat = tk.StringVar(value="kombinace")
@@ -1188,6 +1206,8 @@ class Aplikace(tk.Tk):
         f = self._skrol("6  Nastavení posouzení")
         pole = []
         for fl in fields(Nastaveni):
+            if fl.name in SOUCINITELE_STALE:
+                continue
             vych = fl.default if fl.default is not MISSING else None
             if isinstance(vych, bool):
                 typ = "bool"
@@ -1200,7 +1220,8 @@ class Aplikace(tk.Tk):
                 popis += f"   (výchozí {vych})"
             pole.append((fl.name, popis, typ, vych if typ == "bool" else VOLBY_NASTAVENI.get(fl.name)))
         ttk.Label(f, text=("Hodnoty jsou předvyplněny podle doporučení ČSN EN 1992-1-1; r_sup a r_inf se mění podle "
-                           "typu předpětí (5.10.9). Hodnoty shodné s výchozími se do souboru nezapisují."),
+                           "typu předpětí (5.10.9). Hodnoty shodné s výchozími se do souboru nezapisují. "
+                           "Dílčí součinitele zatížení (γ_G, ξ, teplota) jsou na kartě 5."),
                   foreground="#52514e").pack(anchor="w", pady=(0, 6))
         self.f_nastaveni = Formular(f, pole, sloupcu=2)
         self.f_nastaveni.pack(fill="x")
@@ -1312,6 +1333,7 @@ class Aplikace(tk.Tk):
         self.zpusob_zat.set(zat.get("zpusob", "kombinace" if zat.get("kombinace") else "zatezovaci_stavy"))
         self._prepni_zatizeni()
         self.f_nastaveni.nastav(d.get("posouzeni", {}))
+        self.f_souc_stale.nastav(d.get("posouzeni", {}))
         self._prepni_prurez()
 
     def ziskej_data(self) -> dict:
@@ -1348,7 +1370,8 @@ class Aplikace(tk.Tk):
         zat.update({"zpusob": self.zpusob_zat.get(), **self.p_komb.ziskej(),
                     "stale": self.t_stale.ziskej(), "promenne": prom})
         d["zatizeni"] = zat
-        d["posouzeni"] = self._bez_vychozich(self.f_nastaveni.ziskej(), self._vych_nastaveni())
+        d["posouzeni"] = self._bez_vychozich({**self.f_nastaveni.ziskej(), **self.f_souc_stale.ziskej()},
+                                             self._vych_nastaveni())
         d["posouzeni"] = {k: v for k, v in d["posouzeni"].items()
                           if not (k == "hlavni_napeti" and v is True)}
         if not d["kabel"]:
@@ -1357,12 +1380,13 @@ class Aplikace(tk.Tk):
 
     def _nastav_teplotu(self, t: dict | None):
         t = dict(t or {})
-        hodn = {"uvazovat": bool(t) and t.get("uvazovat", True), "svrsek": str(t.get("svrsek", "bez")),
-                "alfa": t.get("alfa", 1e-5), "E": t.get("E")}
+        self.f_teplota.nastav({"uvazovat": bool(t) and t.get("uvazovat", True),
+                               "svrsek": str(t.get("svrsek", "bez")), "alfa": t.get("alfa", 1e-5), "E": t.get("E")})
         souc = {**SOUCINITELE_TEPLOTY, **{k: tuple(v) for k, v in (t.get("soucinitele") or {}).items()}}
+        hodn = {}
         for k, (g, ps) in souc.items():
             hodn[f"g_{k}"], hodn[f"p_{k}"] = g, ps
-        self.f_teplota.nastav(hodn)
+        self.f_teplota_souc.nastav(hodn)
 
     def _teplota_data(self) -> dict:
         """Sekce [teplota] z formuláře (prázdná, není-li teplota zaškrtnuta)."""
@@ -1380,8 +1404,9 @@ class Aplikace(tk.Tk):
         if f.get("E") is not None:
             out["E"] = f["E"]
         souc = {}
+        fs = self.f_teplota_souc.ziskej()
         for k, (g0, p0) in SOUCINITELE_TEPLOTY.items():
-            g, ps = f.get(f"g_{k}", g0), f.get(f"p_{k}", p0)
+            g, ps = fs.get(f"g_{k}", g0), fs.get(f"p_{k}", p0)
             if (g, ps) != (g0, p0):
                 souc[k] = [g, ps]
         if souc:
