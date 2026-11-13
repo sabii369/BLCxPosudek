@@ -38,6 +38,18 @@ KRITERIA_KATEGORIE = {
 }
 
 
+# Tab. C.7 (doporučené hodnoty w_max), sloupec „V kontaktní spáře“: zbytková životnost →
+# (kombinace pro dekompresi, kombinace pro šířku trhlin, w_max [mm]); None = kritérium se neověřuje.
+# 50 let ≙ „> 30“ (charakteristická: dekomprese), 15-30 ≙ „10 až 30“ (častá: dekomprese),
+# 10 ≙ „< 10“ (častá: w_max = 0,2 mm; podle pozn. b) navíc dekomprese při kvazistálé kombinaci –
+# stupeň vlivu prostředí se nezadává, proto se ověřuje vždy, tj. na straně bezpečné).
+KRITERIA_SPARA = {
+    "50": ("char", None, 0.0),
+    "15-30": ("casta", None, 0.0),
+    "10": ("kvazistala", "casta", 0.2),
+}
+
+
 def kategorie_mostu(zbytkova_zivotnost: str, typ_predpeti: str) -> str:
     """Kategorie mostu B–G podle ČSN 73 6222, tab. 12.3 ("" = zbytková životnost nezadána)."""
     zz = str(zbytkova_zivotnost or "").strip().replace(" až ", "-").replace("–", "-").replace(" ", "")
@@ -147,7 +159,8 @@ class NosnikPB:
                  predem_alpha2: float = 0.19, predem_eta_p2: float = 1.2, kombinace_vstup: list[KombinaceVstup] | None = None,
                  kombinace_vcetne_g0: bool = False, t_vneseni: float | None = None,
                  t_akt: float | None = None, oslabeni_Ap: float = 0.0, oslabeni_As: float = 0.0,
-                 oslabeni_Asw: float = 0.0, teplota: Teplota | None = None):
+                 oslabeni_Asw: float = 0.0, teplota: Teplota | None = None,
+                 kontaktni_spara: bool = False, pozice_spar: list[float] | float | None = None):
         self.beton = beton
         self.predp = predpinaci
         self.betonarska = betonarska
@@ -196,6 +209,23 @@ class NosnikPB:
         self.kategorie = kategorie_mostu(self.n.zbytkova_zivotnost, self.typ)
         if self.kategorie:
             self.n.dekomprese, self.n.trhliny, self.n.w_max = KRITERIA_KATEGORIE[self.kategorie]
+        # kontaktní spáry: pozice x od kraje nosníku (libovolný počet, oddělené dílce)
+        if pozice_spar in (None, ""):
+            pozice_spar = []
+        elif isinstance(pozice_spar, (int, float)):
+            pozice_spar = [pozice_spar]
+        self.spara = bool(kontaktni_spara)
+        self.pozice_spar = sorted({float(v) for v in pozice_spar})
+        self.kriteria_spary = None
+        if self.spara:
+            if not self.pozice_spar or not all(0.0 < v < self.L for v in self.pozice_spar):
+                raise ValueError("Kontaktní spára: zadejte pozice spár (vzdálenost od kraje nosníku) "
+                                 f"v intervalu 0 až L = {self.L:g} m.")
+            zz = self._zivotnost_klic()
+            if zz not in KRITERIA_SPARA:
+                raise ValueError("Kontaktní spára: zadejte zbytkovou životnost (50, 15-30 nebo 10 let) – "
+                                 "podle ní se volí kritérium ve spáře (tab. C.7).")
+            self.kriteria_spary = KRITERIA_SPARA[zz]
         self.protokol = Protokol(self.projekt.get("nazev", "Posudek nosníku z předpjatého betonu"))
         self.v: dict = {}  # uložené výsledky pro grafy
 
@@ -241,6 +271,8 @@ class NosnikPB:
         self.xb = self.xa + self.L0
         x = np.linspace(0, self.L, self.n_rezu)
         x = np.union1d(x, [self.xa, self.xb, self.xa + self.L0 / 2])
+        if self.spara:
+            x = np.union1d(x, self.pozice_spar)
         # Řezy těsně vně podpor: posouvající síla má v podpoře skok o reakci. Řez přesně v podpoře
         # nese hodnotu na straně pole, řez o δ vedle hodnotu na převislém konci (≈ 0), takže průběh
         # V obsahuje svislý skok místo lineárního náběhu od konce nosníku k podpoře.
@@ -256,6 +288,7 @@ class NosnikPB:
                 self.xa + 3 * self.L0 / 4, self.xb, self.L]
         idx = sorted({int(np.argmin(abs(x - b))) for b in body})
         self.i_tab = idx
+        self.i_spary = [int(np.argmin(abs(x - xs))) for xs in self.pozice_spar] if self.spara else []
 
     def _x_tab_hlavicka(self) -> list[str]:
         return [f"x = {fmt(self.x[i], 3)} m" for i in self.i_tab]
@@ -1328,6 +1361,20 @@ class NosnikPB:
                    + f"; šířka trhlin – kombinace {NAZVY_KOMBINACI[trh]}, w_max = {fmt(wm, 1)} mm. Tahové "
                    "napětí v provozních fázích se proto uvádí jen informativně (kritériem jsou dekomprese a "
                    "šířka trhlin).")
+        if self.spara:
+            dek_s, trh_s, wm_s = self.kriteria_spary
+            zz = self._zivotnost_klic()
+            K.text(f"<b>Kontaktní spáry</b> v x = {'; '.join(fmt(v, 3) for v in self.pozice_spar)} m "
+                   "od kraje nosníku. Kritérium ve spáře podle tab. C.7 (sloupec „V kontaktní "
+                   f"spáře“) a zbytkové životnosti {zz.replace('-', ' až ')} let: "
+                   + (f"dekomprese při kombinaci {NAZVY_KOMBINACI[dek_s]} (celý průřez ve spáře zůstane tlačený)"
+                      if dek_s else "")
+                   + (f"; šířka trhlin w_max = {fmt(wm_s, 1)} mm při kombinaci {NAZVY_KOMBINACI[trh_s]} "
+                      "(spára nepřenáší tah: průřez je s trhlinou při jakémkoli tahu, f_ct,eff = 0)" if trh_s else "")
+                   + (". Podle pozn. b) k tab. C.7 se při zbytkové životnosti < 10 let navíc ověřuje dekomprese při "
+                      "kvazistálé kombinaci; stupeň vlivu prostředí se nezadává, proto se ověřuje vždy." if trh_s
+                      else "")
+                   + ". Posudky ve spáře se vyhodnocují jen v řezech spár; ostatní kritéria viz výše.")
         Mg0 = self.zs_g0.M_max
         h = self.prurez.h
         self.msp_napeti = {}
@@ -1458,6 +1505,9 @@ class NosnikPB:
             # šířka trhlin (7.3.4; ČSN 73 6222, tab. 12.4)
             if f.provoz and nn.trhliny != "zadna":
                 self._sirka_trhlin(Kf, f, NP, MP, Mg0, nn.trhliny)
+            # kontaktní spáry (tab. C.7)
+            if f.provoz and self.spara:
+                self._msp_spara(Kf, f, NP, MP, Mg0)
             # napětí v předpínací výztuži v provozu
             if f.provoz:
                 ob = d["char"]
@@ -1495,18 +1545,23 @@ class NosnikPB:
             vr.append(Vrstva(v.z, v.As * f.k_As, self.betonarska.Es, phi=v.phi, nazev=v.nazev or "výztuž"))
         return vr
 
-    def _sirka_trhlin(self, Kf: Kapitola, f: Faze, NP, MP, Mg0, druh: str):
-        """Posudek šířky trhlin: neporušený průřez při σ_ct ≤ f_ctm(t), jinak 7.3.4 na průřezu s trhlinou."""
+    def _sirka_trhlin(self, Kf: Kapitola, f: Faze, NP, MP, Mg0, druh: str, *, rezy=None, fct=None,
+                      w_max: float | None = None, spara: bool = False):
+        """Posudek šířky trhlin: neporušený průřez při σ_ct ≤ f_ctm(t), jinak 7.3.4 na průřezu s trhlinou.
+
+        spara = True: jen řezy ve spáře (rezy), f_ct,eff = 0 (spára nepřenáší tah), w_max z tab. C.7."""
         b, nn, p = self.beton, self.n, self.predp
+        wm = nn.w_max if w_max is None else w_max
+        nazev_p = "Šířka trhlin ve spáře" if spara else "Šířka trhlin"
         ob = self.komb[f.nazev][druh]
         h, x = self.prurez.h, self.x
-        fct = b.fctm_t(f.t)
+        fct = b.fctm_t(f.t) if fct is None else fct
         xi = nn.xi_p if nn.xi_p else xi_predpinaci(self.predem, p.druh, b.fck)
         nazk = NAZVY_KOMBINACI[druh]
         nej = None            # (výsledek, i, r_naz, σ_ct)
         s_max = (-math.inf, 0)
         nenalezeno = []
-        for i in range(len(x)):
+        for i in (range(len(x)) if rezy is None else rezy):
             for r_naz, r in (("sup", nn.r_sup), ("inf", nn.r_inf)):
                 for strana, Mx, zz in ((1, ob.M_max[i], 0.0), (-1, ob.M_min[i], h)):
                     s_un = float(self._napeti(zz, NP[i], MP[i], Mg0[i], Mx, r, idx=i))
@@ -1520,11 +1575,12 @@ class NosnikPB:
                         nenalezeno.append(float(x[i]))
                     elif nej is None or vys.w > nej[0].w:
                         nej = (vys, i, r_naz, s_un)
-        odkaz = "7.3.4" + (", ČSN 73 6222 tab. 12.4" if self.kategorie else "")
-        Kf.text(f"<b>Šířka trhlin</b> – kombinace {nazk}, w_max = {fmt(nn.w_max, 2)} mm"
-                + (f" (kategorie mostu {self.kategorie}, ČSN 73 6222, tab. 12.4)" if self.kategorie else "")
+        odkaz = "7.3.4" + (", tab. C.7" if spara else ", ČSN 73 6222 tab. 12.4" if self.kategorie else "")
+        Kf.text(f"<b>{nazev_p}</b> – kombinace {nazk}, w_max = {fmt(wm, 2)} mm"
+                + (" (kontaktní spáry, tab. C.7)" if spara else
+                   f" (kategorie mostu {self.kategorie}, ČSN 73 6222, tab. 12.4)" if self.kategorie else "")
                 + ". Průřez je bez trhlin, nepřekročí-li tahové napětí na neporušeném průřezu f_ct,eff = "
-                  f"f_ctm(t) = {fmt(fct)} MPa; jinak se šířka trhliny počítá podle 7.3.4 na pružném průřezu "
+                  f"{'f_ct,eff' if spara else 'f_ctm(t)'} = {fmt(fct)} MPa; jinak se šířka trhliny počítá podle 7.3.4 na pružném průřezu "
                   "s trhlinou (beton v tahu nepůsobí, předpínací výztuž s počátečním přetvořením "
                   "ε_p0 = r·σ_pm,t/E_p − σ_c,P(z_p)/E_cm), k_t = 0,4, ξ1 = √ξ, "
                   f"ξ = {fmt(xi, 2)} (tab. 6.2).")
@@ -1536,8 +1592,8 @@ class NosnikPB:
             Kf.krok(f"Největší tahové napětí na neporušeném průřezu (x = {fmt(x[i], 3)} m)",
                     "σ_{ct} ≤ f_{ct,eff}", f"{fmt(s_max[0])} ≤ {fmt(fct)}", s_max[0], "MPa", "7.3.2(4)")
             self.protokol.pridej_posudek(Kf, VysledekPosudku(
-                "Šířka trhlin", "MSP", 0.0, nn.w_max, "mm", 0.0, f.nazev, nazk, float(x[i]),
-                poznamka=f"bez trhlin: σ_ct = {fmt(s_max[0])} ≤ f_ctm = {fmt(fct)} MPa",
+                nazev_p, "MSP", 0.0, wm, "mm", 0.0, f.nazev, nazk, float(x[i]),
+                poznamka=f"bez trhlin: σ_ct = {fmt(s_max[0])} ≤ {fmt(fct)} MPa",
                 odkaz=odkaz, skupina="Trhliny"))
             return
         v, i, r_naz, s_un = nej
@@ -1570,8 +1626,29 @@ class NosnikPB:
         Kf.krok("Šířka trhliny", "w_{k} = s_{r,max}·(ε_{sm} − ε_{cm})",
                 f"{fmt(v.s_r)}·{fmt(v.deps * 1e3)}·10^{{−3}}", v.w, "mm", "(7.8)")
         self.protokol.pridej_posudek(Kf, VysledekPosudku(
-            "Šířka trhlin", "MSP", v.w, nn.w_max, "mm", v.w / nn.w_max, f.nazev, nazk, float(x[i]),
+            nazev_p, "MSP", v.w, wm, "mm", v.w / wm, f.nazev, nazk, float(x[i]),
             poznamka=f"{okraj} okraj, P_{r_naz}, s_r,max {v.s_r_vzorec}", odkaz=odkaz, skupina="Trhliny"))
+
+    def _msp_spara(self, Kf: Kapitola, f: Faze, NP, MP, Mg0):
+        """Kontaktní spáry (tab. C.7): dekomprese celého průřezu a/nebo šířka trhlin jen v řezech spár."""
+        dek, trh, wm = self.kriteria_spary
+        nn, x = self.n, self.x
+        if dek:
+            ob = self.komb[f.nazev][dek]
+            puv, nn.dekomprese_rezim = nn.dekomprese_rezim, "krajni"     # spára: celý průřez, ne jen okolí kabelů
+            try:
+                eta, info = self._dekomprese(NP, MP, Mg0, ob, dek)
+            finally:
+                nn.dekomprese_rezim = puv
+            i = max(self.i_spary, key=lambda k: eta[k])
+            self.protokol.pridej_posudek(Kf, VysledekPosudku(
+                "Dekomprese ve spáře", "MSP", float(info["sE"][i]), float(info["sP"][i]), "MPa", float(eta[i]),
+                f.nazev, NAZVY_KOMBINACI[dek], float(x[i]),
+                poznamka=f"spára x = {fmt(x[i], 3)} m, vlákno z = {fmt(info['z'][i])} mm; E_d = napětí od zatížení"
+                         + (" vč. teploty" if self.vys_teplota is not None else "") + ", R_d = |tlak od P_inf|",
+                odkaz="tab. C.7", skupina="Dekomprese"))
+        if trh:
+            self._sirka_trhlin(Kf, f, NP, MP, Mg0, trh, rezy=self.i_spary, fct=0.0, w_max=wm, spara=True)
 
     def _dekomprese(self, NP, MP, Mg0, ob: Obalka, druh: str | None = None):
         """Využití z hlediska dekomprese: η = σ_od zatížení / |σ_od předpětí| v rozhodujícím vláknu;
