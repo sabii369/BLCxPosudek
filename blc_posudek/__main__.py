@@ -31,7 +31,15 @@ from .davka import _vstupy, davka, jedno_vlakno, vypocet_souboru
 
 # ---------------------------------------------------------------------------
 
+def _utf8_vystup():
+    """Výpis a nápověda v UTF-8 i při přesměrovaném výstupu ve Windows (jinak cp1250 → chyba u „−“, „η“ …)."""
+    for proud in (sys.stdout, sys.stderr):
+        if hasattr(proud, "reconfigure"):
+            proud.reconfigure(encoding="utf-8")
+
+
 def main(argv=None) -> int:
+    _utf8_vystup()
     jedno_vlakno()                       # před importem numpy (výpočet, GUI i procesy dávky)
     ap = argparse.ArgumentParser(prog="python -m blc_posudek",
                                  description="BLC × Posudek PB – most → zatížení nosníku → posudek")
@@ -60,8 +68,6 @@ def main(argv=None) -> int:
             ap.error("GUI otevře jen jeden soubor.")
         from .gui import main as gui_main
         return gui_main(a.vstup[:1])
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
     volby = dict(zatizitelnost=a.zatizitelnost, druhy=a.druhy, protokol=a.protokol,
                  bez_protokolu=a.bez_protokolu)
     soubory = _vstupy(a.vstup)

@@ -70,7 +70,15 @@ def demo(vystup: str):
     print(f"Grafy uloženy do {os.path.abspath(vystup)}")
 
 
+def _utf8_vystup():
+    """Výpis a nápověda v UTF-8 i při přesměrovaném výstupu ve Windows (jinak cp1250 → chyba u „−“, „η“ …)."""
+    for proud in (sys.stdout, sys.stderr):
+        if hasattr(proud, "reconfigure"):
+            proud.reconfigure(encoding="utf-8")
+
+
 def main(argv=None):
+    _utf8_vystup()
     ap = argparse.ArgumentParser(prog="python -m blc",
                                  description="Bridge Load Calculator – přechodnost vozidel MLC vs Ve")
     ap.add_argument("--demo", action="store_true",
