@@ -80,8 +80,10 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
   stálá `f_souc_stale` (γ_G, γ_G,inf, ξ → `[posouzeni]`, ne na kartě 6), doprava / chodci `f_souc_doprava`,
   `f_souc_chodci` (→ `[blc]`, ne na kartě 0), teplota `f_teplota_souc`; kombinace MSÚ a γ_P zůstávají na kartě 6.
 - Zatížitelnost: `blc_posudek/zatizitelnost.py` – `zatizitelnost(d, vys, druhy=…)` → `VysledekZatizitelnosti`
-  (posuzovaný nosník každého druhu = nejzatíženější samotným q druhu při referenční tíze podle `kriterium`,
-  `VysledekSil.rozhodujici_stav` – zadání uživatele 12. 11. 2026; posouzení pro vozidlo dál podle M_Ed 6.10)
+  (každý posudek se hledá na všech nosnících, platí nosník s nejnižší V – `PosudekZat.o`, `ZatizitelnostDruhu.o` = rozhodující;
+  nosníky v pořadí od nejzatíženějšího, vynechá se nosník dominovaný již spočteným – `_dominuje`: v každém bodě
+  nejvýše stejné účinky kombinací při jeho tíhách V; zadaný `vystup` = jen on; zadání uživatele 13. 11. 2026;
+  posouzení pro vozidlo dál podle M_Ed 6.10)
   (`druhy` Vn, Vr, Ve → `ZatizitelnostDruhu`; tíha pro η = 1 každého posudku po schématech – `_hledej`, Illinois se
   sdílenými výpočty, q přeškálované `vys_pro_V`; schémata po posudcích `_slouc`: Vn dvounáprava / náhradní náprava
   < 16 t, Vr 6 / 2 / 3nápravové; stavy nezávisí / neomezuje / klesá; `Vaj`, `V_evidence`); protokol pro zvolené
@@ -127,5 +129,4 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
   referenční hodnoty, rozdíl v `referencni_hodnoty.json` ukázat uživateli a popsat v commitu.
 - Commit jen na požádání; push na `origin` jen po potvrzení. `upstream` = původní BLC (jen fetch).
 - Otevřené: další pohyblivá zatížení (LM1 …), vodorovné síly (čl. 7.4), zatížitelnost rovnoměrným zatížením,
-  posouzení všech nosníků v zatížitelnosti (teď jeden nosník na druh),
   tabulka M_max/M_min/V_max/V_min pro proměnné stavy v Posudku PB, parametrická studie.

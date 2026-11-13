@@ -469,13 +469,15 @@ def test_zatizitelnost(zat):
     assert zat.Vn < zat.Vr                                          # pruhy + chodci vs. 1 vozidlo
     assert zat.Vaj == approx(max(3 / 8 * zat.Vn, zat.Vr / 6))
     assert zat.druhy["Ve"].prvni.vys.q_ch == 0.0                    # Ve: chodci vyloučeni
-    # posuzovaný nosník každého druhu = nejzatíženější samotným zatížením druhu (max M od q)
+    # nosník každého posudku = nosník s nejnižší zatížitelností; rozhodující nosník druhu = nosník minima
     for dr, z in zat.druhy.items():
-        v = z.prvni.vys
-        Mq = [float(v.tabulka(i, "q").M_max.max()) for i in range(v.n_vyst)]
-        assert z.o == Mq.index(max(Mq)) == v.rozhodujici_stav("q", "M"), dr
-        assert z.vyber.startswith(f"nejzatíženější od zatížení {dr} = ")
-    assert [zat.druhy[dr].prvni.vys.popisky[zat.druhy[dr].o] for dr in ("Vn", "Vr", "Ve")] ==         ["N7", "N9", "N6"]                                         # Vr: N9 (podle M_Ed by byl N10)
+        assert z.o == z.minimum().o and z.o in z.nosniky, dr
+        assert all(p.o in z.nosniky for p in z.posudky), dr
+        assert z.n_nosniku == 10 and z.vyber.startswith("nejnižší zatížitelnost přes "), dr
+        for p in z.posudky:                       # žádný počítaný nosník nemá nižší V
+            if p.stav == "V":
+                assert all(q.V >= p.V - 1e-9 for ps in z.nosniky.values() for q in ps
+                           if q.klic == p.klic and q.stav == "V"), dr
     assert zat.druhy["Vn"].prvni.vys.q_ch == 2.5
     priprav_protokol(zat.model)
     kap = zat.model.protokol.kapitoly[0]

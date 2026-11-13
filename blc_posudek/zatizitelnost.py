@@ -26,14 +26,20 @@ Výsledek druhu pro každý posudek ze schémat (blc.schemata_zatizitelnosti):
   Vn = V_dvounáprava, je-li ≥ 16 t, jinak min(V_náhradní náprava, 16 t);
   Vr = V_6, je-li > 50 t, jinak V_2, a je-li V_2 > 16 t, max(V_2, V_3) (nejvýše 50 t).
 Zatížitelnost = nejmenší hodnota přes posudky (čl. 4.1; zvlášť MSÚ a MSP), do evidence
-zaokrouhlená na celé tuny dolů (čl. 13.2).  Posuzovaný nosník je pro každý druh pevný
-(zadaný, nebo nejzatíženější při referenční tíze prvního schématu).  Ostatní zatížení
-(g0, g − g0, chodci) se nemění; dynamický součinitel δ je v účincích q.
+zaokrouhlená na celé tuny dolů (čl. 13.2).  Každý posudek se hledá na všech nosnících
+(pásech) mostu a platí nosník s nejnižší zatížitelností (PosudekZat.o).  Zbytečné nosníky
+se nepočítají: nosník B se vynechá, pokud je pro jiný již spočtený nosník A v každém bodě
+účinek kombinací (g − g0, chodci, q; MSÚ, char, častá, kvazistálá) při tíhách vozidla, které
+vyšly A (nejmenší a největší konečná zatížitelnost), nejvýše stejný jako u A – využití B při
+zatížitelnosti A je pak nejvýše 100 %, takže B nemůže být nižší (_dominuje).  Při zadaném
+nosníku ([blc] vystup) se počítá jen on.  Ostatní zatížení (g0, g − g0,
+chodci) se nemění; dynamický součinitel δ je v účincích q.
 """
 
 from __future__ import annotations
 from blc.cisla import cz
 import math
+import numpy as np
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -67,6 +73,7 @@ class PosudekZat:
     eta_ref: float               # využití při referenční tíze
     eta_0: float                 # využití bez vozidla
     schema: str = ""             # schéma, ze kterého hodnota plyne
+    o: int = -1                  # nosník (výstup, 0-based), na kterém je hodnota nejnižší
 
     @property
     def mezni_stav(self):
@@ -98,6 +105,7 @@ class VysledekSchematu:
     V_max: float                 # největší zkoušená tíha
     n_vypoctu: int
     vys: VysledekSil             # most s referenčním zatížením schématu
+    o: int = -1                  # nosník (-1 = souhrn přes všechny počítané nosníky)
 
 
 def _minimum(posudky, ms: Optional[str] = None) -> Optional[PosudekZat]:
@@ -111,9 +119,11 @@ class ZatizitelnostDruhu:
     druh: str
     posudky: List[PosudekZat]
     schemata: Dict[str, VysledekSchematu]
-    o: int                               # posuzovaný výstup
+    o: int                               # rozhodující výstup (nosník s nejnižší zatížitelností)
     poznamky: List[str] = field(default_factory=list)
     vyber: str = ""                      # jak byl posuzovaný výstup vybrán (text do protokolu)
+    nosniky: Dict[int, List[PosudekZat]] = field(default_factory=dict)  # výsledky po nosnících
+    n_nosniku: int = 0                   # počet nosníků (pásů) mostu
     _cache: dict = field(default_factory=dict, repr=False)
 
     def minimum(self, ms: Optional[str] = None) -> Optional[PosudekZat]:
@@ -174,7 +184,17 @@ class ZatizitelnostDruhu:
 
     @property
     def nevyhovuji_nezavisle(self) -> List[PosudekZat]:
-        return [x for x in self.posudky if x.stav == "nezavisi_nok"]
+        zdroj = [p for ps in self.nosniky.values() for p in ps] or self.posudky
+        out = {}
+        for x in zdroj:
+            if x.stav == "nezavisi_nok":
+                out.setdefault(x.klic, x)
+        return list(out.values())
+
+    @property
+    def pocitane_nosniky(self) -> List[int]:
+        """Nosníky, na kterých se zatížitelnost hledala (ostatní jsou dominované)."""
+        return list(self.nosniky)
 
     @property
     def schema_V(self) -> str:
@@ -295,7 +315,8 @@ def _hledej(d: dict, vys: VysledekSil, o: int, schema: str, tol: float, max_kol:
             m.spocitej()
             body[V] = {klic_posudku(p): float(p.vyuziti) for p in m.protokol.posudky}
             if prubeh:
-                prubeh(f"Zatížitelnost {nazev}: výpočet {len(body)} ({nazev} = {cz(V, 1)} t)")
+                prubeh(f"Zatížitelnost {nazev} ({vys.popisky[o]}): výpočet {len(body)} "
+                       f"({nazev} = {cz(V, 1)} t)")
         return body[V]
 
     e0, er = eta(0.0), eta(Vr)
@@ -320,7 +341,7 @@ def _hledej(d: dict, vys: VysledekSil, o: int, schema: str, tol: float, max_kol:
     interval = {}                         # k → [a, fa, b, fb, strana]
 
     def zat(k, V, stav):
-        return PosudekZat(k, V, stav, er[k], e0[k], schema)
+        return PosudekZat(k, V, stav, er[k], e0[k], schema, o)
 
     for k in klice:
         hodn = [(V, body[V][k]) for V in sorted(body) if k in body[V]]
@@ -379,7 +400,7 @@ def _hledej(d: dict, vys: VysledekSil, o: int, schema: str, tol: float, max_kol:
             interval[k] = [a, fa, b, fb, strana]
     for k, (a, fa, b, fb, _) in interval.items():          # nekonvergovalo – interpolace
         vysl[k] = zat(k, a + (b - a) * (-fa) / (fb - fa) if fb != fa else 0.5 * (a + b), "V")
-    return VysledekSchematu(schema, {k: vysl[k] for k in klice}, Vr, Vmax, len(body), vys)
+    return VysledekSchematu(schema, {k: vysl[k] for k in klice}, Vr, Vmax, len(body), vys, o)
 
 
 # ---------------------------------------------------------------------------
@@ -410,7 +431,106 @@ def _slouc(druh: str, sch: Dict[str, VysledekSchematu]) -> List[PosudekZat]:
                 (v3 is None or v2 is None or v3 >= v2)
             schema = "6" if V == p0.V else ("3" if tri else "2")
         stav = "V" if V is not None and math.isfinite(V) else "neomezuje"
-        out.append(PosudekZat(k, V if stav == "V" else None, stav, p0.eta_ref, p0.eta_0, schema))
+        out.append(PosudekZat(k, V if stav == "V" else None, stav, p0.eta_ref, p0.eta_0, schema,
+                              p0.o))
+    return out
+
+
+def _poradi_omezeni(p: PosudekZat) -> tuple:
+    """Řazení výsledků jednoho posudku na různých nosnících: rozhoduje nejpřísnější
+    (bez vozidla < nejnižší V < ostatní stavy)."""
+    if p.stav == "bez_vozidla":
+        return (0, 0.0)
+    if p.stav == "V":
+        return (1, p.V)
+    return ({"nezavisi_nok": 2, "klesa": 3, "nezavisi_ok": 4, "neomezuje": 5}[p.stav], 0.0)
+
+
+def _nejprisnejsi(a: Optional[PosudekZat], b: PosudekZat) -> PosudekZat:
+    return b if a is None or _poradi_omezeni(b) < _poradi_omezeni(a) else a
+
+
+def _sluc_nosniky(seznamy) -> List[PosudekZat]:
+    """Posudky po nosnících (seznam seznamů se shodnými klíči) → nejpřísnější po posudcích."""
+    best: Dict[tuple, PosudekZat] = {}
+    for ps in seznamy:
+        for p in ps:
+            best[p.klic] = _nejprisnejsi(best.get(p.klic), p)
+    return list(best.values())
+
+
+TOL_DOMINANCE = 2e-3     # tolerance porovnání účinků (podíl největší hodnoty tabulky)
+
+
+def _rozsah_V(r: VysledekSchematu) -> List[float]:
+    """Tíhy [t], na kterých se porovnávají účinky nosníků: nejmenší a největší konečná
+    zatížitelnost nosníku ve schématu (účinky jsou v V lineární – stačí krajní body);
+    bez konečné hodnoty největší zkoušená tíha."""
+    v = [p.V for p in r.posudky.values() if p.stav == "V" and p.V > 0]
+    return [min(v), max(v)] if v else [r.V_max]
+
+
+def _tabulky_dominance(vys: VysledekSil, o: int, druhy: List[str], V: float, cache: dict):
+    k = (id(vys), o, round(V, 6))
+    if k not in cache:
+        vv = vys_pro_V(vys, V) if V > 0 or vys.V else vys
+        cache[k] = [vv.kombinace(o, dr, vcetne_g0=False) for dr in druhy]
+    return cache[k]
+
+
+def _druhy_s_dopravou(vys: VysledekSil, druhy: List[str]) -> List[str]:
+    """Kombinace, ve kterých působí doprava (u kvazistálé je ψ2 = 0 → nezávisí na V)."""
+    return [dr for dr in druhy if vys.soucinitele.faktor_q("q", dr) > 0]
+
+
+def _dominuje(a: Dict[str, VysledekSchematu], vs: Dict[str, VysledekSil], o_a: int, o_b: int,
+              druhy: List[str], cache: dict) -> bool:
+    """True, má-li nosník o_a (spočtený, výsledky a po schématech) v každém bodě účinky kombinací
+    druhy aspoň tak velké jako nosník o_b při tíhách vozidla z _rozsah_V (tolerance
+    TOL_DOMINANCE) – o_b pak nemůže mít nižší zatížitelnost než o_a.  Porovnávají se extrémy
+    tabulek (max M_max, min M_min, max V_max, min V_min); kombinace bez dopravy se vynechají."""
+    for s_, v_s in vs.items():
+        druhy = _druhy_s_dopravou(v_s, druhy)
+        if s_ not in a:
+            return False
+        for V in _rozsah_V(a[s_]):
+            for ta, tb in zip(_tabulky_dominance(v_s, o_a, druhy, V, cache),
+                              _tabulky_dominance(v_s, o_b, druhy, V, cache)):
+                tM = TOL_DOMINANCE * max(1e-9, float(np.abs(ta.M_max).max()), float(np.abs(ta.M_min).max()))
+                tV = TOL_DOMINANCE * max(1e-9, float(ta.V_abs.max()))
+                if not (ta.M_max.max() >= tb.M_max.max() - tM and ta.M_min.min() <= tb.M_min.min() + tM and
+                        ta.V_max.max() >= tb.V_max.max() - tV and ta.V_min.min() <= tb.V_min.min() + tV):
+                    return False
+    return True
+
+
+def _poradi_nosniku(vs: List[VysledekSil], druhy: List[str]) -> List[int]:
+    """Nosníky od nejzatíženějšího (součet maxim M a |V| kombinací při referenční tíze)."""
+    def skore(o):
+        return -sum(float(t.M_max.max()) + float(t.V_abs.max()) for v in vs for dr in druhy
+                    for t in [v.kombinace(o, dr, vcetne_g0=False)])
+    n = vs[0].n_vyst
+    return sorted(range(n), key=lambda o: (skore(o), o))
+
+
+def _dalsi_schemata(druh: str, sch: Dict[str, VysledekSchematu]) -> List[str]:
+    """Schémata, která je podle výsledků jednoho nosníku nutné ještě spočítat
+    (Vn: náhradní náprava při V < 16 t; Vr: 2nápravové při V ≤ 50 t, 3nápravové při V2 > 16 t)."""
+    out = []
+    if druh == "Vn" and "dvojnaprava" in sch and "naprava" not in sch:
+        Vs = [p.V for p in sch["dvojnaprava"].posudky.values() if p.stav in ("V", "bez_vozidla")]
+        if any(v < sz.VN_MEZ for v in Vs):
+            out.append("naprava")
+    elif druh == "Vr":
+        if "6" in sch and "2" not in sch:
+            Vs = [p.V for p in sch["6"].posudky.values() if p.stav in ("V", "bez_vozidla")]
+            if any(v <= sz.VR_MEZ_6 for v in Vs):
+                out.append("2")
+        elif "6" in sch and "2" in sch and "3" not in sch:
+            v6 = sch["6"].posudky
+            if any(_V(v6.get(k)) is not None and v6[k].V <= sz.VR_MEZ_6 and
+                   (p.V is None or p.V > sz.VR_MEZ_2) for k, p in sch["2"].posudky.items()):
+                out.append("3")
     return out
 
 
@@ -421,9 +541,6 @@ def _vys_druhu(vys: VysledekSil, druh: str, V: float, schema: str = "") -> Vysle
         return vys
     return vys_s_vozidlem(vys, **{druh: V}, **({"schema": schema} if schema else {}))
 
-
-#: popis kritéria výběru nosníku od zatížení druhu
-POPIS_KRITERIA = {"M": "max M", "M-": "max záporný M", "V": "max |V|"}
 
 PROTOKOLY = ("souhrn",) + DRUHY        # protokol zatížitelnosti: souhrn | jen jeden druh
 
@@ -506,41 +623,82 @@ def zatizitelnost(d: dict, vys: Optional[VysledekSil] = None, o: Optional[int] =
     for k in druhy:
         if V_ref[k] <= 0:
             raise ValueError(f"Zatížitelnost: zadejte referenční {k} > 0.")
-    # posuzovaný nosník: zadaný (o, [blc] vystup), jinak pro každý druh nejzatíženější samotným
-    # zatížením tohoto druhu při referenční tíze (podle [blc] kriterium; bez g0, g − g0, chodců)
+    # nosníky: zadaný (o, [blc] vystup) → jen on; jinak všechny nosníky, vynechány jsou ty, které
+    # mají jiné nosníky všude větší účinky g − g0, chodců i q (_nedominovane)
     pevny = o if o is not None else (vyber_nosnik(vys, d) if str(b.get("vystup") or "auto") != "auto"
                                       else None)
-    krit = b.get("kriterium", "M")
     kw = dict(tol=tol, max_kol=max_kol, nasobek_max=nasobek_max, prubeh=prubeh)
+    from .vypocet import nastaveni_posudku
+    druhy_komb = (["6.10a", "6.10b"] if nastaveni_posudku(d).get("kombinace_msu", "6.10ab") == "6.10ab"
+                  else ["6.10"]) + ["char", "casta", "kvazistala"]
     res = VysledekZatizitelnosti({}, voz if voz in druhy else druhy[0], d=copy.deepcopy(d))
 
     for druh in druhy:
-        poradi = {"Vn": ["dvojnaprava"], "Vr": ["6"], "Ve": [""]}[druh]
-        sch: Dict[str, VysledekSchematu] = {}
-        o_d = pevny
-        vyber = "zadaný" if pevny is not None else ""
-        while poradi:
-            s = poradi.pop(0)
+        prvni = {"Vn": "dvojnaprava", "Vr": "6", "Ve": ""}[druh]
+        vys_s: Dict[str, VysledekSil] = {}               # schéma → most se zatížením schématu
+        po_nosnicich: Dict[int, Dict[str, VysledekSchematu]] = {}
+        cache_dom: dict = {}
+        kand: List[int] = []                             # počítané nosníky, od nejzatíženějšího
+
+        def pridej_schema(s_):
             if prubeh:
-                prubeh(f"Zatížitelnost {druh}: {POPIS_SCHEMAT[s]}")
-            v_s = _vys_druhu(vys, druh, V_ref[druh], s)
-            if o_d is None:
-                o_d = v_s.rozhodujici_stav("q", krit)
-                vyber = (f"nejzatíženější od zatížení {druh} = {cz(V_ref[druh])} t "
-                         f"({POPIS_SCHEMAT[s].split(' (')[0]}) – {POPIS_KRITERIA[krit]}")
-            r = sch[s] = _hledej(d, v_s, o_d, s, nazev=druh, **kw)
-            Vs = [p.V for p in r.posudky.values() if p.stav in ("V", "bez_vozidla")]
-            if druh == "Vn" and s == "dvojnaprava" and any(v < sz.VN_MEZ for v in Vs):
-                poradi.append("naprava")
-            elif druh == "Vr" and s == "6" and any(v <= sz.VR_MEZ_6 for v in Vs):
-                poradi.append("2")
-            elif druh == "Vr" and s == "2":
-                # třínápravové vozidlo jen tam, kde nerozhoduje šestinápravové a V2 > 16 t
-                v6 = sch["6"].posudky
-                if any(_V(v6.get(k)) is not None and v6[k].V <= sz.VR_MEZ_6 and
-                       (p.V is None or p.V > sz.VR_MEZ_2) for k, p in r.posudky.items()):
-                    poradi.append("3")
-        z = ZatizitelnostDruhu(druh, _slouc(druh, sch), sch, o_d, vyber=vyber)
+                prubeh(f"Zatížitelnost {druh}: {POPIS_SCHEMAT[s_]}")
+            vys_s[s_] = _vys_druhu(vys, druh, V_ref[druh], s_)
+
+        pridej_schema(prvni)
+        poradi = [pevny] if pevny is not None else _poradi_nosniku(list(vys_s.values()), druhy_komb)
+        n_all = vys_s[prvni].n_vyst
+        while True:
+            def spocti_nosnik(o_k):
+                for s_, v_s in vys_s.items():
+                    sch_o = po_nosnicich.setdefault(o_k, {})
+                    if s_ not in sch_o:
+                        sch_o[s_] = _hledej(d, v_s, o_k, s_, nazev=druh, **kw)
+
+            for o_k in kand:                              # nová schémata u spočtených nosníků
+                spocti_nosnik(o_k)
+            # ostatní v pořadí zatížení: počítá se, není-li dominován již spočteným nosníkem
+            for o_k in poradi:
+                if o_k in kand or any(
+                        _dominuje(po_nosnicich[a_], vys_s, a_, o_k, druhy_komb, cache_dom)
+                        for a_ in kand):
+                    continue
+                kand.append(o_k)
+                if prubeh and pevny is None:
+                    prubeh(f"Zatížitelnost {druh}: nosník {vys_s[prvni].popisky[o_k]} "
+                           f"({len(kand)}. z {n_all})")
+                spocti_nosnik(o_k)
+            chybi = []
+            for o_k in kand:
+                for s_ in _dalsi_schemata(druh, po_nosnicich[o_k]):
+                    if s_ not in vys_s and s_ not in chybi:
+                        chybi.append(s_)
+            if not chybi:
+                break
+            for s_ in chybi:
+                pridej_schema(s_)
+        # výsledek po nosnících (schémata sloučena podle ČSN) → nejpřísnější po posudcích
+        nosniky = {o_k: _slouc(druh, po_nosnicich[o_k]) for o_k in kand}
+        posudky = _sluc_nosniky(nosniky.values())
+        schemata = {}
+        for s_ in vys_s:
+            ps = _sluc_nosniky([list(po_nosnicich[o_k][s_].posudky.values()) for o_k in kand])
+            schemata[s_] = VysledekSchematu(
+                s_, {p.klic: p for p in ps}, float(vys_s[s_].V),
+                max(po_nosnicich[o_k][s_].V_max for o_k in kand),
+                sum(po_nosnicich[o_k][s_].n_vypoctu for o_k in kand), vys_s[s_])
+        m_all = _minimum(posudky)
+        o_d = m_all.o if m_all is not None else kand[0]
+        pop = vys_s[prvni].popisky
+        if pevny is not None:
+            vyber = "zadaný"
+        else:
+            vyber = (f"nejnižší zatížitelnost přes {len(kand)} z {n_all} "
+                     f"{'pásů' if vys.deska else 'nosníků'} ({', '.join(pop[x] for x in kand)}; "
+                     f"ostatní mají při zatížitelnosti menší účinky g − g0, chodců i q); "
+                     f"rozhoduje {pop[o_d]}")
+        z = ZatizitelnostDruhu(druh, posudky, schemata, o_d, vyber=vyber, nosniky=nosniky,
+                               n_nosniku=vys_s[prvni].n_vyst)
         if z.nevyhovuji_nezavisle:
             z.poznamky.append(f"{len(z.nevyhovuji_nezavisle)} posudků nevyhovuje nezávisle na "
                               "zatížení dopravou (předpětí, výstavba) – zatížitelnost neomezují, "
@@ -614,6 +772,8 @@ def kapitola_zatizitelnost(model, res: VysledekZatizitelnosti) -> None:
            "využití η = 100 % (iterací celého posudku; účinky zatížení dopravou z modelu mostu "
            "přeškálované z referenční tíhy – jsou v ní lineární). Zatížitelnost je nejmenší hodnota "
            "přes posudky (čl. 4.1); do evidence se zaokrouhluje na celé tuny dolů (čl. 13.2). "
+           "Každý posudek byl hledán na všech nosnících (pásech), kromě těch, na kterých má jiný nosník "
+           "všude větší účinek g − g0, chodců i q – platí nosník s nejnižší zatížitelností. "
            "Ostatní zatížení – g0, g − g0 a chodci – se nemění. Zatížení Vn a Vr stojí u kraje "
            "vozovky u užšího chodníku (pruh č. 1 / vnější okraj vozidla); nejnepříznivější příčná "
            "poloha se nehledá.")
@@ -656,18 +816,18 @@ def kapitola_zatizitelnost(model, res: VysledekZatizitelnosti) -> None:
                        f"výpočtů posudku, zkoušeno do {fmt(r.V_max)} t")
         K.text(f"{druh} – {NAZVY_DRUHU[druh]} zatížitelnost: {r0.vys.stavy['q'].popis}. "
                f"Chodci: {fmt(r0.vys.q_ch, 2)} kN/m² ({r0.vys.q_ch_zdroj or 'bez chodníků'}). "
-               f"Posuzovaný {vyst} {r0.vys.popisky[z.o]}" + (f" ({z.vyber})" if z.vyber else "") +
+               f"Rozhodující {vyst} {r0.vys.popisky[z.o]}" + (f" ({z.vyber})" if z.vyber else "") +
                ". Schémata: " + "; ".join(txt) + ".")
         for t in z.poznamky:
             K.text("Upozornění: " + t)
         rows = []
         for p in sorted(z.posudky, key=lambda p: (p.V is None, p.V if p.V is not None else 0.0)):
             ms, naz, faze, komb = p.klic
-            rows.append([ms, naz, faze, komb or "–", p.text,
+            rows.append([ms, naz, faze, komb or "–", p.text, "–" if p.o < 0 else r0.vys.popisky[p.o],
                          POPIS_SCHEMAT[p.schema].split(" (")[0] if p.stav == "V" else "–",
                          f"{cz(p.eta_ref * 100, 1)} %", f"{cz(p.eta_0 * 100, 1)} %"])
-        K.tabulka(["MS", "Posudek", "Fáze", "Kombinace", f"{druh} [t]", "Schéma",
-                   f"η při {druh} = {fmt(z.V_ref)} t", "η bez vozidla"], rows,
+        K.tabulka(["MS", "Posudek", "Fáze", "Kombinace", f"{druh} [t]",
+                   vyst.capitalize(), "Schéma", f"η při {druh} = {fmt(z.V_ref)} t", "η bez vozidla"], rows,
                   f"Zatížitelnost {druh} po mezních stavech (seřazeno)")
     K.text(f"Následující protokol je spočten pro {res.druh} = {fmt(vys.V)} t ({res.hlavni.druh} – "
            f"{NAZVY_DRUHU[res.druh]} zatížitelnost, {POPIS_SCHEMAT[vys.schema_q or '']}) – "

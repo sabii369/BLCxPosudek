@@ -513,10 +513,15 @@ Zvolené vozidlo musí být Vn, Vr nebo Ve – pro ně se počítá protokol.
   vyjde-li ≤ 50 t, spočte se dvounápravové, a vyjde-li nad 16 t, i třínápravové:
   Vr = max(V_2, V_3) ≤ 50 t (čl. 7.2.2).
 - Chodci podle normy: s Vn a Vr 2,5 kN/m², s Ve 0 (lze zadat jinak). g0, g − g0 se nemění.
-- Posuzovaný nosník je pro každý druh pevný – zadaný, nebo **nejzatíženější samotným zatížením
-  daného druhu** (Vn, Vr, Ve při referenční tíze, prvním schématu; bez g0, g − g0 a chodců) podle
-  kritéria *Nejzatíženější podle* (max M, max záporný M, max |V|); u Vn a Vr jím bývá nosník
-  u kraje s užším chodníkem. Výběr je uveden v kapitole zatížitelnosti a v hlavičce protokolu.
+- **Nosníky**: každý posudek se hledá na **všech nosnících (pásech)** a platí nosník s nejnižší
+  zatížitelností (v tabulkách sloupec *Nosník*). Zbytečné nosníky se nepočítají: nosníky se řadí
+  od nejzatíženějšího a nosník se vynechá, má-li již spočtený nosník při tíhách vozidla, které
+  mu vyšly (nejmenší a největší konečná zatížitelnost), v každém bodě aspoň stejné účinky
+  kombinací (g − g0 vč. dobetonávky, chodci, q; MSÚ, char, častá, kvazistálá; tolerance 0,2 %) –
+  jeho využití při zatížitelnosti toho nosníku je pak nejvýše 100 %. U Vn a Vr se test dělá pro
+  všechna spočtená schémata. Je-li nosník zadán (*Posuzovaný výstup* ≠ auto), počítá se jen on.
+  Počet počítaných nosníků je v kapitole zatížitelnosti a v hlavičce protokolu. Protokol
+  druhu (posudky při zatížitelnosti) je pro rozhodující nosník.
   (Při posouzení pro zvolené vozidlo se nosník vybírá podle MSÚ 6.10 včetně g0.)
 - Výsledkem posudku je tíha [t]; dále „nezávisí na zatížení dopravou – vyhovuje /
   NEVYHOVUJE“ (napínání, minimální výztuž …), „neomezuje“ (η do zkoušené tíhy nedosáhne

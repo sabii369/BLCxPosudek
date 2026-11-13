@@ -542,8 +542,10 @@ slovník výsledků (ne celé objekty); vzor `blc_posudek/davka.py`.
    jiném nosníku (ve vzoru rozhoduje N6 pro M i V, η smyku po nosnících 0,18–0,29).
    Pro jistotu ve studii posoudit všechny nosníky
    (`for o in range(vys.n_vyst)`, ~0,35 s / nosník) nebo porovnat kritéria "M" a "V".
-   Zatížitelnost drží pro každý druh nosník nejzatíženější samotným zatížením druhu
-   (kap. 7, `rozhodujici_stav`).
+   Zatížitelnost hledá každý posudek na všech nosnících a bere nosník s nejnižší V
+   (`PosudekZat.o`); dominované nosníky (jiný už spočtený nosník má při jeho V stejné nebo větší
+   účinky kombinací – `_dominuje`) se nepočítají; zadaný `vystup` ≠ auto = jen on. Čas zatížitelnosti
+   roste s počtem nedominovaných nosníků (každý = samostatné hledání V).
 6. **Příčná poloha zatížení** je jedna – Vn a Vr u kraje vozovky u užšího chodníku, Ve a MLC
    v ose vozovky / `y_vozidla`; nejnepříznivější se nehledá. Při změně chodníků se mění kraj
    i osa vozovky, a tím i rozhodující nosník (u shodných chodníků se zatěžuje od levého kraje).
