@@ -667,3 +667,24 @@ def test_gui_soucinitele_na_karte_5():
     finally:
         app.destroy()
 
+
+def test_zatizitelnost_kontaktni_spara(d, vysledek):
+    """Posudky ve spáře (tab. C.7) vstupují do zatížitelnosti jako každý jiný posudek."""
+    from blc_posudek.zatizitelnost import zatizitelnost
+
+    def spara(zz):
+        d2 = copy.deepcopy(d)
+        d2["blc"]["vozidlo"] = "Ve"
+        d2["nosnik"].update(kontaktni_spara=True, pozice_spar=[2.0, 9.96])
+        d2.setdefault("posouzeni", {})["zbytkova_zivotnost"] = zz
+        z = zatizitelnost(d2, vysledek[0], druhy=("Ve",)).druhy["Ve"]
+        return z, {p.klic[1:]: p for p in z.posudky if p.klic[1].endswith("ve spáře")}
+
+    z, p = spara("50")                                  # > 30 let: dekomprese, charakteristická kombinace
+    assert {k[0] for k in p} == {"Dekomprese ve spáře"}
+    dek = p["Dekomprese ve spáře", "Konec životnosti", "charakteristická"]
+    assert dek.stav == "V" and dek.V > 0 and z.minimum().V <= dek.V + 1e-9
+    z, p = spara("10")                                  # < 10 let: w_max (častá) + dekomprese kvazistálá
+    assert {k[0] for k in p} == {"Dekomprese ve spáře", "Šířka trhlin ve spáře"}
+    assert p["Šířka trhlin ve spáře", "Konec životnosti", "častá"].stav == "V"
+    assert p["Dekomprese ve spáře", "Konec životnosti", "kvazistálá"].stav == "nezavisi_ok"   # bez dopravy

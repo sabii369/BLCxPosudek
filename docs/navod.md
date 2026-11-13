@@ -413,6 +413,13 @@ nastavení lze vynutit proměnnou prostředí `OPENBLAS_NUM_THREADS`.
    dekomprese, trhliny, w_max; tahové napětí v provozu je pak jen informativní). Šířka trhlin
    (7.3.4): bez trhlin při σ_ct ≤ f_ctm, jinak průřez s trhlinou; s_r,max podle (7.11) jen se
    zadaným Ø betonářské výztuže (karta 4, sloupec Ø), jinak 1,3·(h − x). Prázdné = bez kategorie.
+   **Kontaktní spára** (karta 3, *Nosník*): zaškrtnutí + pole *Pozice spáry x od kraje* [m]:
+   vzdálenosti všech spár od kraje nosníku oddělené „;“ (např. „3,5; 8,46“; 0 < x < L). Ve spárách se
+   navíc posuzuje (tab. C.7, sloupec „V kontaktní spáře“) podle zbytkové životnosti, kterou je
+   proto nutné zadat: 50 let (> 30) dekomprese při charakteristické kombinaci, 15-30 let dekomprese
+   při časté, 10 let (< 10) šířka trhlin 0,2 mm při časté (spára nepřenáší tah, f_ct,eff = 0)
+   a podle pozn. b) dekomprese při kvazistálé. Dekomprese ve spáře se posuzuje na celém průřezu
+   (okrajová vlákna). Posudky „… ve spáře“ vstupují i do zatížitelnosti. Ostatní posudky se nemění.
 4. **Lišta nahoře:** *Režim* **Posouzení / Zatížitelnost** (u zatížitelnosti i volba druhů
    a protokolu) a tlačítko **▶ Posouzení (F5)** / **▶ Zatížitelnost (F5)** – spočítá model mostu
    (jen pokud se změnily jeho vstupy) a posudek, resp. zatížitelnost; tlačítko

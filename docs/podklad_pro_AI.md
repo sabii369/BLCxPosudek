@@ -101,7 +101,7 @@ Jeden slovník `d` (TOML/JSON) = vstup Posudku PB + sekce `[blc]`. Sekce `[zatiz
 | `[predpinaci_vyztuz]` | `typ`, `fpk`, `Ep`, `trida_relaxace` …, `taznost` (neoslabená ε_uk [‰], 35; sklon zpevnění), **`taznost_oslabena`** (ε_uk,red [‰] od koroze, volitelně; 0 < ε_uk,red ≤ ε_uk) | posudek |
 | `[betonarska_vyztuz]` | `typ` ("B500B"), `fyk` … | posudek |
 | `[prurez]` | `obrys` [[y, z] mm], `otvory`, nebo `vrstvy`, nebo `b`+`h` | **oba** (BLC: A a Iy brutto, je-li `prurez_z_posudku = true`) |
-| `[nosnik]` | `L` (délka nosníku), **`L0` (rozpětí = osa ložisek)**, `predpeti` ("dodatecne"/"predem…"), `charakteristiky` ("brutto"/"idealni"), `pocet_rezu` (41), `pocet_napinani`, `postup_napinani` | **oba** (BLC: rozpětí = L0) |
+| `[nosnik]` | `L` (délka nosníku), **`L0` (rozpětí = osa ložisek)**, `predpeti` ("dodatecne"/"predem…"), `charakteristiky` ("brutto"/"idealni"), `pocet_rezu` (41), `kontaktni_spara` (false) + `pozice_spar` [seznam x v m od kraje nosníku, libovolný počet; vyžaduje `zbytkova_zivotnost`], `pocet_napinani`, `postup_napinani` | **oba** (BLC: rozpětí = L0) |
 | `[[kabel]]` | `nazev`, `pocet_lan`, `geometrie` ("parabola"/"polygon"/"primka"), `body` [[x m, z mm]], `polomery`, `z_L`/`z_S`/`z_P`, `sigma_max`, `napinani`, `mu`, `k`, `pokluz`, `d_kanalku` | posudek |
 | `[[smykova_vyztuz]]` | `Asw` [mm²], `s` [mm], `alpha`, `od`, `do` | posudek |
 | `[[vyztuz]]` | `z` [mm], `As` [mm²], `nazev`, `phi` [mm] (Ø – šířka trhlin, nepovinné) | posudek |
@@ -311,6 +311,8 @@ Posudky pro vzorový příklad (38 položek; počet závisí na kabelech a fáz�
 | MSP | Tlakové / Tahové napětí v betonu | Vnesení předpětí, Vnesení ost. stálých (stálá) | ne |
 | MSP | Tlakové / Tahové napětí v betonu | provoz, charakteristická (tahové jen bez kategorie mostu) | ano |
 | MSP | Dekomprese | provoz, častá (podle kategorie mostu i kvazistálá / žádná) | ano |
+| MSP | Dekomprese ve spáře | jen s `kontaktni_spara`; tab. C.7: 50 let char., 15-30 let častá, 10 let kvazistálá; celý průřez ve spáře | ano (kvazistálá bez dopravy: nezávisí) |
+| MSP | Šířka trhlin ve spáře | jen s `kontaktni_spara` a zbytkovou životností 10 let; častá, w_max 0,2 mm, f_ct,eff = 0 | ano, η = 0 do vzniku tahu |
 | MSP | Šířka trhlin | provoz, kombinace podle `trhliny` / kategorie (jen je-li zadána) | ano, η = 0 do vzniku trhlin |
 | MSP | Napětí v předpínací výztuži | provoz, charakteristická | jen kabely v tažené oblasti (ve vzoru rozhoduje horní kabel K1 → ne) |
 | MSP | Hlavní tahové napětí | provoz, charakteristická | ano |
