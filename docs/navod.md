@@ -510,6 +510,10 @@ zvolené vozidlo*) (v souboru `[blc] zatizitelnost = true`, `zatizitelnost_druhy
 zadaném zatížení se pro každý posudek (mezní stav × fáze × kombinace) hledá **tíha vozidla,
 při které je využití 100 %** – pro **normální Vn, výhradní Vr a výjimečnou Ve** zatížitelnost.
 Zvolené vozidlo musí být Vn, Vr nebo Ve – pro ně se počítá protokol.
+Volba *čas posouzení* v liště (`[blc] zatizitelnost_cas = "vse" | "akt" | "konec"`) omezí
+hledání na posudky v jedné fázi – *Aktuální stáří* (vyžaduje zadané aktuální stáří na kartě
+Zatížení a čas) nebo *Konec životnosti*; *všechny fáze* (výchozí) počítá všechny fáze včetně
+napínání a vnesení předpětí. Posudky mimo zvolený čas se nehledají (v tabulce „–“) a výpočet je kratší.
 
 - Pro každé schéma se stav q spočte jednou s referenční tíhou (zadané Vn, Vr, Ve – výchozí
   32, 60, 80 t) na stejném modelu MKP; účinky jsou v tíze lineární, pro jinou tíhu se

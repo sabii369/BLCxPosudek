@@ -89,7 +89,8 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
   < 16 t, Vr 6 / 2 / 3nápravové; stavy nezávisí / neomezuje / klesá; `Vaj`, `V_evidence`); protokol pro zvolené
   vozidlo, `model.zatizitelnost`, kapitola na začátek protokolu; GUI `AplikaceMost._zobraz_vysledky`.
   Protokol jen pro druh: `protokol_druhu(res, druh)` (posudky při jeho zatížitelnosti; `[blc]
-  protokol_zatizitelnosti`, dávka `--protokol souhrn|Vn|Vr|Ve|vse`, GUI přepínání bez nového hledání);
+  protokol_zatizitelnosti`, dávka `--protokol souhrn|Vn|Vr|Ve|vse`, GUI přepínání bez nového hledání); `[blc] zatizitelnost_cas`
+  (`vse|akt|konec`, GUI „čas posouzení“) – hledají se jen posudky ve fázi `CAS_FAZE`;
   v kapitole BLC (2.4) `blc_zat_pricny` a při zatížitelnosti (`dopln_kapitolu_blc`) `blc_zat_<druh>`, `blc_pricny_<druh>` při referenční tíze; graf `blc_sily` má místo řádku q řádky referenčních souprav
   (`plotting_sily.kresli_pricny_rez` – příčný řez s polohou zatížení, pruhy, kóty).
 - Vozidlo q: `vnitrni_sily(Ve=…)`, `(Vn=…)`, `(Vr=…)` (+ `schema`), nebo `(MLC=…, typ_MLC="k"|"p", dist=None|kolona)`;

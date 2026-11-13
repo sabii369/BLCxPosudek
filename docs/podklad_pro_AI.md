@@ -160,6 +160,7 @@ hodnoty jsou v `KLICE_BLC_VOLITELNE`.
 | `t_stale` | (t_vneseni) | dny | jen režim "zatezovaci_stavy" |
 | `zatizitelnost` | false | – | true = místo posouzení výpočet zatížitelnosti |
 | `zatizitelnost_druhy` | "vse" | – | "vse" (Vn, Vr, Ve) \| "vozidlo" \| seznam, např. ["Vn", "Ve"] |
+| `zatizitelnost_cas` | "vse" | – | "vse" (všechny fáze) \| "akt" (Aktuální stáří, vyžaduje `t_akt`) \| "konec" (Konec životnosti) – zatížitelnost jen pro posudky v této fázi |
 | `protokol_zatizitelnosti` | "souhrn" | – | "souhrn" \| "Vn" \| "Vr" \| "Ve" (jen druh, posudky při jeho zatížitelnosti) \| "vse" (dávka: souhrn + `DIR/<druh>/`) |
 
 ---

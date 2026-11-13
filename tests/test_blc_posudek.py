@@ -339,6 +339,10 @@ def test_gui(tmp_path):
         assert ulozeno["blc"]["vozidlo"] == "MLC_k"
         app.var_zat_prot.set("jen Vr – posudky při Vr")
         assert app.ziskej_data()["blc"]["protokol_zatizitelnosti"] == "Vr"
+        assert app.ziskej_data()["blc"]["zatizitelnost_cas"] == "vse"
+        app.var_zat_cas.set("Konec životnosti")
+        assert app.ziskej_data()["blc"]["zatizitelnost_cas"] == "konec"
+        app.var_zat_cas.set("všechny fáze")
         # režim v liště: zatížitelnost → tlačítko, volby a referenční tíhy všech druhů
         app.var_rezim.set("Zatížitelnost")
         app._zmena_rezimu()
@@ -666,6 +670,30 @@ def test_gui_soucinitele_na_karte_5():
         assert parametry_blc(d)["soucinitele"].gamma_Q == 1.5
     finally:
         app.destroy()
+
+
+def test_zatizitelnost_cas_posouzeni(d, vysledek):
+    """[blc] zatizitelnost_cas: hledají se jen posudky ve zvolené fázi, výsledek odpovídá
+    stejným posudkům při všech fázích; bez aktuálního stáří je volba 'akt' chyba."""
+    from blc_posudek.zatizitelnost import CAS_FAZE, zatizitelnost
+
+    def ve(cas, **casova):
+        d2 = copy.deepcopy(d)
+        d2["blc"].update(vozidlo="Ve", zatizitelnost_cas=cas)
+        d2.setdefault("casova_osa", {}).update(casova)
+        return zatizitelnost(d2, vysledek[0], druhy=("Ve",), o=5).druhy["Ve"]
+
+    vse, konec = ve("vse"), ve("konec")
+    assert {p.klic[2] for p in konec.posudky} == {CAS_FAZE["konec"]}
+    assert len(konec.posudky) < len(vse.posudky) and konec.n_vypoctu <= vse.n_vypoctu
+    pv = {p.klic: p for p in vse.posudky}
+    for p in konec.posudky:                       # stejná hodnota jako při hledání všech fází
+        if p.stav == "V":
+            assert p.V == approx(pv[p.klic].V, abs=0.05)
+    with pytest.raises(ValueError, match="čase posouzení"):
+        ve("akt")
+    akt = ve("akt", t_akt=18250.0)
+    assert {p.klic[2] for p in akt.posudky} == {CAS_FAZE["akt"]}
 
 
 def test_zatizitelnost_kontaktni_spara(d, vysledek):

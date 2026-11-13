@@ -29,7 +29,9 @@ Sekce [blc]:
   zatížitelnost zatizitelnost = true → místo posouzení hledá Vn, Vr, Ve pro η = 100 % každého
                posudku; zatizitelnost_druhy = "vse" | "vozidlo" | ["Vn", "Ve", …];
                protokol_zatizitelnosti = "souhrn" | "Vn" | "Vr" | "Ve" (jen druh, posudky při jeho
-               zatížitelnosti) | "vse" (dávka: souhrn + každý druh zvlášť)
+               zatížitelnosti) | "vse" (dávka: souhrn + každý druh zvlášť);
+               zatizitelnost_cas = "vse" (všechny fáze) | "akt" (Aktuální stáří) | "konec"
+               (Konec životnosti) – zatížitelnost se hledá jen pro posudky ve zvolené fázi
   předání      vystup ("auto" | "N3"), kriterium ("M" | "M-" | "V"), rezim ("kombinace" |
                "zatezovaci_stavy"), gamma_Q, psi0, psi1, psi2, t_vneseni, t_stale
 """
@@ -63,7 +65,7 @@ VYCHOZI_BLC = {
     "gamma_Q": 1.35, "psi0": 0.75, "psi1": 0.75, "psi2": 0.0,
     "q_chodnik": None, "gamma_Qch": 1.35, "psi0_ch": 0.75, "psi1_ch": 0.75, "psi2_ch": 0.0,
     "zatizitelnost": False, "zatizitelnost_druhy": "vse",
-    "protokol_zatizitelnosti": "souhrn",
+    "protokol_zatizitelnosti": "souhrn", "zatizitelnost_cas": "vse",
 }
 
 

@@ -49,6 +49,8 @@ from blc.vnitrni_sily import VysledekSil, vnitrni_sily, vys_pro_V, vys_s_vozidle
 TOL = 1e-3              # přesnost využití
 TOL_V = 0.01            # přesnost V [t]
 DRUHY = ("Vn", "Vr", "Ve")
+# čas posouzení zatížitelnosti: "vse" = všechny fáze, jinak jen fáze tohoto názvu
+CAS_FAZE = {"akt": "Aktuální stáří", "konec": "Konec životnosti"}
 NAZVY_DRUHU = {"Vn": "normální", "Vr": "výhradní", "Ve": "výjimečná"}
 CLANKY = {"Vn": "čl. 7.1", "Vr": "čl. 7.2", "Ve": "čl. 7.3"}
 STAVY_TEXT = {
@@ -300,8 +302,10 @@ def vys_pro_Ve(vys: VysledekSil, Ve: float) -> VysledekSil:
 # ---------------------------------------------------------------------------
 
 def _hledej(d: dict, vys: VysledekSil, o: int, schema: str, tol: float, max_kol: int,
-            nasobek_max: float, prubeh=None, nazev: str = "V") -> VysledekSchematu:
-    """V [t] pro η = 1 každého posudku při zatížení q mostu vys (přeškálovaném z vys.V)."""
+            nasobek_max: float, prubeh=None, nazev: str = "V",
+            cas: str = "vse") -> VysledekSchematu:
+    """V [t] pro η = 1 každého posudku při zatížení q mostu vys (přeškálovaném z vys.V);
+    cas = "vse" | "akt" | "konec" – jen posudky v této fázi (viz CAS_FAZE)."""
     from pb_posudek.vstup import model_ze_slovniku
     from .vypocet import data_pro_posudek
 
@@ -320,7 +324,10 @@ def _hledej(d: dict, vys: VysledekSil, o: int, schema: str, tol: float, max_kol:
         return body[V]
 
     e0, er = eta(0.0), eta(Vr)
-    klice = [k for k in er if k in e0]
+    klice = [k for k in er if k in e0 and (cas == "vse" or k[2] == CAS_FAZE[cas])]
+    if not klice:
+        raise ValueError(f"Zatížitelnost: v čase posouzení '{CAS_FAZE.get(cas, cas)}' není žádný "
+                         "posudek (zadejte aktuální stáří na kartě Zatížení a čas).")
 
     def roste(k, V):
         return eta(V).get(k, 0.0) > e0[k] + 1e-9
@@ -627,7 +634,10 @@ def zatizitelnost(d: dict, vys: Optional[VysledekSil] = None, o: Optional[int] =
     # mají jiné nosníky všude větší účinky g − g0, chodců i q (_nedominovane)
     pevny = o if o is not None else (vyber_nosnik(vys, d) if str(b.get("vystup") or "auto") != "auto"
                                       else None)
-    kw = dict(tol=tol, max_kol=max_kol, nasobek_max=nasobek_max, prubeh=prubeh)
+    cas = b.get("zatizitelnost_cas") or "vse"
+    if cas not in ("vse",) + tuple(CAS_FAZE):
+        raise ValueError(f"Neznámý čas posouzení zatížitelnosti '{cas}' (vse, akt, konec).")
+    kw = dict(tol=tol, max_kol=max_kol, nasobek_max=nasobek_max, prubeh=prubeh, cas=cas)
     from .vypocet import nastaveni_posudku
     druhy_komb = (["6.10a", "6.10b"] if nastaveni_posudku(d).get("kombinace_msu", "6.10ab") == "6.10ab"
                   else ["6.10"]) + ["char", "casta", "kvazistala"]

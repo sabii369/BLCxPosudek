@@ -46,6 +46,8 @@ DRUHY_ZAT_KLIC = {v: k for k, v in DRUHY_ZAT_GUI.items()}
 PROTOKOL_GUI = {"souhrn": "souhrn – posudky pro zvolené vozidlo", "Vn": "jen Vn – posudky při Vn",
                 "Vr": "jen Vr – posudky při Vr", "Ve": "jen Ve – posudky při Ve"}
 PROTOKOL_KLIC = {v: k for k, v in PROTOKOL_GUI.items()}
+CAS_ZAT_GUI = {"vse": "všechny fáze", "akt": "Aktuální stáří", "konec": "Konec životnosti"}
+CAS_ZAT_KLIC = {v: k for k, v in CAS_ZAT_GUI.items()}
 SEDA = "#52514e"
 REZIMY = ("Posouzení", "Zatížitelnost")
 GRAF_REZ = "Příčný řez – poloha zatížení"
@@ -125,6 +127,10 @@ class AplikaceMost(Aplikace):
                           values=list(PROTOKOL_GUI.values()))
         cb.pack(side="left")
         cb.bind("<<ComboboxSelected>>", lambda e: self._prepni_protokol())
+        ttk.Label(self.fr_zat, text="čas posouzení").pack(side="left", padx=(8, 2))
+        self.var_zat_cas = tk.StringVar(value=CAS_ZAT_GUI["vse"])
+        ttk.Combobox(self.fr_zat, textvariable=self.var_zat_cas, state="readonly", width=16,
+                     values=list(CAS_ZAT_GUI.values())).pack(side="left")
 
     def _zmena_rezimu(self, *_):
         """Přepínač Posouzení / Zatížitelnost: var_zat, tlačítko výpočtu, volby zatížitelnosti."""
@@ -441,6 +447,7 @@ class AplikaceMost(Aplikace):
         out["zatizitelnost"] = bool(self.var_zat.get())
         out["zatizitelnost_druhy"] = DRUHY_ZAT_KLIC.get(self.var_zat_druhy.get(), "vse")
         out["protokol_zatizitelnosti"] = PROTOKOL_KLIC.get(self.var_zat_prot.get(), "souhrn")
+        out["zatizitelnost_cas"] = CAS_ZAT_KLIC.get(self.var_zat_cas.get(), "vse")
         lin = [{k: v for k, v in r.items() if v is not None} for r in self.t_liniova.ziskej()]
         if lin:
             out["liniova"] = lin
@@ -461,6 +468,8 @@ class AplikaceMost(Aplikace):
                                                  DRUHY_ZAT_GUI["vse"]))
         self.var_zat_prot.set(PROTOKOL_GUI.get(m.get("protokol_zatizitelnosti") or "souhrn",
                                                PROTOKOL_GUI["souhrn"]))
+        self.var_zat_cas.set(CAS_ZAT_GUI.get(m.get("zatizitelnost_cas") or "vse",
+                                             CAS_ZAT_GUI["vse"]))
 
     def _nastav_data(self, d: dict):
         super()._nastav_data(d)
@@ -610,7 +619,8 @@ class AplikaceMost(Aplikace):
         self.t_vys.column("eta", width=230 if len(druhy) == 1 else 190)
         for iid, v in self._radky:
             pp = [zat[d].get(klic_posudku(v)) for d in druhy]
-            if any(p is None for p in pp):
+            if any(p is None for p in pp):             # posudek mimo zvolený čas posouzení
+                self.t_vys.set(iid, "eta", "–")
                 continue
             stavy = {p.stav for p in pp}
             if len(druhy) == 1 or (len(stavy) == 1 and "V" not in stavy):
