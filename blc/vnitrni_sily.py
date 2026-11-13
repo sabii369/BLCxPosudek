@@ -579,6 +579,57 @@ def _kombinuj_pruhy(pruhy: List[Dict[str, np.ndarray]], zbytek: Optional[Dict[st
     return out
 
 
+def pricne_q(K: Konstrukce, vyb: Vybaveni, druh: str, V: float = 0.0, schema: Optional[str] = None,
+             y_Ve: Optional[float] = None, MLC: Optional[str] = None, typ_MLC: str = "k") -> dict:
+    """Příčná poloha zatížení dopravou bez MKP (pro výpočet q i náhled příčného řezu):
+    druh "Vn" | "Vr" (u kraje vozovky u užšího chodníku, schéma podle tíhy) | "Ve" | "MLC"
+    (osa y_Ve, None = osa vozovky).  Vrací dict y (osa vozidla / pruhu 1), poloha (popis),
+    stopy [(y, šířka)], pruhy [dict y0, y1, nazev, naprava, F_kola, q], obrys [(y0, y1)],
+    rozvor, b_k, schema."""
+    B = K.B
+    if druh == "Vn":
+        schema = schema or sz.schema_Vn(V)
+        pp = sz.pricna_poloha(vyb.chodnik_L, vyb.chodnik_P, B)
+        pruhy, zbytek = sz.pruhy_Vn(pp, schema)
+        bw = sz.PLOSKA_KOLA_VN
+        stopy, popis = [], []
+        for p in pruhy:
+            if p.naprava:
+                stopy += [(p.y_c - 0.5 * sz.ROZCHOD_KOL, bw), (p.y_c + 0.5 * sz.ROZCHOD_KOL, bw)]
+            popis.append(dict(y0=p.y0, y1=p.y1, nazev=f"pruh {p.cislo}", naprava=p.naprava,
+                              F_kola=p.F_kolo, q=p.q_rovnomerne))
+        if zbytek is not None:
+            popis.append(dict(y0=zbytek[0], y1=zbytek[1], nazev="zbývající plocha", naprava=None,
+                              F_kola=0.0, q=1.0))
+        return dict(y=pruhy[0].y_c, poloha=pp.popis, stopy=stopy, pruhy=popis, obrys=[],
+                    rozvor=sz.ROZCHOD_KOL, b_k=bw, schema=schema)
+    if druh == "Vr":
+        schema = schema or sz.schema_Vr(V)
+        v = sz.VOZIDLA_VR[schema]
+        pp = sz.pricna_poloha(vyb.chodnik_L, vyb.chodnik_P, B)
+        yc, y1, y2 = sz.stopy_vozidla_u_kraje(pp, v)
+        stopy = sorted({(y, b) for y in (y1, y2) for b in {a.sirka for a in v.napravy}})
+        obrys = [(min(pp.y_kraj, pp.y_kraj + pp.smer * v.sirka),
+                  max(pp.y_kraj, pp.y_kraj + pp.smer * v.sirka))]
+        return dict(y=yc, poloha=pp.popis, stopy=stopy, pruhy=[], obrys=obrys, rozvor=v.rozchod,
+                    b_k=max(a.sirka for a in v.napravy), schema=schema)
+    if druh not in ("Ve", "MLC"):
+        raise ValueError(f"Neznámý druh zatížení dopravou '{druh}'.")
+    y_c = float(y_Ve) if y_Ve is not None else vyb.y_osy_vozovky(B)
+    rozvor, b_k = VE_ROZVOR, VE_B_K
+    if druh == "MLC":
+        t = (typ_MLC or "k").lower()
+        if t not in ("k", "p"):
+            raise ValueError("Typ vozidla MLC musí být 'k' (kolové) nebo 'p' (pásové).")
+        v = kolove_vozidlo(MLC) if t == "k" else pasove_vozidlo(MLC)
+        rozvor, b_k = v.rozvor, v.b_k
+    pul = 0.5 * (rozvor + b_k)
+    y1, y2 = y_c - 0.5 * rozvor, y_c + 0.5 * rozvor
+    return dict(y=y_c, poloha=f"osa y = {cz(y_c, 2)} m", stopy=[(y1, b_k), (y2, b_k)], pruhy=[],
+                obrys=[(y_c - 1.5, y_c + 1.5)] if druh == "Ve" else [(y_c - pul, y_c + pul)],
+                rozvor=rozvor, b_k=b_k, schema="")
+
+
 def _schema_Vn(model, vyst, K: Konstrukce, vyb: Vybaveni, Vn: float, schema: str, roz: float,
                krok: float, krok_useky: float, dyn: Optional[float]) -> dict:
     """Stav q pro normální zatížitelnost Vn [t] (vn = Vn/13,33) – obr. 7.1 u kraje vozovky
@@ -590,7 +641,7 @@ def _schema_Vn(model, vyst, K: Konstrukce, vyb: Vybaveni, Vn: float, schema: str
     nos = Nosnik1D(K)
     bw = sz.PLOSKA_KOLA_VN
     slozky, acc_pruhy, n_st = [], [], 0
-    stopy, pruhy_popis = [], []
+    geo = pricne_q(K, vyb, "Vn", Vn, schema)
     for p in pruhy:
         s: Dict[str, object] = {"cislo": p.cislo, "pojezd": None, "useky": []}
         acc = {a + z: np.zeros((vyst.n, model.nx)) for a in VELICINY for z in "+-"}
@@ -605,7 +656,6 @@ def _schema_Vn(model, vyst, K: Konstrukce, vyb: Vybaveni, Vn: float, schema: str
             for k in acc:
                 acc[k] += np.maximum(ob[k], 0.0) if k.endswith("+") else np.minimum(ob[k], 0.0)
             s["pojezd"] = gen
-            stopy += [(ya, bw), (yb, bw)]
         us = _useky_pasu(K, p.y0, p.y1, p.q_rovnomerne * vn, krok_useky, dy_max=1.0)
         su = _soucty_useku(model, vyst, us)
         n_st += len(us)
@@ -614,12 +664,8 @@ def _schema_Vn(model, vyst, K: Konstrukce, vyb: Vybaveni, Vn: float, schema: str
         s["useky"] = us
         slozky.append(s)
         acc_pruhy.append(acc)
-        pruhy_popis.append(dict(y0=p.y0, y1=p.y1, nazev=f"pruh {p.cislo}", naprava=p.naprava,
-                                F_kola=p.F_kolo, q=p.q_rovnomerne))
     acc_z, us_z = None, []
     if zbytek is not None:
-        pruhy_popis.append(dict(y0=zbytek[0], y1=zbytek[1], nazev="zbývající plocha",
-                                naprava=None, F_kola=0.0, q=1.0))
         us_z = _useky_pasu(K, zbytek[0], zbytek[1], vn, krok_useky, dy_max=1.0)
         acc_z = _soucty_useku(model, vyst, us_z)
         n_st += len(us_z)
@@ -643,7 +689,7 @@ def _schema_Vn(model, vyst, K: Konstrukce, vyb: Vybaveni, Vn: float, schema: str
                         "na chodník.")
     return dict(stav=_stav("q", popis(Vn), kom, n_st), popis=popis,
                 vozidlo=lambda t: f"Vn {t} t", y=pruhy[0].y_c, poloha=pp.popis,
-                dyn=delty[1], dyn_zdroj=dzdroj, stopy=stopy, pruhy=pruhy_popis,
+                dyn=delty[1], dyn_zdroj=dzdroj, stopy=geo["stopy"], pruhy=geo["pruhy"],
                 varovani=varovani,
                 q_nastaveni=dict(typ="sestava", pruhy=slozky, zbytek=us_z, delty=delty,
                                  meritko=1.0))
@@ -671,11 +717,10 @@ def _schema_Vr(model, vyst, K: Konstrukce, vyb: Vybaveni, Vr: float, schema: str
     varovani = []
     if v.sirka > pp.w + 1e-9:
         varovani.append(f"Vozidlo Vr (šířka {cz(v.sirka)} m) je širší než vozovka ({cz(pp.w, 2)} m).")
-    stopy = sorted({(y, b) for y in (y1, y2) for b in {a.sirka for a in v.napravy}})
-    obrys = [(min(pp.y_kraj, pp.y_kraj + pp.smer * v.sirka), max(pp.y_kraj, pp.y_kraj + pp.smer * v.sirka))]
-    return dict(stav=_stav("q", popis(Vr), ob, n_p), popis=popis, obrys=obrys,
+    geo = pricne_q(K, vyb, "Vr", Vr, schema)
+    return dict(stav=_stav("q", popis(Vr), ob, n_p), popis=popis, obrys=geo["obrys"],
                 vozidlo=lambda t: f"Vr {t} t ({v.nazev})", y=yc, poloha=pp.popis, dyn=d,
-                dyn_zdroj=dzdroj, stopy=stopy, pruhy=[], varovani=varovani,
+                dyn_zdroj=dzdroj, stopy=geo["stopy"], pruhy=[], varovani=varovani,
                 rozvor=v.rozchod, b_k=max(a.sirka for a in v.napravy),
                 q_nastaveni=dict(typ="pojezd", polohy=gen, meritko=1.0))
 
@@ -683,6 +728,71 @@ def _schema_Vr(model, vyst, K: Konstrukce, vyb: Vybaveni, Vr: float, schema: str
 # ---------------------------------------------------------------------------
 # Hlavní funkce
 # ---------------------------------------------------------------------------
+
+def geometrie_mostu(L, N: int = 1, b: float = 1.0, Iy: float = 0.0, beton: Optional[str] = None,
+                    E: Optional[float] = None, nu: float = 0.2, d: float = 0.0, spara: bool = False,
+                    b_s: float = 0.0, Iy_s: float = 0.0, beton_s: Optional[str] = None,
+                    E_s: Optional[float] = None, typ_konstrukce: str = "nosniky", h: float = 0.0,
+                    alfa: float = 90.0, sikmost: str = "prava", k_pod: Optional[float] = None,
+                    uloz: str = "tvrde", k_rot: Optional[float] = None, beta_s_pevne: bool = False,
+                    vybaveni: Optional[Vybaveni] = None, **_) -> tuple:
+    """(Konstrukce, Vybaveni) ze stejných argumentů jako vnitrni_sily (ostatní se ignorují) –
+    bez výpočtu MKP (náhled příčného řezu, kontrola vstupů)."""
+    Lp = [float(L)] if np.isscalar(L) else [float(v) for v in L]
+    if beton:
+        E = E_betonu(beton)
+    if E is None:
+        raise ValueError("Zadejte třídu betonu nebo modul pružnosti E.")
+    if beton_s:
+        E_s = E_betonu(beton_s)
+    K = Konstrukce(L=Lp, N=N, b=b, E=E, Iy=Iy, nu=nu, d=d, spara=spara, b_s=b_s,
+                   Iy_s=Iy_s, E_s=E_s, typ=typ_konstrukce, h=h, alfa=alfa, sikmost=sikmost,
+                   k_pod=k_pod, uloz=uloz, k_rot=k_rot, beta_s_pevne=beta_s_pevne)
+    vyb = vybaveni or Vybaveni()
+    vyb.kontrola(K.B)
+    return K, vyb
+
+
+def nahled_mostu(**kw):
+    """Náhled mostu bez MKP – objekt s atributy, které čte plotting_sily.kresli_pricny_rez
+    (K, vybaveni, vyst, popisky, stavy, druh_q, V, schema_q, vozidlo, y_Ve, poloha_q, stopy_q,
+    pruhy_q, obrys_q, dyn, q_ch …).  kw = argumenty vnitrni_sily (parametry_blc)."""
+    from types import SimpleNamespace
+    K, vyb = geometrie_mostu(**kw)
+    druh = next((k for k in ("Vn", "Vr", "Ve") if kw.get(k)), "MLC" if kw.get("MLC") else "")
+    V = float(kw.get(druh) or 0.0) if druh in ("Vn", "Vr", "Ve") else 0.0
+    q, q_zdroj = _q_chodniku(druh, kw.get("q_chodnik"))
+    dyn_zad = kw.get("dyn")
+    out = SimpleNamespace(K=K, vybaveni=vyb, deska=K.je_deska, stavy={}, druh_q=druh, V=V, schema_q="",
+                          vozidlo="", y_Ve=0.0, poloha_q="", stopy_q=[], pruhy_q=[], obrys_q=[],
+                          dyn=1.0, q_ch=float(q), q_ch_zdroj=q_zdroj)
+    if K.je_deska:
+        n = max(1, int(round(K.B)))
+        y = (np.arange(n) + 0.5) * K.B / n
+        out.vyst = SimpleNamespace(y=y, sirka_okna=K.B / n)
+        out.popisky = [f"pás {i + 1}" for i in range(n)]
+    else:
+        out.vyst = SimpleNamespace(y=np.asarray(K.y_nos, dtype=float), sirka_okna=K.b)
+        out.popisky = [f"N{i + 1}" for i in range(K.N)]
+    if not druh:
+        return out
+    geo = pricne_q(K, vyb, druh, V, kw.get("schema"), y_Ve=kw.get("y_Ve"), MLC=kw.get("MLC"),
+                   typ_MLC=kw.get("typ_MLC") or "k")
+    if druh == "Vn":
+        dyn = delty_zatizitelnosti(K, dyn_zad)[0][1]
+        voz = f"Vn {cz(V)} t"
+    elif druh == "Vr":
+        dyn = dynamicky_soucinitel("Vr", dyn_zad, K)[0]
+        voz = f"Vr {cz(V)} t ({sz.VOZIDLA_VR[geo['schema']].nazev})"
+    else:
+        dyn = dynamicky_soucinitel(druh, dyn_zad)[0]
+        t_ = (kw.get("typ_MLC") or "k").lower()
+        voz = f"Ve {cz(V)} t" if druh == "Ve" else f"{kw['MLC']} {'kolové' if t_ == 'k' else 'pásové'}"
+    out.stavy = {"q": None}
+    out.__dict__.update(schema_q=geo["schema"], vozidlo=voz, y_Ve=geo["y"], poloha_q=geo["poloha"],
+                        stopy_q=geo["stopy"], pruhy_q=geo["pruhy"], obrys_q=geo["obrys"], dyn=dyn)
+    return out
+
 
 def vnitrni_sily(
     L: Union[float, List[float]],
@@ -776,19 +886,12 @@ def vnitrni_sily(
         ex:          velikost prvku MKP [m].
         soucinitele: součinitele kombinací (výběr nejzatíženějšího nosníku, export).
     """
-    Lp = [float(L)] if np.isscalar(L) else [float(v) for v in L]
-    if beton:
-        E = E_betonu(beton)
-    if E is None:
-        raise ValueError("Zadejte třídu betonu nebo modul pružnosti E.")
-    if beton_s:
-        E_s = E_betonu(beton_s)
-    K = Konstrukce(L=Lp, N=N, b=b, E=E, Iy=Iy, nu=nu, d=d, spara=spara, b_s=b_s,
-                   Iy_s=Iy_s, E_s=E_s, typ=typ_konstrukce, h=h, alfa=alfa, sikmost=sikmost,
-                   k_pod=k_pod, uloz=uloz, k_rot=k_rot, beta_s_pevne=beta_s_pevne)
-    vyb = vybaveni or Vybaveni()
+    K, vyb = geometrie_mostu(L=L, N=N, b=b, Iy=Iy, beton=beton, E=E, nu=nu, d=d, spara=spara,
+                             b_s=b_s, Iy_s=Iy_s, beton_s=beton_s, E_s=E_s,
+                             typ_konstrukce=typ_konstrukce, h=h, alfa=alfa, sikmost=sikmost,
+                             k_pod=k_pod, uloz=uloz, k_rot=k_rot, beta_s_pevne=beta_s_pevne,
+                             vybaveni=vybaveni)
     B = K.B
-    vyb.kontrola(B)
     if dyn is not None and dyn <= 0:
         raise ValueError("Dynamický součinitel musí být kladný.")
     if g_spary < 0:
@@ -973,6 +1076,7 @@ def _promenne(model, vyst: Vystupy, K: Konstrukce, vyb: Vybaveni, n: dict, cache
 
             def novy_gen(t=t, dist=dist):
                 return nos.stavy_MLC(t, MLC, n_ob, dist, roz, extra=True)
+        geo = pricne_q(K, vyb, druh, y_Ve=y_c, MLC=MLC, typ_MLC=n.get("typ_MLC") or "k")
         pul = 0.5 * (rozvor + b_k)
         if y_c - pul < vyb.chodnik_L - 1e-9 or y_c + pul > B - vyb.chodnik_P + 1e-9:
             varovani.append(f"Vozidlo {voz_popis} (šířka {cz(2 * pul, 2)} m, osa y = {cz(y_c, 2)} m) "
@@ -998,9 +1102,8 @@ def _promenne(model, vyst: Vystupy, K: Konstrukce, vyb: Vybaveni, n: dict, cache
                              ob.Vm_max, ob.Vm_min, ob.Vp_max, ob.Vp_min, ob.Vs_max, ob.Vs_min,
                              pohyblivy=True, n_stavu=ob.n_stavu)
         attrs.update(V=float(Ve or 0.0), dyn=dyn, dyn_zdroj=dyn_zdroj, vozidlo=voz_popis,
-                     rozvor=rozvor, b_k=b_k, poloha_q=f"osa y = {cz(y_c, 2)} m",
-                     stopy_q=[(y1, b_k), (y2, b_k)],
-                     obrys_q=[(y_c - 1.5, y_c + 1.5)] if druh == "Ve" else [(y_c - pul, y_c + pul)],
+                     rozvor=rozvor, b_k=b_k, poloha_q=geo["poloha"], stopy_q=geo["stopy"],
+                     obrys_q=geo["obrys"],
                      q_nastaveni=dict(typ="pojezd", polohy=polohy, meritko=1.0, popis=popis,
                                       vozidlo=lambda t: f"Ve {t} t"))
     elif druh in ("Vn", "Vr"):

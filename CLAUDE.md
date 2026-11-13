@@ -73,6 +73,9 @@ python tests/referencni_pripady.py    # přegenerovat referenční hodnoty – J
   napětí (přesná integrace po průřezu, Excel zjednodušuje) × γ·ψ kombinace nepříznivě k napětí v betonu v provozu
   (tlak/tah char, dotvarování, dekomprese, hlavní napětí; ne trhliny, ne MSÚ); `msp_napeti` klíče `(P, M, varianta)`,
   `grafy_most.profily_faze` nelineární průběh; GUI karta 5.
+- GUI: režim Posouzení / Zatížitelnost a tlačítko výpočtu v liště (`var_rezim`, `_zmena_rezimu`); karta 0 ukazuje
+  jen platná pole (`_viditelnost`, `rozloz_formular`), před výpočtem náhled příčného řezu bez MKP
+  (`blc.vnitrni_sily.nahled_mostu`, `pricne_q` sdílí s výpočtem q); karta 6 ve skupinách, karta 7 filtr (pb_posudek).
 - GUI: všechny dílčí součinitele zatížení na kartě 5, sekce „Dílčí součinitele zatížení“ (`ram_soucinitele`):
   stálá `f_souc_stale` (γ_G, γ_G,inf, ξ → `[posouzeni]`, ne na kartě 6), doprava / chodci `f_souc_doprava`,
   `f_souc_chodci` (→ `[blc]`, ne na kartě 0), teplota `f_teplota_souc`; kombinace MSÚ a γ_P zůstávají na kartě 6.

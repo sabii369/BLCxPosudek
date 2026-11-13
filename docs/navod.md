@@ -389,21 +389,34 @@ nastavení lze vynutit proměnnou prostředí `OPENBLAS_NUM_THREADS`.
    chodci (prázdné = podle ČSN 73 6222), **vozidlo** (Vn / Vr / Ve [t] podle ČSN 73 6222,
    MLC kolové / pásové, kolona jen u MLC), dynamický součinitel (prázdné = podle ČSN 73 6222,
    kap. 8: Vn δ1–δ3, Vr δ1, Ve δ = 1,05),
-   posuzovaný nosník (auto = nejzatíženější podle M, M− nebo V), způsob předání, γ_Q a ψ.
+   posuzovaný nosník (auto = nejzatíženější podle M, M− nebo V), způsob předání.
+   Karta ukazuje **jen pole platná pro zadání**: u desky tloušťku h (bez počtu a šířky nosníků
+   a spáry), A a Iy nosníku jen bez převzetí z průřezu, parametry spáry jen se zaškrtnutou spárou,
+   k_φ jen u vetknutí, u vozidla jen jeho tíhu (MLC: třída a kolona; v režimu zatížitelnosti
+   referenční Vn, Vr i Ve). Skrytá pole si hodnotu ponechají. Dokud most není spočten, ukazuje
+   graf vpravo **náhled příčného řezu ze zadání** (nosníky, vybavení, pruhy Vn / vozidlo Vr, Ve,
+   MLC v příčné poloze, kóty) – bez výpočtu MKP, překresluje se při změně vstupů; po výpočtu je
+   týž řez ve volbě grafu *Příčný řez – poloha zatížení*. Posuzovaný nosník je v tabulce
+   nosníků tučně se značkou ●.
 2. Karty 1–4: materiály, průřez (z něj A a Iy nosníku pro model mostu – lze vypnout
    a zadat ručně), kabely, výztuž.
 3. Karta 5: prostředí, časová osa a stáří, od kterého působí g − g0 / kvazistálá kombinace;
    sekce **Dílčí součinitele zatížení** – všechny součinitele na jednom místě: stálá (γ_G,sup,
    γ_G,inf, ξ), doprava q a chodci q_ch (γ_Q, ψ0, ψ1, ψ2), teplota (γ, ψ po kombinacích).
    Vnější zatížení se nezadává – zobrazí se kombinace převzaté z obálek.
-   Karta 6 (nastavení posouzení): **Zbytková životnost** 50 / 15-30 / 10 let určí kategorii
+   Karta 6 (nastavení posouzení) je rozdělena do skupin *Napínání a předpínací výztuž*,
+   *Napětí v betonu*, *Dekomprese a trhliny*, *MSÚ, smyk a průhyb*. Karta 7 (výsledky) má nad
+   tabulkou posudků filtr *Zobrazit* (všechny / jen nevyhovující / nevyhovující a η > 90 %)
+   a *Fáze*. **Zbytková životnost** 50 / 15-30 / 10 let určí kategorii
    mostu podle ČSN 73 6222, tab. 12.3 (předem předpjatý B/C/D, dodatečně soudržně C/D/E)
    a z tab. 12.4 kombinaci pro dekompresi, pro šířku trhlin a w_max (přepíše ruční volby
    dekomprese, trhliny, w_max; tahové napětí v provozu je pak jen informativní). Šířka trhlin
    (7.3.4): bez trhlin při σ_ct ≤ f_ctm, jinak průřez s trhlinou; s_r,max podle (7.11) jen se
    zadaným Ø betonářské výztuže (karta 4, sloupec Ø), jinak 1,3·(h − x). Prázdné = bez kategorie.
-4. **F5** – spočítá model mostu (jen pokud se změnily jeho vstupy) a posudek; tlačítko
-   *Vnitřní síly mostu* na kartě 0 spočítá jen most (tabulka nosníků, grafy). Změna dílčích
+4. **Lišta nahoře:** *Režim* **Posouzení / Zatížitelnost** (u zatížitelnosti i volba druhů
+   a protokolu) a tlačítko **▶ Posouzení (F5)** / **▶ Zatížitelnost (F5)** – spočítá model mostu
+   (jen pokud se změnily jeho vstupy) a posudek, resp. zatížitelnost; tlačítko
+   *Jen vnitřní síly mostu* na kartě 0 spočítá jen most (tabulka nosníků, grafy). Změna dílčích
    součinitelů γ, ψ, ξ (karta 5) model mostu nepřepočítává – jen se znovu složí kombinace.
 5. *HTML protokol* – protokol posudku s kapitolou „Zatížení z modelu mostu (BLC)“. Části jen
    pro protokol (polohy vozidla, referenční soupravy Vn, Vr, Ve, obrázky) se počítají až
@@ -484,8 +497,8 @@ Do posudku se předávají g − g0, q_ch a q (g0 si posudek počítá sám).
 
 ### 8.5 Výpočet zatížitelnosti (ČSN 73 6222)
 
-Políčko **Zatížitelnost (η = 100 %) místo posouzení** na kartě 0 a volba *Vn, Vr i Ve* / *jen
-zvolené vozidlo* (v souboru `[blc] zatizitelnost = true`, `zatizitelnost_druhy = "vse" |
+Režim **Zatížitelnost** v liště nahoře a volba *druhy* (*Vn, Vr i Ve* / *jen
+zvolené vozidlo*) (v souboru `[blc] zatizitelnost = true`, `zatizitelnost_druhy = "vse" |
 "vozidlo" | ["Vn", "Ve"]`; v dávce `--zatizitelnost [--druhy Vn,Vr,Ve]`): místo posouzení při
 zadaném zatížení se pro každý posudek (mezní stav × fáze × kombinace) hledá **tíha vozidla,
 při které je využití 100 %** – pro **normální Vn, výhradní Vr a výjimečnou Ve** zatížitelnost.
@@ -527,7 +540,8 @@ Zvolené vozidlo musí být Vn, Vr nebo Ve – pro ně se počítá protokol.
   - *jen Vn / jen Vr / jen Ve* – kapitola „Zatížitelnost Vr – výhradní (ČSN 73 6222)“ jen
     s tímto druhem a **posudky celého protokolu při zatížitelnosti tohoto druhu** (jeho
     rozhodující posudek má využití 100 %, schéma, nosník a chodci odpovídají druhu);
-    karta 7 ukazuje výsledky téhož druhu. Po výpočtu lze volbu přepnout bez nového hledání
+    karta 7 ukazuje výsledky téhož druhu. Po výpočtu lze volbu *protokol* v liště přepnout
+    bez nového hledání
     (posudek druhu se spočte jen poprvé, ≈ 3 s); nespočtený druh se při F5 dopočítá,
   - v dávce `--protokol vse`: souhrn do `DIR/protokol.html` a protokol každého druhu do
     `DIR/<druh>/protokol.html`.

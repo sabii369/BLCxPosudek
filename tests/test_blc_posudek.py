@@ -242,6 +242,22 @@ def test_soucinitele_bez_prepoctu_mkp(vysledek):
     assert klic_mkp(kw) != klic_mkp({**kw, "N": 12})
 
 
+def test_nahled_mostu_bez_mkp(d, vysledek):
+    """Náhled příčného řezu ze zadání (bez MKP) = stejná příčná poloha jako výpočet (Ve, Vn, Vr)."""
+    from blc.vnitrni_sily import nahled_mostu, vys_s_vozidlem
+    atr = ("druh_q", "V", "schema_q", "vozidlo", "y_Ve", "poloha_q", "stopy_q", "pruhy_q", "obrys_q",
+           "dyn", "q_ch", "q_ch_zdroj")
+    vys = vysledek[0]
+    for voz, V in (("Ve", 80.0), ("Vn", 32.0), ("Vr", 60.0)):
+        d2 = copy.deepcopy(d)
+        d2["blc"]["vozidlo"] = voz
+        n = nahled_mostu(**parametry_blc(d2))
+        v = vys if voz == "Ve" else vys_s_vozidlem(vys, **{voz: V})
+        for a in atr:
+            assert getattr(n, a) == getattr(v, a), (voz, a)
+        assert n.popisky == v.popisky and list(n.vyst.y) == list(v.vyst.y)
+
+
 def test_nezname_klice_blc(d):
     d2 = copy.deepcopy(d)
     d2["blc"]["gama_Q"] = 1.5
@@ -323,6 +339,61 @@ def test_gui(tmp_path):
         assert ulozeno["blc"]["vozidlo"] == "MLC_k"
         app.var_zat_prot.set("jen Vr – posudky při Vr")
         assert app.ziskej_data()["blc"]["protokol_zatizitelnosti"] == "Vr"
+        # režim v liště: zatížitelnost → tlačítko, volby a referenční tíhy všech druhů
+        app.var_rezim.set("Zatížitelnost")
+        app._zmena_rezimu()
+        assert app.ziskej_data()["blc"]["zatizitelnost"] is True
+        assert app.btn_vypocet.cget("text").strip().startswith("▶  Zatížitelnost".strip())
+        assert app.fr_zat.winfo_manager() == "pack"
+        for k in ("Vn", "Vr", "Ve"):
+            assert app.f_voz.widgety[k].winfo_manager() == "grid"
+        app.var_rezim.set("Posouzení")
+        app._zmena_rezimu()
+        assert app.ziskej_data()["blc"]["zatizitelnost"] is False and not app.fr_zat.winfo_manager()
+    finally:
+        app.destroy()
+
+
+def test_gui_karta0_viditelnost_a_nahled():
+    """Karta 0: jen platná pole (deska, spára, převzetí průřezu, vozidlo), náhled řezu bez výpočtu,
+    posuzovaný nosník označen."""
+    from blc_posudek.gui import AplikaceMost, ZNACKA_POS
+    app = AplikaceMost(PRIKLAD)
+    try:
+        app.update()
+        app._viditelnost()
+        vid = lambda fm, k: fm.widgety[k].winfo_manager() == "grid"     # noqa: E731
+        assert vid(app.f_kon, "N") and not vid(app.f_kon, "h") and not vid(app.f_kon, "Iy")
+        assert not vid(app.f_spara, "b_s") and not vid(app.f_uloz, "k_rot")
+        assert vid(app.f_voz, "Ve") and not vid(app.f_voz, "Vn") and not vid(app.f_voz, "MLC")
+        app.f_kon.prom["prurez_z_posudku"].set(False)
+        assert vid(app.f_kon, "Iy") and vid(app.f_kon, "A_nosniku")
+        app.f_kon.prom["prurez_z_posudku"].set(True)
+        app.f_spara.prom["spara"].set(True)
+        assert vid(app.f_spara, "b_s") and not vid(app.f_uloz, "spoj")
+        app.f_spara.prom["spara"].set(False)
+        app.f_kon.prom["typ_konstrukce"].set("deska")
+        assert vid(app.f_kon, "h") and not vid(app.f_kon, "N") and not app.lf_spara.winfo_manager()
+        app.f_kon.prom["typ_konstrukce"].set("nosniky")
+        assert app.lf_spara.winfo_manager() == "pack"
+        app.f_voz.prom["vozidlo"].set("MLC kolové")
+        assert vid(app.f_voz, "MLC") and vid(app.f_voz, "dist") and not vid(app.f_voz, "Ve")
+        app.f_voz.prom["vozidlo"].set("Vn – normální")
+        assert vid(app.f_voz, "Vn") and not vid(app.f_voz, "y_vozidla")
+        # náhled příčného řezu ze zadání (bez výpočtu mostu)
+        app._nahled()
+        assert app._blc_vys is None and app._nahled_zobrazen
+        nadpis = app.g_blc.fig.axes[0].get_title()
+        assert nadpis.startswith("Náhled ze zadání") and "Vn 32 t" in nadpis
+        # po výpočtu mostu: spočtený graf, posuzovaný nosník označen
+        app.spocitej_blc()
+        t0 = time.time()
+        while (app._blc_vys is None or app._zaneprazdnen) and time.time() - t0 < 120:
+            app.update()
+            time.sleep(0.05)
+        assert not app._nahled_zobrazen
+        o = vyber_nosnik(app._blc_vys, app.ziskej_data())
+        assert app.t_blc.set(str(o), "vyst").endswith(ZNACKA_POS) and "pos" in app.t_blc.item(str(o), "tags")
     finally:
         app.destroy()
 

@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from blc.vehicles import seznam_mlc
-from blc.vnitrni_sily import vnitrni_sily, VysledekSil
+from blc.vnitrni_sily import nahled_mostu, vnitrni_sily, VysledekSil
 from pb_posudek import gui as pbgui
 from pb_posudek.gui import Aplikace, Formular, Graf, Tabulka, TRIDY_BETONU
 
@@ -47,6 +47,38 @@ PROTOKOL_GUI = {"souhrn": "souhrn – posudky pro zvolené vozidlo", "Vn": "jen 
                 "Vr": "jen Vr – posudky při Vr", "Ve": "jen Ve – posudky při Ve"}
 PROTOKOL_KLIC = {v: k for k, v in PROTOKOL_GUI.items()}
 SEDA = "#52514e"
+REZIMY = ("Posouzení", "Zatížitelnost")
+GRAF_REZ = "Příčný řez – poloha zatížení"
+ZNACKA_POS = " ●"                 # posuzovaný nosník v tabulce karty 0 (◄ Segoe UI kreslí jako šipku)
+GRAFY_BLC = ["Průběhy sil – vybraný nosník", "Vnitřní síly na nosnících (půdorys)",
+             "Příčné rozdělení a vybavení", GRAF_REZ]
+
+
+def _popisky_formulare(fm) -> dict:
+    """{klíč: popisek} polí Formular (popisek leží v mřížce vlevo od pole)."""
+    out = {}
+    for k, w in fm.widgety.items():
+        gi = w.grid_info()
+        out[k] = fm.grid_slaves(row=int(gi["row"]), column=int(gi["column"]) - 1)[0]
+    return out
+
+
+def rozloz_formular(fm, viditelne, sloupcu: int = 2) -> None:
+    """Zobrazí jen pole `viditelne` (v původním pořadí, bez mezer v mřížce); skrytá pole
+    si hodnotu ponechají."""
+    if not hasattr(fm, "_popisky"):
+        fm._popisky = _popisky_formulare(fm)
+    i = 0
+    for k, *_ in fm.pole:
+        w, lab = fm.widgety[k], fm._popisky[k]
+        if k in viditelne:
+            r, c = divmod(i, sloupcu)
+            i += 1
+            lab.grid(row=r, column=2 * c, sticky="w", padx=(4, 6), pady=2)
+            w.grid(row=r, column=2 * c + 1, sticky="we", padx=(0, 14), pady=2)
+        else:
+            lab.grid_remove()
+            w.grid_remove()
 
 
 class AplikaceMost(Aplikace):
@@ -70,6 +102,45 @@ class AplikaceMost(Aplikace):
         return super().title(str(s).replace("PB posudek", NAZEV, 1))
 
     # =====================================================================
+    # Lišta – režim výpočtu (posouzení / zatížitelnost)
+    # =====================================================================
+    def _lista(self):
+        super()._lista()
+        tb = self.btn_vypocet.master
+        ttk.Separator(tb, orient="vertical").pack(side="left", fill="y", padx=8)
+        ttk.Label(tb, text="Režim:").pack(side="left")
+        self.var_zat = tk.BooleanVar(value=False)
+        self.var_rezim = tk.StringVar(value=REZIMY[0])
+        for r in REZIMY:
+            ttk.Radiobutton(tb, text=r, value=r, variable=self.var_rezim,
+                            command=self._zmena_rezimu).pack(side="left", padx=(4, 0))
+        self.fr_zat = ttk.Frame(tb)
+        ttk.Label(self.fr_zat, text="druhy").pack(side="left", padx=(8, 2))
+        self.var_zat_druhy = tk.StringVar(value=DRUHY_ZAT_GUI["vse"])
+        ttk.Combobox(self.fr_zat, textvariable=self.var_zat_druhy, state="readonly", width=17,
+                     values=list(DRUHY_ZAT_GUI.values())).pack(side="left")
+        ttk.Label(self.fr_zat, text="protokol").pack(side="left", padx=(8, 2))
+        self.var_zat_prot = tk.StringVar(value=PROTOKOL_GUI["souhrn"])
+        cb = ttk.Combobox(self.fr_zat, textvariable=self.var_zat_prot, state="readonly", width=32,
+                          values=list(PROTOKOL_GUI.values()))
+        cb.pack(side="left")
+        cb.bind("<<ComboboxSelected>>", lambda e: self._prepni_protokol())
+
+    def _zmena_rezimu(self, *_):
+        """Přepínač Posouzení / Zatížitelnost: var_zat, tlačítko výpočtu, volby zatížitelnosti."""
+        zat = self.var_rezim.get() == REZIMY[1]
+        if self.var_zat.get() != zat:
+            self.var_zat.set(zat)
+        if zat:
+            self.fr_zat.pack(side="left")
+        else:
+            self.fr_zat.pack_forget()
+        self.btn_vypocet.configure(text="▶  Zatížitelnost (F5)" if zat else "▶  Posouzení (F5)")
+        if hasattr(self, "f_voz"):
+            self._viditelnost()
+            self._naplanuj_nahled()
+
+    # =====================================================================
     # Karta 0 – most a zatížení
     # =====================================================================
     def _zalozka_materialy(self):
@@ -83,7 +154,7 @@ class AplikaceMost(Aplikace):
         pan.pack(fill="both", expand=True)
         # levý sloupec se svislým posuvníkem
         lev = ttk.Frame(pan)
-        cv = tk.Canvas(lev, highlightthickness=0, width=560)
+        cv = tk.Canvas(lev, highlightthickness=0, width=640)
         sb = ttk.Scrollbar(lev, orient="vertical", command=cv.yview)
         f = ttk.Frame(cv, padding=8)
         okno = cv.create_window((0, 0), window=f, anchor="nw")
@@ -96,10 +167,12 @@ class AplikaceMost(Aplikace):
             int(-ev.delta / 120), "units")))
         cv.bind("<Leave>", lambda e: cv.unbind_all("<MouseWheel>"))
         pan.add(lev, weight=2)
+        self.after(300, lambda: pan.sashpos(0, max(560, int(pan.winfo_width() * 0.44))))
         zm = self._naplanuj_nahled
 
         lf = ttk.LabelFrame(f, text="Nosná konstrukce", padding=6)
         lf.pack(fill="x", pady=4)
+        self.lf_kon = lf
         self._ram_propojene = ttk.Frame(lf)
         self._ram_propojene.pack(fill="x")
         self.f_kon = Formular(lf, [
@@ -109,16 +182,17 @@ class AplikaceMost(Aplikace):
             ("d", "Účinná výška d [m]", "float", None),
             ("prurez_z_posudku", "A, Iy z průřezu (karta 2)", "bool", True),
             ("nu", "Poissonovo číslo ν", "float", None),
-            ("A_nosniku", "A nosníku [m²] (bez převzetí)", "optfloat", None),
-            ("A_dobetonavky", "A dobetonávky mezi nosníky [m²]", "optfloat", None),
-            ("Iy", "Iy nosníku [m⁴] (bez převzetí)", "optfloat", None),
-            ("h", "Tloušťka desky h [m] (deska)", "optfloat", None)], sloupcu=2, pri_zmene=zm)
+            ("A_nosniku", "A nosníku [m²]", "optfloat", None),
+            ("A_dobetonavky", "A dobetonávky [m²]", "optfloat", None),
+            ("Iy", "Iy nosníku [m⁴]", "optfloat", None),
+            ("h", "Tloušťka desky h [m]", "optfloat", None)], sloupcu=2, pri_zmene=zm)
         self.f_kon.pack(fill="x")
         self.lbl_prurez_blc = ttk.Label(lf, text="", foreground=SEDA)
         self.lbl_prurez_blc.pack(anchor="w", pady=(2, 0))
 
         lf = ttk.LabelFrame(f, text="Podélná spára mezi nosníky", padding=6)
         lf.pack(fill="x", pady=4)
+        self.lf_spara = lf
         self.f_spara = Formular(lf, [
             ("spara", "Spára (deskový prvek, kloubově)", "bool", False),
             ("b_s", "Šířka spáry b_s [m]", "optfloat", None),
@@ -130,20 +204,20 @@ class AplikaceMost(Aplikace):
         lf = ttk.LabelFrame(f, text="Uložení a šikmost", padding=6)
         lf.pack(fill="x", pady=4)
         self.f_uloz = Formular(lf, [
-            ("alfa", "Úhel šikmosti α [°] (90 = kolmý)", "float", None),
+            ("alfa", "Šikmost α [°]", "float", None),
             ("sikmost", "Šikmost", "choice", ["prava", "leva"]),
-            ("k_v", "Tuhost podpory k_v [MN/m/m]", "optfloat", None),
+            ("k_v", "k_v [MN/m/m]", "optfloat", None),
             ("uloz", "Uložení", "choice", ["tvrde", "mekke", "vetknuti"]),
             ("k_rot", "Vetknutí k_φ [MNm/rad/m]", "optfloat", None),
-            ("spoj", "Spojení nosníků bez spáry", "choice", ["kloub", "deska"]),
-            ("beta_s_pevne", "β_s = 0 i u pružné podpory", "bool", False)],
+            ("spoj", "Spojení nosníků", "choice", ["kloub", "deska"]),
+            ("beta_s_pevne", "β_s = 0 (srovnání)", "bool", False)],
             sloupcu=2, pri_zmene=zm)
         self.f_uloz.pack(fill="x")
-        ttk.Label(lf, foreground=SEDA, text="k_v prázdné / 0 = tuhá podpora; k_φ prázdné = dokonalé "
-                                            "vetknutí (jen uložení „vetknuti“); β_s = 0 = zjednodušená "
-                                            "vazba (SCIA s vetknutou rotací podél podpory) – jen pro "
-                                            "srovnání, platí pro tvrdé uložení na pružné podpoře"
-                  ).pack(anchor="w")
+        ttk.Label(lf, foreground=SEDA, wraplength=530, justify="left", text=(
+            "α = 90° kolmý most; k_v = tuhost podpory, prázdné / 0 = tuhá; k_φ prázdné = dokonalé "
+            "vetknutí (jen uložení „vetknuti“); spojení nosníků bez spáry; β_s = 0 i u pružné "
+            "podpory = zjednodušená vazba (SCIA s vetknutou rotací podél podpory) – jen pro srovnání"
+            )).pack(anchor="w")
 
         lf = ttk.LabelFrame(f, text="Ostatní stálé zatížení g − g0 (vybavení mostu)", padding=6)
         lf.pack(fill="x", pady=4)
@@ -179,12 +253,12 @@ class AplikaceMost(Aplikace):
         lf.pack(fill="x", pady=4)
         self.f_voz = Formular(lf, [
             ("vozidlo", "Vozidlo / schéma", "choice", list(VOZIDLA_GUI.values())),
-            ("Vn", "Vn – normální zatížitelnost [t]", "optfloat", None),
-            ("Vr", "Vr – výhradní zatížitelnost [t]", "optfloat", None),
-            ("Ve", "Ve – výjimečná zatížitelnost [t]", "optfloat", None),
+            ("Vn", "Tíha Vn [t]", "optfloat", None),
+            ("Vr", "Tíha Vr [t]", "optfloat", None),
+            ("Ve", "Tíha Ve [t]", "optfloat", None),
             ("MLC", "Třída MLC", "choice", seznam_mlc()),
             ("dist", "Kolona – vzdálenost vozidel [m]", "optfloat", None),
-            ("dyn", "Dynamický součinitel δ (prázdné = ČSN 73 6222)", "optfloat", None),
+            ("dyn", "δ (prázdné = ČSN 73 6222)", "optfloat", None),
             ("y_vozidla", "Osa vozidla Ve / MLC y [m]", "optfloat", None),
             ("roznos", "Roznos kola do střednice desky", "bool", True),
             ("t_voz", "Tloušťka vozovky (roznos) [m]", "float", None),
@@ -208,8 +282,9 @@ class AplikaceMost(Aplikace):
             ("rezim", "Předání zatížení", "choice", ["kombinace", "zatezovaci_stavy"])],
             sloupcu=2, pri_zmene=zm)
         self.f_pred.pack(fill="x")
-        ttk.Label(lf, foreground=SEDA, justify="left", text=(
-            "auto = nejzatíženější nosník podle MSÚ (6.10, včetně g0). Dílčí součinitele všech zatížení "
+        ttk.Label(lf, foreground=SEDA, justify="left", wraplength=530, text=(
+            "auto = nejzatíženější nosník podle MSÚ (6.10, včetně g0); u zatížitelnosti nejzatíženější "
+            "samotným zatížením Vn / Vr / Ve. Dílčí součinitele všech zatížení "
             "(stálá, doprava, chodci, teplota) jsou na kartě 5, kombinace MSÚ na kartě 6."
         )).pack(anchor="w")
 
@@ -218,27 +293,10 @@ class AplikaceMost(Aplikace):
         pan.add(prav, weight=3)
         bt = ttk.Frame(prav)
         bt.pack(fill="x")
-        self.btn_blc = ttk.Button(bt, text="▶  Vnitřní síly mostu", command=self.spocitej_blc)
+        self.btn_blc = ttk.Button(bt, text="▶  Jen vnitřní síly mostu", command=self.spocitej_blc)
         self.btn_blc.pack(side="left")
-        ttk.Button(bt, text="▶▶  Most + posudek (F5)", style="Akce.TButton",
-                   command=self.spocitej).pack(side="left", padx=6)
-        self.var_zat = tk.BooleanVar(value=False)
-        ttk.Checkbutton(bt, text="Zatížitelnost (η = 100 %) místo posouzení:",
-                        variable=self.var_zat, command=self._naplanuj_nahled).pack(side="left", padx=(8, 2))
-        self.var_zat_druhy = tk.StringVar(value=DRUHY_ZAT_GUI["vse"])
-        ttk.Combobox(bt, textvariable=self.var_zat_druhy, state="readonly", width=18,
-                     values=list(DRUHY_ZAT_GUI.values())).pack(side="left")
-        bt2 = ttk.Frame(prav)
-        bt2.pack(fill="x", pady=(4, 0))
-        ttk.Label(bt2, text="Protokol a výsledky zatížitelnosti:").pack(side="left")
-        self.var_zat_prot = tk.StringVar(value=PROTOKOL_GUI["souhrn"])
-        cb = ttk.Combobox(bt2, textvariable=self.var_zat_prot, state="readonly", width=34,
-                          values=list(PROTOKOL_GUI.values()))
-        cb.pack(side="left", padx=4)
-        cb.bind("<<ComboboxSelected>>", lambda e: self._prepni_protokol())
-        ttk.Label(bt2, foreground=SEDA, text="jen druh = kapitola zatížitelnosti a posudky při "
-                                             "jeho zatížitelnosti (přepnutí bez nového hledání)"
-                  ).pack(side="left", padx=4)
+        ttk.Label(bt, foreground=SEDA, text="posouzení / zatížitelnost: tlačítko v liště nahoře (F5)"
+                  ).pack(side="left", padx=8)
         self.lbl_blc = ttk.Label(prav, text="Vnitřní síly mostu nejsou spočteny.",
                                  foreground="#b42323", wraplength=700, justify="left")
         self.lbl_blc.pack(anchor="w", pady=4)
@@ -250,25 +308,68 @@ class AplikaceMost(Aplikace):
                                   selectmode="browse")
         for c, h in zip(cols, heads):
             self.t_blc.heading(c, text=h)
-            self.t_blc.column(c, width=66 if c != "vyst" else 70, anchor="e")
-        self.t_blc.tag_configure("pos", background="#fff3cd")
+            self.t_blc.column(c, width=62 if c != "vyst" else 74, anchor="e")
+        self.t_blc.tag_configure("pos", background="#fff3cd", font=("Segoe UI", 9, "bold"))
         self.t_blc.pack(fill="x")
         self.t_blc.bind("<<TreeviewSelect>>", lambda e: self._graf_blc())
         self.t_blc.bind("<Double-1>", self._nastav_posuzovany)
         ttk.Label(prav, foreground=SEDA, text=(
-            "Jednotky kNm, kN (deska: na pás 1 m). Žlutě posuzovaný nosník; dvojklik = posuzovat "
-            "tento nosník. M_Ed, V_Ed = MSÚ 6.10 vč. g0.")).pack(anchor="w")
+            "Jednotky kNm, kN (deska: na pás 1 m). ● tučně = posuzovaný nosník; dvojklik = "
+            "posuzovat tento nosník. M_Ed, V_Ed = MSÚ 6.10 vč. g0.")).pack(anchor="w")
         r = ttk.Frame(prav)
         r.pack(fill="x", pady=(6, 2))
         ttk.Label(r, text="Graf:").pack(side="left")
         self.var_graf_blc = tk.StringVar(value="Průběhy sil – vybraný nosník")
         cb = ttk.Combobox(r, textvariable=self.var_graf_blc, state="readonly", width=34,
-                          values=["Průběhy sil – vybraný nosník", "Vnitřní síly na nosnících (půdorys)",
-                                  "Příčné rozdělení a vybavení"])
+                          values=GRAFY_BLC)
         cb.pack(side="left", padx=4)
         cb.bind("<<ComboboxSelected>>", lambda e: self._graf_blc())
         self.g_blc = Graf(prav, figsize=(8, 5))
         self.g_blc.pack(fill="both", expand=True)
+        self._nahled_klic = None
+        self._nahled_zobrazen = False
+        # pole karty 0 podle typu konstrukce, spáry, uložení, vozidla a režimu
+        for fm, klice in ((self.f_kon, ("typ_konstrukce", "prurez_z_posudku")), (self.f_spara, ("spara",)),
+                          (self.f_uloz, ("uloz",)), (self.f_voz, ("vozidlo",))):
+            for k in klice:
+                fm.prom[k].trace_add("write", lambda *_: self._viditelnost())
+        for fm in (self.f_kon, self.f_spara, self.f_uloz, self.f_vyb, self.f_chodci, self.f_voz, self.f_pred):
+            fm.columnconfigure(1, minsize=110)
+            fm.columnconfigure(3, minsize=110)
+        self.after_idle(self._viditelnost)
+
+    def _viditelnost(self):
+        """Na kartě 0 jen pole platná pro typ konstrukce, spáru, uložení, vozidlo a režim."""
+        kon = self.f_kon.prom
+        deska = kon["typ_konstrukce"].get() == "deska"
+        prevzit = bool(kon["prurez_z_posudku"].get())
+        vid = {"typ_konstrukce", "d", "nu"}
+        vid |= {"h"} if deska else {"N", "b", "prurez_z_posudku", "A_dobetonavky"}
+        if not deska and not prevzit:
+            vid |= {"A_nosniku", "Iy"}
+        rozloz_formular(self.f_kon, vid)
+        if deska:
+            self.lf_spara.pack_forget()
+        elif not self.lf_spara.winfo_manager():
+            self.lf_spara.pack(fill="x", pady=4, after=self.lf_kon)
+        spara = bool(self.f_spara.prom["spara"].get())
+        rozloz_formular(self.f_spara, {"spara"} | ({"b_s", "Iy_s", "beton_s", "g_spary"} if spara else set()))
+        vid = {"alfa", "sikmost", "k_v", "uloz", "beta_s_pevne"}
+        if self.f_uloz.prom["uloz"].get() == "vetknuti":
+            vid.add("k_rot")
+        if not deska and not spara:
+            vid.add("spoj")
+        rozloz_formular(self.f_uloz, vid)
+        voz = VOZIDLA_KLIC.get(self.f_voz.prom["vozidlo"].get(), self.f_voz.prom["vozidlo"].get())
+        zat = bool(self.var_zat.get())
+        vid = {"vozidlo", "dyn", "roznos", "t_voz", "krok", "ex"}
+        if zat:
+            vid |= {"Vn", "Vr", "Ve", "y_vozidla"}         # referenční tíhy všech druhů
+        elif voz in ("Vn", "Vr", "Ve"):
+            vid |= {voz} | ({"y_vozidla"} if voz == "Ve" else set())
+        else:
+            vid |= {"MLC", "dist", "y_vozidla"}
+        rozloz_formular(self.f_voz, vid)
 
     def _propoj_s_posudkem(self):
         """Pole L, L0 a beton na kartě 0 sdílejí proměnné s kartami 1 a 3."""
@@ -353,6 +454,8 @@ class AplikaceMost(Aplikace):
             fm.nastav(m)
         self.t_liniova.nastav(b.get("liniova", []))
         self.var_zat.set(bool(m.get("zatizitelnost", False)))
+        self.var_rezim.set(REZIMY[1] if self.var_zat.get() else REZIMY[0])
+        self._zmena_rezimu()
         dz = m.get("zatizitelnost_druhy", "vse")
         self.var_zat_druhy.set(DRUHY_ZAT_GUI.get(dz if isinstance(dz, str) else "vse",
                                                  DRUHY_ZAT_GUI["vse"]))
@@ -548,6 +651,8 @@ class AplikaceMost(Aplikace):
                             (f"; V_aj = {cz(Vaj, 1)} t" if Vaj is not None else "") +
                             (f"; {nok} posudků nevyhovuje nezávisle na zatížení" if nok else "") +
                             (f"; upozornění {len(upoz)}" if upoz else "")))
+        if hasattr(self, "_filtruj"):
+            self._filtruj()
         self.lbl_souhrn.configure(text="Zatížitelnost " + txt,
                                   foreground="#0a7d0a" if not nok else "#8a5a00")
         self.stav.set(f"Zatížitelnost: {txt}; protokol a grafy pro {res.druh} = "
@@ -628,6 +733,7 @@ class AplikaceMost(Aplikace):
             if not jen_stav or self._blc_vys is None:
                 self.t_blc.delete(*self.t_blc.get_children())
             self._kresli_zatizeni(None, None)
+            self._kresli_nahled(d)
             return
         o = vyber_nosnik(vys, d)
         pop = vys.popisky[o]
@@ -649,12 +755,14 @@ class AplikaceMost(Aplikace):
                    "se stálým g − g0" if vys.g_dobetonavky else "") + "."), foreground="#0a7d0a")
         if jen_stav and self.t_blc.get_children():
             self._oznac_posuzovany(o)
+            if self._nahled_zobrazen:            # graf ukazoval náhled – vrátit spočtený
+                self._graf_blc()
         else:
             self.t_blc.delete(*self.t_blc.get_children())
             for i, s in enumerate(vys.souhrn()):
                 g = lambda k: f"{cz(s.get(k, 0.0), 1)}"  # noqa: E731
                 self.t_blc.insert("", "end", iid=str(i), values=(
-                    s["vystup"], f"{cz(s['y'], 2)}", g("M_g0"), g("M_g-g0"), g("M_qch"), g("M_q"),
+                    s["vystup"] + (ZNACKA_POS if i == o else ""), f"{cz(s['y'], 2)}", g("M_g0"), g("M_g-g0"), g("M_qch"), g("M_q"),
                     g("V_g0"), g("V_g-g0"), g("V_qch"), g("V_q"), g("M_Ed"), g("V_Ed")))
             self._oznac_posuzovany(o)
             self.t_blc.selection_set(str(o))
@@ -662,8 +770,12 @@ class AplikaceMost(Aplikace):
         self._kresli_zatizeni(vys, zat)
 
     def _oznac_posuzovany(self, o: int):
+        vys = self._blc_vys
         for iid in self.t_blc.get_children():
-            self.t_blc.item(iid, tags=("pos",) if int(iid) == o else ())
+            i = int(iid)
+            self.t_blc.item(iid, tags=("pos",) if i == o else ())
+            if vys is not None and i < vys.n_vyst:
+                self.t_blc.set(iid, "vyst", vys.popisky[i] + (ZNACKA_POS if i == o else ""))
 
     def _nastav_posuzovany(self, _=None):
         sel = self.t_blc.selection()
@@ -674,17 +786,52 @@ class AplikaceMost(Aplikace):
         vys = self._blc_vys
         if vys is None:
             return
+        self._nahled_zobrazen = False
         from blc.plotting_sily import plot_sily, plot_pricne
         sel = self.t_blc.selection()
         o = int(sel[0]) if sel else vys.rozhodujici()
         volba = self.var_graf_blc.get()
-        if volba.startswith("Průběhy"):
+        if volba == GRAF_REZ:
+            from blc.plotting_sily import plot_pricny_rez
+            fig = plot_pricny_rez(vys, o, show=False)
+        elif volba.startswith("Průběhy"):
             fig = plot_sily(vys, o, show=False)
         elif volba.startswith("Vnitřní síly"):
             from blc.plotting_sily import plot_stavy_pudorys
             fig = plot_stavy_pudorys(vys, o, show=False)
         else:
             fig = plot_pricne(vys, show=False)
+        plt.close(fig)
+        self.g_blc.zobraz(fig)
+
+    def _kresli_nahled(self, d):
+        """Bez spočteného mostu: náhled příčného řezu se zatížením dopravou ze zadání (bez MKP,
+        překreslí se jen při změně vstupů)."""
+        from blc.plotting_sily import plot_pricny_rez
+        try:
+            kw = parametry_blc(d) if d is not None else None
+            klic = None if kw is None else klic_mkp(kw)
+        except Exception:  # noqa: BLE001
+            kw = klic = None
+        if klic is not None and klic == self._nahled_klic and self._nahled_zobrazen:
+            return
+        self._nahled_klic = klic
+        self._nahled_zobrazen = True
+        if kw is None:
+            self.g_blc.fig.clear()
+            self.g_blc.canvas.draw_idle()
+            return
+        try:
+            n = nahled_mostu(**kw)
+            o = n.popisky.index(str(d["blc"].get("vystup"))) if d["blc"].get("vystup") in n.popisky else None
+            fig = plot_pricny_rez(n, o, show=False)
+            from textwrap import fill
+            from blc.plotting_sily import nadpis_pricneho_rezu
+            fig.axes[0].set_title(fill("Náhled ze zadání (most není spočten) – " + nadpis_pricneho_rezu(n),
+                                       100), fontsize=9)
+            fig.tight_layout()
+        except Exception:  # noqa: BLE001 – neúplné zadání: náhled se nekreslí
+            return
         plt.close(fig)
         self.g_blc.zobraz(fig)
 
