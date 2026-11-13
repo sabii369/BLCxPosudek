@@ -178,6 +178,7 @@ def model_ze_slovniku(d: dict) -> NosnikPB:
         t_akt=co.get("t_akt"), oslabeni_Ap=deg.get("oslabeni_predpinaci", 0.0),
         oslabeni_As=deg.get("oslabeni_betonarske", 0.0), oslabeni_Asw=deg.get("oslabeni_smykove", 0.0),
         teplota=Teplota.ze_slovniku(d.get("teplota")),
+        kontaktni_spara=bool(n.get("kontaktni_spara", False)), pozice_spar=n.get("pozice_spar"),
     )
 
 

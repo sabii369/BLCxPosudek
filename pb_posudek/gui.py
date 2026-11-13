@@ -192,6 +192,8 @@ class Formular(ttk.Frame):
                 self.prom[k].set(bool(volby) if v is None else bool(v))
             elif typ == "pary":
                 self.prom[k].set(_pary_na_text(v))
+            elif typ == "seznam":
+                self.prom[k].set(_seznam_na_text(v))
             else:
                 self.prom[k].set(_na_text(v))
 
@@ -223,6 +225,13 @@ class Formular(ttk.Frame):
                         raise ValueError(f"Pole „{popis}“ je povinné.")
                     continue
                 out[k] = int(c) if typ in ("int", "optint") else float(c)
+            elif typ == "seznam":
+                try:
+                    sez = _text_na_seznam(v)
+                except ValueError:
+                    raise ValueError(f"Pole „{popis}“: neplatný zápis „{v}“ (např. 3,5; 8)")
+                if sez:
+                    out[k] = sez
             elif typ == "pary":
                 try:
                     pary = _text_na_pary(v)
@@ -1070,6 +1079,8 @@ class Aplikace(tk.Tk):
             ("predpeti", "Předpětí", "choice", ["dodatecne", "predem"]),
             ("charakteristiky", "Průřezové char.", "choice", ["brutto", "idealni"]),
             ("pocet_rezu", "Počet řezů", "optint", None),
+            ("kontaktni_spara", "Kontaktní spáry", "bool", False),
+            ("pozice_spar", "Pozice spáry x od kraje [m]; …", "seznam", None),
             ("pocet_napinani", "Počet kroků napínání", "optint", None),
             ("postup_napinani", "Postup napínání σ:min; …", "pary", None)], sloupcu=3,
             pri_zmene=self._naplanuj_nahled)
