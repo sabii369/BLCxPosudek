@@ -77,6 +77,18 @@ POPISKY_NASTAVENI = {
     "pruhyb_limit": "Mezní průhyb L/…", "relaxace_t_max_h": "Relaxace – max. čas [h]",
     "hlavni_napeti": "Posoudit hlavní napětí",
 }
+# skupiny polí karty 6 (pole mimo skupiny se zařadí do „Ostatní“)
+SKUPINY_NASTAVENI = (
+    ("Napínání a předpínací výztuž", ("k1_nap", "k2_nap", "k7", "k8", "k5", "r_sup", "r_inf", "gamma_P",
+                                      "relaxace_t_max_h", "xi_p")),
+    ("Napětí v betonu", ("k_predpeti", "k1", "k2", "tah_predpeti", "tah_provoz", "hlavni_napeti")),
+    ("Dekomprese a trhliny", ("dekomprese", "dekomprese_rezim", "a_dek", "zbytkova_zivotnost", "trhliny",
+                              "w_max")),
+    ("MSÚ, smyk a průhyb", ("kombinace_msu", "cot_theta_min", "cot_theta_max", "kanalky", "pruhyb_limit")),
+)
+# filtr tabulky výsledků (karta 7): text → štítky řádků, které se zobrazí (None = všechny)
+FILTRY_VYSLEDKU = {"všechny posudky": None, "jen nevyhovující": ("bad",),
+                   "nevyhovující a η > 90 %": ("bad", "warn")}
 # dílčí součinitele stálých zatížení – zadávají se na kartě 5 (sekce „Dílčí součinitele zatížení“)
 SOUCINITELE_STALE = ("gamma_G", "gamma_G_inf", "xi")
 VOLBY_NASTAVENI = {
@@ -221,6 +233,40 @@ class Formular(ttk.Frame):
             else:
                 if v.strip() != "":
                     out[k] = _cislo(v) if typ == "choice" and k == "trida_relaxace" else v
+        return out
+
+
+class SkupinyFormularu(ttk.Frame):
+    """Několik formulářů v pojmenovaných rámečcích, navenek jako jeden Formular
+    (prom, widgety, pole, nastav, doplnit, ziskej)."""
+
+    def __init__(self, master, skupiny, sloupcu: int = 2, pri_zmene=None, **kw):
+        super().__init__(master, **kw)
+        self.formulare: list[Formular] = []
+        for nazev, pole in skupiny:
+            if not pole:
+                continue
+            lf = ttk.LabelFrame(self, text=nazev, padding=6)
+            lf.pack(fill="x", pady=4)
+            fm = Formular(lf, pole, sloupcu=sloupcu, pri_zmene=pri_zmene)
+            fm.pack(fill="x")
+            self.formulare.append(fm)
+        self.pole = [p for fm in self.formulare for p in fm.pole]
+        self.prom = {k: v for fm in self.formulare for k, v in fm.prom.items()}
+        self.widgety = {k: w for fm in self.formulare for k, w in fm.widgety.items()}
+
+    def nastav(self, d: dict):
+        for fm in self.formulare:
+            fm.nastav(d)
+
+    def doplnit(self, d: dict, prepsat: bool = False):
+        for fm in self.formulare:
+            fm.doplnit(d, prepsat)
+
+    def ziskej(self) -> dict:
+        out = {}
+        for fm in self.formulare:
+            out.update(fm.ziskej())
         return out
 
 
@@ -1224,7 +1270,13 @@ class Aplikace(tk.Tk):
                            "typu předpětí (5.10.9). Hodnoty shodné s výchozími se do souboru nezapisují. "
                            "Dílčí součinitele zatížení (γ_G, ξ, teplota) jsou na kartě 5."),
                   foreground="#52514e").pack(anchor="w", pady=(0, 6))
-        self.f_nastaveni = Formular(f, pole, sloupcu=2)
+        podle_klice = {p[0]: p for p in pole}
+        skupiny, zarazene = [], set()
+        for nazev, klice in SKUPINY_NASTAVENI:
+            skupiny.append((nazev, [podle_klice[k] for k in klice if k in podle_klice]))
+            zarazene.update(klice)
+        skupiny.append(("Ostatní", [p for p in pole if p[0] not in zarazene]))
+        self.f_nastaveni = SkupinyFormularu(f, skupiny, sloupcu=2)
         self.f_nastaveni.pack(fill="x")
 
     # --- výsledky -------------------------------------------------------
@@ -1251,10 +1303,26 @@ class Aplikace(tk.Tk):
         pan.pack(fill="both", expand=True, pady=(8, 0))
         lev = ttk.Frame(pan)
         pan.add(lev, weight=2)
+        fr = ttk.Frame(lev)
+        fr.pack(side="top", fill="x", pady=(0, 4))
+        ttk.Label(fr, text="Zobrazit:").pack(side="left")
+        self.var_filtr = tk.StringVar(value=next(iter(FILTRY_VYSLEDKU)))
+        cb = ttk.Combobox(fr, textvariable=self.var_filtr, state="readonly", width=24,
+                          values=list(FILTRY_VYSLEDKU))
+        cb.pack(side="left", padx=(4, 12))
+        cb.bind("<<ComboboxSelected>>", lambda e: self._filtruj())
+        ttk.Label(fr, text="Fáze:").pack(side="left")
+        self.var_filtr_faze = tk.StringVar(value="všechny")
+        self.cb_filtr_faze = ttk.Combobox(fr, textvariable=self.var_filtr_faze, state="readonly", width=30,
+                                          values=["všechny"])
+        self.cb_filtr_faze.pack(side="left", padx=4)
+        self.cb_filtr_faze.bind("<<ComboboxSelected>>", lambda e: self._filtruj())
+        self.lbl_filtr = ttk.Label(fr, text="", foreground="#52514e")
+        self.lbl_filtr.pack(side="left", padx=8)
         sl = ("ms", "nazev", "eta", "faze", "komb", "x", "ed", "rd", "j")
         self.t_vys = ttk.Treeview(lev, columns=sl, show="headings", selectmode="browse")
-        for k, t, w, a in (("ms", "MS", 40, "w"), ("nazev", "Posudek", 200, "w"), ("eta", "η", 56, "e"),
-                           ("faze", "Fáze", 140, "w"), ("komb", "Kombinace", 90, "w"), ("x", "x [m]", 50, "e"),
+        for k, t, w, a in (("ms", "MS", 40, "w"), ("nazev", "Posudek", 250, "w"), ("eta", "η", 56, "e"),
+                           ("faze", "Fáze", 190, "w"), ("komb", "Kombinace", 90, "w"), ("x", "x [m]", 50, "e"),
                            ("ed", "E_d", 62, "e"), ("rd", "R_d", 62, "e"), ("j", "", 34, "w")):
             self.t_vys.heading(k, text=t, command=lambda c=k: self._serad(c))
             self.t_vys.column(k, width=w, anchor=a, stretch=k in ("nazev", "faze"))
@@ -1726,7 +1794,11 @@ class Aplikace(tk.Tk):
     # --- zobrazení výsledků ----------------------------------------------
     def _vymaz_vysledky(self):
         self.model = None
+        for iid, _ in getattr(self, "_radky", []):
+            if self.t_vys.exists(iid):
+                self.t_vys.delete(iid)
         self.t_vys.delete(*self.t_vys.get_children())
+        self._radky = []
         for v, d in self.karty.values():
             v.configure(text="–", foreground="")
             d.configure(text="")
@@ -1778,11 +1850,42 @@ class Aplikace(tk.Tk):
         self.cb_graf.configure(values=list(self._seznam_grafu))
         self.var_graf.set("Souhrn využití")
         self._zobraz_graf("Souhrn využití")
+        faze = list(dict.fromkeys(v.faze for v in pos if v.faze))
+        self.cb_filtr_faze.configure(values=["všechny"] + faze)
+        if self.var_filtr_faze.get() not in faze:
+            self.var_filtr_faze.set("všechny")
+        self._filtruj()
         self.nb.select(self.z_vysledky)
-        self.after(50, lambda: self.pan_vys.sashpos(0, int(self.pan_vys.winfo_width() * 0.47)))
+        self.after(50, self._nastav_deleni_vysledku)
         self.stav.set(f"Výpočet dokončen – {len(pos)} posudků, "
                       f"{'vše vyhovuje' if ok else f'{nok} nevyhovuje'}"
                       + (f"; upozornění {len(upoz)} (karta Výsledky)." if upoz else "."))
+
+    def _nastav_deleni_vysledku(self, pokusu: int = 40):
+        """Dělítko karty 7 (tabulka | graf) na 55 % šířky – až má panel skutečnou šířku
+        (těsně po přepnutí karty ji ještě nemá a dělítko by skončilo na 0)."""
+        w = self.pan_vys.winfo_width()
+        if w < 200 and pokusu > 0:
+            self.after(50, lambda: self._nastav_deleni_vysledku(pokusu - 1))
+            return
+        self.pan_vys.sashpos(0, int(w * 0.55))
+
+    def _filtruj(self):
+        """Tabulka výsledků podle filtru (nevyhovující / blízko meze podle štítku řádku) a fáze;
+        skryté řádky se odpojí, pořadí se vrátí na původní."""
+        radky = getattr(self, "_radky", [])
+        stitky = FILTRY_VYSLEDKU.get(self.var_filtr.get())
+        faze = self.var_filtr_faze.get()
+        n = 0
+        for iid, v in radky:
+            ukaz = ((stitky is None or set(self.t_vys.item(iid, "tags")) & set(stitky))
+                    and (faze in ("", "všechny") or v.faze == faze))
+            if ukaz:
+                self.t_vys.move(iid, "", n)
+                n += 1
+            else:
+                self.t_vys.detach(iid)
+        self.lbl_filtr.configure(text=f"{n} z {len(radky)}" if n < len(radky) else "")
 
     def _sestav_seznam_grafu(self, m) -> dict:
         g = grafy
