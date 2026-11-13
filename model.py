@@ -340,6 +340,10 @@ class NosnikPB:
         x = self.x
         self.zk = [k.geometrie.z_v(x) for k in self.kabely]
         self.ak = [k.geometrie.alfa_v(x) for k in self.kabely]
+        # kabel působí jen mezi svými kotvami (kabely kotvené na horním povrchu začínají až v x_kotvy > 0);
+        # mimo tento rozsah nemá sílu, sklon ani plochu (dříve se σ, z a α za kotvou extrapolovaly)
+        self.mk = [((x >= k.geometrie.x[0] - 1e-9) & (x <= k.geometrie.x[-1] + 1e-9)).astype(float)
+                   for k in self.kabely]
         K = self.protokol.kapitola("Předpínací výztuž a vedení kabelů", 2)
         rows = []
         for k in self.kabely:
@@ -391,7 +395,9 @@ class NosnikPB:
             self.secG = self.secP.copy()
             for j in range(n):
                 otvory, plus, plus0, lana = [], [], [], []
-                for k, z in zip(self.kabely, self.zk):
+                for k, z, mk in zip(self.kabely, self.zk, self.mk):
+                    if not mk[j]:
+                        continue
                     if not self.predem and k.d_kanalku > 0:
                         otvory.append((z[j], -math.pi * k.d_kanalku ** 2 / 4))
                     plus.append((z[j], ((ap - 1) if self.predem else ap) * k.Ap))
@@ -604,8 +610,8 @@ class NosnikPB:
         M = np.zeros_like(self.x)
         V = np.zeros_like(self.x)
         ztP = self.secP[:, 1]
-        for k, s, z, a in zip(self.kabely, sigma, self.zk, self.ak):
-            P = s * k.Ap * k_Ap * 1e-3
+        for k, s, z, a, mk in zip(self.kabely, sigma, self.zk, self.ak, self.mk):
+            P = s * mk * k.Ap * k_Ap * 1e-3
             N -= P * np.cos(a)
             M += P * np.cos(a) * (z - ztP) * 1e-3
             V += P * np.sin(a)
@@ -672,8 +678,8 @@ class NosnikPB:
             for ik, k in enumerate(self.kabely):
                 g = k.geometrie
                 s0, s1, info, rho = self._napni_kabel(k)
-                self.sig_tr.append(np.interp(x, g.x, s0))
-                self.sig_pokl.append(np.interp(x, g.x, s1))
+                self.sig_tr.append(np.interp(x, g.x, s0) * self.mk[ik])
+                self.sig_pokl.append(np.interp(x, g.x, s1) * self.mk[ik])
                 self.pokluz_info.append(info)
                 self.rho_drzeni[ik] = np.interp(x, g.x, rho)
                 K2.krok(f"Kabel {k.nazev}: celková úhlová změna / délka kabelu", "θ_{celk}; L_{k}", "",
@@ -738,10 +744,10 @@ class NosnikPB:
             for _ in range(4):
                 NP, MP, _ = self._sily_predpeti(sig)
                 new = []
-                for k, s0, z in zip(self.kabely, self.sig_pokl, self.zk):
+                for k, s0, z, mk in zip(self.kabely, self.sig_pokl, self.zk, self.mk):
                     sc = self._napeti(z, NP, MP, Mg0, 0.0)
                     d_el = j * p.Ep / Ec0 * np.maximum(-sc, 0.0)
-                    new.append((s0 - d_el) * fr)
+                    new.append((s0 - d_el) * fr * mk)
                 sig = new
             sig_pm0_lpt = max(float(s[self.im]) for s in sig)
         self.d_el = [(s0 * fr - s) for s0, s in zip(self.sig_pokl, sig)]
@@ -1047,7 +1053,7 @@ class NosnikPB:
         im = self.im
         for f in faze[1:]:
             sigs, det, eps, phi0, zcp, zres = self._dlouhodobe(f.t)
-            f.sigma = sigs
+            f.sigma = [s_ * mk for s_, mk in zip(sigs, self.mk)]
             f.ztraty = {"eps_cs": eps, "phi0": phi0, "kabely": det}
             # podrobný postup ve středu rozpětí
             if f.t == self.t_konec or f.provoz:
@@ -1457,10 +1463,10 @@ class NosnikPB:
                 ob = d["char"]
                 lim = nn.k5 * p.fpk
                 worst = (0.0, 0, "")
-                for k, s, z in zip(self.kabely, f.sigma, self.zk):
+                for k, s, z, mk in zip(self.kabely, f.sigma, self.zk, self.mk):
                     ztL, IL = self.secL[:, 1], self.secL[:, 2]
                     ds = p.Ep / b.Ecm * ob.M_max * 1e6 * (ztL - z) / IL
-                    sp = s + np.maximum(ds, 0)
+                    sp = (s + np.maximum(ds, 0)) * mk
                     i = int(np.argmax(sp))
                     if sp[i] > worst[0]:
                         worst = (float(sp[i]), i, k.nazev)
@@ -1479,7 +1485,9 @@ class NosnikPB:
         """Výztuž pro průřez s trhlinou v řezu i: kabely s ε_p0 = r·σ_pm,t/E_p − σ_c,P(z_p)/E_cm."""
         b, p = self.beton, self.predp
         vr = []
-        for k, s, z in zip(self.kabely, f.sigma, self.zk):
+        for k, s, z, mk in zip(self.kabely, f.sigma, self.zk, self.mk):
+            if not mk[i]:
+                continue
             sc = float(self._napeti(z[i], NP[i], MP[i], 0.0, 0.0, r, idx=i))
             vr.append(Vrstva(float(z[i]), k.Ap * f.k_Ap, p.Ep, r * float(s[i]) / p.Ep - sc / b.Ecm, True,
                              nazev=k.nazev))
@@ -1571,8 +1579,9 @@ class NosnikPB:
         nn = self.n
         h = self.prurez.h
         if nn.dekomprese_rezim == "kabel":
-            zmin = np.min(self.zk, 0) - nn.a_dek
-            zmax = np.max(self.zk, 0) + nn.a_dek
+            zv = np.where(np.array(self.mk) > 0, np.array(self.zk), np.nan)
+            zmin = np.nan_to_num(np.nanmin(zv, 0), nan=h) - nn.a_dek
+            zmax = np.nan_to_num(np.nanmax(zv, 0), nan=0.0) + nn.a_dek
             zd = np.clip(zmin, 0, h)
             zh = np.clip(zmax, 0, h)
         else:
@@ -1740,7 +1749,9 @@ class NosnikPB:
         NP, MP, _ = self._sily_predpeti(f.sigma, f.k_Ap)
         Mperm = float(self._M_trvale(f.t)[i])
         vrstvy = []
-        for k, s, z in zip(self.kabely, f.sigma, self.zk):
+        for k, s, z, mk in zip(self.kabely, f.sigma, self.zk, self.mk):
+            if not mk[i]:
+                continue                     # řez mimo rozsah kabelu (před kotvou)
             sc = float(self._napeti(z[i], NP[i] * redukce, MP[i] * redukce, self.zs_g0.M_max[i], Mperm, idx=i))
             e0 = s[i] / p.Ep - (sc / b.Ecm if eps0_navic else 0.0)
             vrstvy.append(VrstvaPredpeti(float(z[i]), k.Ap * f.k_Ap * fr * redukce, float(e0), k.nazev))
@@ -1873,15 +1884,16 @@ class NosnikPB:
                     A_sl = sum(v["Ap"] for v in ro.vrstvy_p if v["F"] > 0)
                     A_sl += sum(v["As"] for v in ro.vrstvy_s if v["F"] > 0)
                 else:
-                    A_sl = sum(k.Ap * f.k_Ap for z, k in zip(self.zk, self.kabely) if z[i] < zt)
+                    A_sl = sum(k.Ap * f.k_Ap for z, k, mk in zip(self.zk, self.kabely, self.mk)
+                               if z[i] < zt and mk[i])
                     A_sl += sum(v.As * f.k_As for v in self.vyztuz if v.z < zt)
                 # šířka stojiny v pásmu mezi tlačeným a taženým pásem, oslabení kanálky v každé úrovni
                 zr = np.linspace(max(P.h - d, 0.0), min(P.h - 0.1 * d, P.h), 80)
                 b_z = P.sirka(zr)
                 phi_z = np.zeros_like(zr)
                 if not self.predem:
-                    for k, z in zip(self.kabely, self.zk):
-                        if k.d_kanalku > 0:
+                    for k, z, mk in zip(self.kabely, self.zk, self.mk):
+                        if k.d_kanalku > 0 and mk[i]:
                             v_kanalku = np.abs(zr - z[i]) < k.d_kanalku / 2
                             phi_z += np.where(v_kanalku & (k.d_kanalku > b_z / 8), k.d_kanalku, 0.0)
                 bnom_z = b_z - k_d * phi_z
